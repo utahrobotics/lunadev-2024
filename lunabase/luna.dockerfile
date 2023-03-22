@@ -3,6 +3,10 @@ FROM ubuntu as base
 LABEL org.opencontainers.image.source=https://github.com/utahrobotics/lunadev-2024
 LABEL org.opencontainers.image.description="An image ready for ROS 2 development"
 
+# Configure timezone
+ENV TZ=America/Denver
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # Enable Ubuntu Universe Repository
 RUN apt-get update && \
     apt-get install software-properties-common -y --no-install-recommends && \
