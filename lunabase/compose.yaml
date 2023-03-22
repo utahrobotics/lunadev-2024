@@ -1,0 +1,14 @@
+services:
+  lunabase:
+    # image: ghcr.io/utahrobotics/lunabotics/lunabase:2024
+    image: ubuntu
+    container_name: ${USER}
+    privileged: true
+    tty: true
+    pull_policy: always
+    ports:
+      - "${MY_NX_PORT}:4000"
+    volumes:
+      - type: bind
+        source: /home/${USER}
+        target: /root
