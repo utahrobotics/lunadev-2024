@@ -15,3 +15,5 @@ if [ "$PWD" = "/usr-ws-2023" ]; then
 else
     echo "Not in usr-ws-2023"
 fi'
+# Run rviz
+alias rviz='ros2 run rviz2 rviz2'

@@ -32,14 +32,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       
-      - name: Build AMD64 base
-        run: docker build lunabase/ --file lunabase/luna.dockerfile --target base --tag ghcr.io/utahrobotics/lunabotics/base:2024
+      - name: Build AMD64 luna
+        run: docker build lunabase/ --file lunabase/luna.dockerfile --target base --tag ghcr.io/utahrobotics/lunabotics/luna:2024
       
-      - name: Push AMD64 base
-        run: docker image push ghcr.io/utahrobotics/lunabotics/base:2024
-      
-      - name: Build AMD64 lunabase
-        run: docker build lunabase/ --file lunabase/luna.dockerfile --target lunabase --tag ghcr.io/utahrobotics/lunabotics/lunabase:2024
-      
-      - name: Push AMD64 lunabase
-        run: docker image push ghcr.io/utahrobotics/lunabotics/lunabase:2024
+      - name: Push AMD64 luna
+        run: docker image push ghcr.io/utahrobotics/lunabotics/luna:2024
