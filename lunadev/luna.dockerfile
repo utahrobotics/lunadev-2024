@@ -1,4 +1,4 @@
-FROM python as luna
+FROM ubuntu as luna
 
 LABEL org.opencontainers.image.source=https://github.com/utahrobotics/lunadev-2024
 LABEL org.opencontainers.image.description="An image ready for ROS 2 development"
@@ -13,7 +13,7 @@ RUN apt-get update && \
     add-apt-repository universe
 
 # Install installation dependencies: curl, pip
-RUN apt-get install curl -y --no-install-recommends
+RUN apt-get install curl pip -y --no-install-recommends
 
 # Install dev tools: git, usbutils
 RUN apt-get install git usbutils -y --no-install-recommends
