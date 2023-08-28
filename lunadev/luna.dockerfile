@@ -1,4 +1,4 @@
-FROM ubuntu as luna
+FROM python as luna
 
 LABEL org.opencontainers.image.source=https://github.com/utahrobotics/lunadev-2024
 LABEL org.opencontainers.image.description="An image ready for ROS 2 development"
@@ -13,7 +13,7 @@ RUN apt-get update && \
     add-apt-repository universe
 
 # Install installation dependencies: curl, pip
-RUN apt-get install curl pip -y --no-install-recommends
+RUN apt-get install curl -y --no-install-recommends
 
 # Install dev tools: git, usbutils
 RUN apt-get install git usbutils -y --no-install-recommends
@@ -25,9 +25,6 @@ RUN apt-get update && apt-get upgrade -y
 
 # Install ROS 2
 RUN apt-get install ros-humble-ros-base python3-argcomplete -y --no-install-recommends
-
-# Install hidapi dependencies
-RUN apt-get install python libusb-1.0-0-dev libudev-dev -y --no-install-recommends
 
 # Upgrade setuptools, then install pip packages not present in rosdep, and rosdep itself
 RUN pip install --upgrade setuptools && \
