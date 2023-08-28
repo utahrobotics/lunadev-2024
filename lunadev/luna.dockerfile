@@ -26,6 +26,9 @@ RUN apt-get update && apt-get upgrade -y
 # Install ROS 2
 RUN apt-get install ros-humble-ros-base python3-argcomplete -y --no-install-recommends
 
+# Dev stuff for python
+RUN apt-get install python3-dev
+
 # Upgrade setuptools, then install pip packages not present in rosdep, and rosdep itself
 RUN pip install --upgrade setuptools && \
     pip install pyvesc rosdep && \
