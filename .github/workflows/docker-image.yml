@@ -5,13 +5,15 @@ on:
   push:
     branches: [ "main" ]
     paths: 
-      - 'lunadev/*.dockerfile'
-      - 'lunadev/*.sh'
+      - lunadev/*.dockerfile
+      - lunadev/*.sh
+      - .github/workflows/docker-image.yml
   pull_request:
     branches: [ "main" ]
     paths: 
-      - 'lunadev/*.dockerfile'
-      - 'lunadev/*.sh'
+      - lunadev/*.dockerfile
+      - lunadev/*.sh
+      - .github/workflows/docker-image.yml
 
 jobs:
   build_amd64:
