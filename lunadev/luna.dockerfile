@@ -31,7 +31,7 @@ RUN apt-get install python-dev libusb-1.0-0-dev libudev-dev -y --no-install-reco
 
 # Upgrade setuptools, then install pip packages not present in rosdep, and rosdep itself
 RUN pip install --upgrade setuptools && \
-    pip install pyvesc hidapi rosdep
+    pip install pyvesc rosdep pyenet
 
 # Init and update rosdep
 RUN rosdep init && rosdep update

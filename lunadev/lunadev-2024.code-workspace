@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "../"
+		}
+	],
+	"settings": {
+		// "python.terminal.activateEnvironment": false
+	},
+	"extensions": {
+		"recommendations": [
+			"ms-python.flake8",
+			"ms-vscode-remote.remote-containers",
+			"ms-python.isort",
+			"ms-python.vscode-pylance",
+			"ms-python.python",
+			"ms-azuretools.vscode-docker"
+		]
+	}
+}

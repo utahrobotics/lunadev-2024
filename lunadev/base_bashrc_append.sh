@@ -1,5 +1,5 @@
-# source foxy installation
-source /opt/ros/foxy/setup.bash
+# source humble installation
+source /opt/ros/humble/setup.bash
 # source install
 alias srcinstall='source install/setup.bash'
 # resolve deps, build, then source overlay

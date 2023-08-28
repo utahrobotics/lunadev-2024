@@ -6,8 +6,8 @@ services:
     privileged: true
     tty: true
     pull_policy: always
-    workdir: "/root/usr-ws-2024"
+    working_dir: "/root/lunadev-2024"
     volumes:
       - type: bind
-        source: /home/${USER}
-        target: /root
+        source: ../
+        target: /root/lunadev-2024
