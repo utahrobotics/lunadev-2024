@@ -13,7 +13,7 @@ RUN apt-get update && \
     add-apt-repository universe
 
 # Install installation dependencies: curl, pip
-RUN apt-get install curl pip -y --no-install-recommends
+RUN apt-get install curl pip -y --no-install-recommends && pip install --use-pep517
 
 # Install dev tools: git, usbutils
 RUN apt-get install git usbutils -y --no-install-recommends
