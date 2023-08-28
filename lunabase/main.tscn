@@ -1,9 +1,132 @@
-[gd_scene format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=6 format=3 uid="uid://b8qgudi6vkflb"]
 
-[node name="Main" type="Control"]
-layout_mode = 3
+[sub_resource type="GDScript" id="GDScript_wemvy"]
+script/source = "extends Label
+
+
+func _ready() -> void:
+	Lunabot.disconnected.connect(func():
+		text = \"Not Connected\"
+	)
+	Lunabot.network_statistics.connect(
+		func(total_bytes: float, ping: int, packet_loss: float, packet_throttle: float):
+			text = \"\"\"Total Bytes: %s
+Ping: %s
+Packet Loss: %s
+Packet Throttle: %s\"\"\" % [total_bytes, ping, packet_loss, packet_throttle]
+	)
+"
+
+[sub_resource type="GDScript" id="GDScript_yu1su"]
+script/source = "extends Label
+
+
+var timer := 0.0
+
+
+func _ready() -> void:
+	Lunabot.something_received.connect(func():
+		timer = 0
+	)
+
+
+func _process(delta: float) -> void:
+	timer += delta
+	text = \"Last Received: %s ms\" % [roundi(timer * 1000)]
+"
+
+[sub_resource type="Gradient" id="Gradient_k12v6"]
+colors = PackedColorArray(0, 0, 0, 1, 0, 0, 0, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_adsri"]
+gradient = SubResource("Gradient_k12v6")
+height = 32
+
+[sub_resource type="GDScript" id="GDScript_amk46"]
+script/source = "extends Button
+
+
+var camera_enabled := false
+
+
+func _ready() -> void:
+	Lunabot.connected.connect(func():
+		disabled = false
+	)
+	Lunabot.disconnected.connect(func():
+		disabled = true
+	)
+
+
+func _on_pressed() -> void:
+	if camera_enabled:
+		Lunabot.send_important_msg(Lunabot.ImportantMessage.DISABLE_CAMERA)
+		camera_enabled = false
+		text = \"Enable Camera\"
+	else:
+		Lunabot.send_important_msg(Lunabot.ImportantMessage.ENABLE_CAMERA)
+		camera_enabled = true
+		text = \"Disable Camera\"
+"
+
+[node name="Main" type="MarginContainer"]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="Control" type="Control" parent="."]
+layout_mode = 2
+
+[node name="VBoxContainer3" type="VBoxContainer" parent="Control"]
+layout_mode = 1
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="ImportantData" type="Label" parent="Control/VBoxContainer3"]
+layout_mode = 2
+text = "Not Connected"
+script = SubResource("GDScript_wemvy")
+
+[node name="LastReceived" type="Label" parent="Control/VBoxContainer3"]
+layout_mode = 2
+text = "Last Received:"
+script = SubResource("GDScript_yu1su")
+
+[node name="VBoxContainer2" type="VBoxContainer" parent="Control"]
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 0.7
+anchor_bottom = 1.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Control"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.7
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 0
+
+[node name="TextureRect" type="TextureRect" parent="Control/VBoxContainer"]
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+texture = SubResource("GradientTexture2D_adsri")
+expand_mode = 5
+stretch_mode = 5
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Control/VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="EnableCamera" type="Button" parent="Control/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+disabled = true
+text = "Enable Camera"
+script = SubResource("GDScript_amk46")
+
+[connection signal="pressed" from="Control/VBoxContainer/HBoxContainer/EnableCamera" to="Control/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
