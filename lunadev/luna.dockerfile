@@ -27,7 +27,7 @@ RUN apt-get update && apt-get upgrade -y
 RUN apt-get install ros-humble-ros-base python3-argcomplete -y --no-install-recommends
 
 # Install hidapi dependencies
-RUN apt-get install python-dev libusb-1.0-0-dev libudev-dev -y --no-install-recommends
+RUN apt-get install python libusb-1.0-0-dev libudev-dev -y --no-install-recommends
 
 # Upgrade setuptools, then install pip packages not present in rosdep, and rosdep itself
 RUN pip install --upgrade setuptools && \
