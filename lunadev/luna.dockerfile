@@ -13,7 +13,7 @@ RUN apt-get update && \
     add-apt-repository universe
 
 # Install installation dependencies: curl, pip
-RUN apt-get install curl pip -y --no-install-recommends && pip install --use-pep517
+RUN apt-get install curl pip -y --no-install-recommends
 
 # Install dev tools: git, usbutils
 RUN apt-get install git usbutils -y --no-install-recommends
@@ -28,7 +28,8 @@ RUN apt-get install ros-humble-ros-base python3-argcomplete -y --no-install-reco
 
 # Upgrade setuptools, then install pip packages not present in rosdep, and rosdep itself
 RUN pip install --upgrade setuptools && \
-    pip install pyvesc rosdep pyenet
+    pip install pyvesc rosdep && \
+    pip install --use-pep517 pyenet
 
 # Init and update rosdep
 RUN rosdep init && rosdep update
