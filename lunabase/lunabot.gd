@@ -1,7 +1,7 @@
 extends Node
 
 
-enum Channels { IMPORTANT, CAMERA, ODOMETRY, CONTROLS }
+enum Channels { IMPORTANT, CAMERA, ODOMETRY, STEERING }
 enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA, STOP_DRIVE, STOP_ARM }
 
 signal connected
@@ -16,6 +16,8 @@ var running := true
 var thread := Thread.new()
 var lunabot: ENetPacketPeer
 var lunabot_mutex := Mutex.new()
+var steering_data: PackedByteArray
+var echo_steering := false
 
 
 func _ready() -> void:
@@ -86,6 +88,9 @@ func _run_thr():
 					
 				ENetConnection.EventType.EVENT_RECEIVE:
 					_on_receive(channel, data)
+			
+			if echo_steering:
+				raw_send_unreliable(Channels.STEERING, steering_data)
 
 
 func _on_receive(channel: int, data: PackedByteArray) -> void:
@@ -110,19 +115,21 @@ func _on_receive(channel: int, data: PackedByteArray) -> void:
 			var origin := Vector2(x, y)
 			call_deferred("emit", "odometry_received", origin)
 		
-		Channels.CONTROLS:
-			# We should send from here, not receive
-			# Lunabot will receive on this channel
-			push_error("Received data on controls channel!")
+		Channels.STEERING:
+			if data.size() != 2:
+				push_error("Invalid steering packet")
+				return
+			
+			lunabot_mutex.lock()
+			echo_steering = steering_data != data
+			lunabot_mutex.unlock()
 
 
 func raw_send(channel: int, data: PackedByteArray, flags: int) -> void:
 	lunabot_mutex.lock()
 	if lunabot == null:
 		push_warning("Lunabot not connected to yet!")
-		lunabot_mutex.unlock()
-		await connected
-		lunabot_mutex.lock()
+		return
 	var err := lunabot.send(channel, data, flags)
 	lunabot_mutex.unlock()
 	if err != OK:
@@ -138,9 +145,37 @@ func raw_send_unreliable(channel: int, data: PackedByteArray) -> void:
 
 
 func send_important_msg(msg: ImportantMessage) -> void:
+	if msg == ImportantMessage.STOP_DRIVE:
+		lunabot_mutex.lock()
+		steering_data = PackedByteArray([0, 0])
+		# We don't need to echo since we are sending a reliable message
+		echo_steering = false
+		lunabot_mutex.unlock()
 	var data := PackedByteArray([0])
 	data.encode_u8(0, msg)
 	raw_send_reliable(0, data)
+
+
+func send_steering(drive: float, steering: float) -> void:
+	if drive > 1:
+		drive = 1
+		push_warning("Drive greater than 1!")
+	if drive < -1:
+		drive = -1
+		push_warning("Drive lesser than -1!")
+	if steering > 1:
+		steering = 1
+		push_warning("Steering greater than 1!")
+	if steering < -1:
+		steering = -1
+		push_warning("Steering lesser than -1!")
+	
+	lunabot_mutex.lock()
+	steering_data = PackedByteArray([0, 0])
+	steering_data.encode_s8(0, roundi(drive * 127))
+	steering_data.encode_s8(1, roundi(steering * 127))
+	echo_steering = true
+	lunabot_mutex.unlock()
 
 
 func _exit_tree() -> void:

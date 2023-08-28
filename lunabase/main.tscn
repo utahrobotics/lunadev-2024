@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=9 format=3 uid="uid://b8qgudi6vkflb"]
 
 [sub_resource type="GDScript" id="GDScript_wemvy"]
 script/source = "extends Label
@@ -69,6 +69,65 @@ func _on_pressed() -> void:
 		text = \"Disable Camera\"
 "
 
+[sub_resource type="Gradient" id="Gradient_j05cb"]
+interpolation_mode = 2
+offsets = PackedFloat32Array(0, 0.5, 1)
+colors = PackedColorArray(1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_lspd7"]
+gradient = SubResource("Gradient_j05cb")
+fill_from = Vector2(1, 1)
+
+[sub_resource type="GDScript" id="GDScript_aogjq"]
+script/source = "extends TextureRect
+
+
+var driving := false
+
+
+func _ready() -> void:
+	Lunabot.disconnected.connect(func():
+		driving = false
+		_update()
+	)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if !Lunabot.is_lunabot_connected():
+		return
+	
+	if event is InputEventMouseButton:
+		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			driving = not driving
+			_update()
+			accept_event()
+		
+	elif event is InputEventMouseMotion:
+		if !driving:
+			return
+		var origin := (get_local_mouse_position() / size - Vector2.ONE / 2) * 2
+		Lunabot.send_steering(origin.x, - origin.y)
+		accept_event()
+
+
+func _on_mouse_exited() -> void:
+	if !Lunabot.is_lunabot_connected():
+		return
+	driving = false
+	_update()
+
+
+func _update() -> void:
+	if driving:
+		mouse_default_cursor_shape = Control.CURSOR_MOVE
+		$CenterContainer/Label.text = \"×\"
+		warp_mouse(size / 2)
+	else:
+		mouse_default_cursor_shape = Control.CURSOR_ARROW
+		$CenterContainer/Label.text = \"Click to Drive\"
+		Lunabot.send_important_msg(Lunabot.ImportantMessage.STOP_DRIVE)
+"
+
 [node name="Main" type="MarginContainer"]
 anchors_preset = 15
 anchor_right = 1.0
@@ -129,4 +188,30 @@ disabled = true
 text = "Enable Camera"
 script = SubResource("GDScript_amk46")
 
+[node name="VBoxContainer" type="VBoxContainer" parent="Control/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+alignment = 2
+
+[node name="TextureRect" type="TextureRect" parent="Control/VBoxContainer/VBoxContainer"]
+layout_mode = 2
+mouse_filter = 0
+texture = SubResource("GradientTexture2D_lspd7")
+expand_mode = 5
+stretch_mode = 5
+script = SubResource("GDScript_aogjq")
+
+[node name="CenterContainer" type="CenterContainer" parent="Control/VBoxContainer/VBoxContainer/TextureRect"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Label" type="Label" parent="Control/VBoxContainer/VBoxContainer/TextureRect/CenterContainer"]
+layout_mode = 2
+text = "Click to Drive"
+
 [connection signal="pressed" from="Control/VBoxContainer/HBoxContainer/EnableCamera" to="Control/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
+[connection signal="mouse_exited" from="Control/VBoxContainer/VBoxContainer/TextureRect" to="Control/VBoxContainer/VBoxContainer/TextureRect" method="_on_mouse_exited"]
