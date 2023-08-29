@@ -6,6 +6,7 @@ services:
     privileged: true
     tty: true
     pull_policy: always
+    network_mode: host
     working_dir: "/root/lunadev-2024"
     volumes:
       - type: bind

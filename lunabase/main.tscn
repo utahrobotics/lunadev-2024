@@ -13,7 +13,7 @@ func _ready() -> void:
 			text = \"\"\"Total Bytes: %s
 Ping: %s
 Packet Loss: %s
-Packet Throttle: %s\"\"\" % [total_bytes, ping, packet_loss, packet_throttle]
+Packet Throttle: %s\"\"\" % [total_bytes, ping, roundi(packet_loss * 100), roundi(packet_throttle * 100)]
 	)
 "
 
@@ -32,7 +32,10 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	timer += delta
-	text = \"Last Received: %s ms\" % [roundi(timer * 1000)]
+	if timer > 10:
+		text = \"Last Received: 10000+ ms\"
+	else:
+		text = \"Last Received: %s ms\" % [roundi(timer * 1000)]
 "
 
 [sub_resource type="Gradient" id="Gradient_k12v6"]
@@ -106,12 +109,12 @@ func _gui_input(event: InputEvent) -> void:
 		if !driving:
 			return
 		var origin := (get_local_mouse_position() / size - Vector2.ONE / 2) * 2
-		Lunabot.send_steering(origin.x, - origin.y)
+		Lunabot.send_steering(- origin.y, origin.x)
 		accept_event()
 
 
 func _on_mouse_exited() -> void:
-	if !Lunabot.is_lunabot_connected():
+	if !Lunabot.is_lunabot_connected() or !driving:
 		return
 	driving = false
 	_update()
@@ -193,15 +196,18 @@ layout_mode = 2
 size_flags_vertical = 3
 alignment = 2
 
-[node name="TextureRect" type="TextureRect" parent="Control/VBoxContainer/VBoxContainer"]
+[node name="AspectRatioContainer" type="AspectRatioContainer" parent="Control/VBoxContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+alignment_vertical = 2
+
+[node name="TextureRect" type="TextureRect" parent="Control/VBoxContainer/VBoxContainer/AspectRatioContainer"]
 layout_mode = 2
 mouse_filter = 0
 texture = SubResource("GradientTexture2D_lspd7")
-expand_mode = 5
-stretch_mode = 5
 script = SubResource("GDScript_aogjq")
 
-[node name="CenterContainer" type="CenterContainer" parent="Control/VBoxContainer/VBoxContainer/TextureRect"]
+[node name="CenterContainer" type="CenterContainer" parent="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -209,9 +215,9 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Label" type="Label" parent="Control/VBoxContainer/VBoxContainer/TextureRect/CenterContainer"]
+[node name="Label" type="Label" parent="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect/CenterContainer"]
 layout_mode = 2
 text = "Click to Drive"
 
 [connection signal="pressed" from="Control/VBoxContainer/HBoxContainer/EnableCamera" to="Control/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
-[connection signal="mouse_exited" from="Control/VBoxContainer/VBoxContainer/TextureRect" to="Control/VBoxContainer/VBoxContainer/TextureRect" method="_on_mouse_exited"]
+[connection signal="mouse_exited" from="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" to="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" method="_on_mouse_exited"]

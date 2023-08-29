@@ -1,7 +1,7 @@
 extends Node
 
 
-enum Channels { IMPORTANT, CAMERA, ODOMETRY, STEERING }
+enum Channels { IMPORTANT, CAMERA, ODOMETRY, STEERING, MAX }
 enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA, STOP_DRIVE, STOP_ARM }
 
 signal connected
@@ -32,71 +32,75 @@ func _ready() -> void:
 
 func is_lunabot_connected() -> bool:
 	lunabot_mutex.lock()
+	@warning_ignore("shadowed_variable_base_class")
 	var is_connected = lunabot != null
 	lunabot_mutex.unlock()
 	return is_connected
 
 
 func _run_thr():
-		while running:
-			var result: Array = server.service(500)
-			
-			lunabot_mutex.lock()
-			if lunabot != null:
-				call_deferred(
-					"emit",
-					"network_statistics",
-					server.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_DATA) + server.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA),
-					roundi(lunabot.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) / 2),
-					lunabot.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / ENetPacketPeer.PACKET_LOSS_SCALE,
-					lunabot.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE) / ENetPacketPeer.PACKET_THROTTLE_SCALE
-				)
-			lunabot_mutex.unlock()
-			
-			var event_type: ENetConnection.EventType = result[0]
-			var peer: ENetPacketPeer = result[1]
-			var data: PackedByteArray = result[2]
-			var channel: int = result[3]
-			
-			match event_type:
-				ENetConnection.EventType.EVENT_ERROR:
-					server.destroy()
-					push_error("Server got error, closing!")
-					running = false
-					break
-					
-				ENetConnection.EventType.EVENT_NONE:
+	while running:
+		var result: Array = server.service(200)
+		
+		lunabot_mutex.lock()
+		if lunabot != null:
+			call_deferred(
+				"emit_signal",
+				"network_statistics",
+				server.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_DATA) + server.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA),
+				roundi(lunabot.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) / 2),
+				lunabot.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / ENetPacketPeer.PACKET_LOSS_SCALE,
+				lunabot.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE) / ENetPacketPeer.PACKET_THROTTLE_SCALE
+			)
+		lunabot_mutex.unlock()
+		
+		var event_type: ENetConnection.EventType = result[0]
+		var peer: ENetPacketPeer = result[1]
+		var _data: int = result[2]
+		var channel: int = result[3]
+		
+		match event_type:
+			ENetConnection.EventType.EVENT_ERROR:
+				server.destroy()
+				push_error("Server got error, closing!")
+				running = false
+				break
+				
+			ENetConnection.EventType.EVENT_CONNECT:
+				lunabot_mutex.lock()
+				if lunabot != null:
+					push_error("New connection to lunabot even though we are already connected!")
 					continue
-					
-				ENetConnection.EventType.EVENT_CONNECT:
-					lunabot_mutex.lock()
-					if lunabot != null:
-						push_error("New connection to lunabot even though we are already connected!")
-						continue
-					lunabot = peer
-					lunabot_mutex.unlock()
-					call_deferred("emit", "connected")
-					
-				ENetConnection.EventType.EVENT_DISCONNECT:
-					lunabot_mutex.lock()
-					if lunabot == null:
-						push_error("Disconnection to lunabot even though we were never connected!")
-						continue
-					lunabot = null
-					lunabot_mutex.unlock()
-					call_deferred("emit", "disconnected")
-					
-				ENetConnection.EventType.EVENT_RECEIVE:
-					_on_receive(channel, data)
-			
-			if echo_steering:
-				raw_send_unreliable(Channels.STEERING, steering_data)
+				lunabot = peer
+				lunabot_mutex.unlock()
+				call_deferred("emit_signal", "connected")
+				
+			ENetConnection.EventType.EVENT_DISCONNECT:
+				lunabot_mutex.lock()
+				if lunabot == null:
+					push_error("Disconnection to lunabot even though we were never connected!")
+					continue
+				lunabot = null
+				lunabot_mutex.unlock()
+				call_deferred("emit_signal", "disconnected")
+				
+			ENetConnection.EventType.EVENT_RECEIVE:
+				_on_receive(channel)
+		
+		lunabot_mutex.lock()
+		if echo_steering:
+			raw_send_unreliable(Channels.STEERING, steering_data)
+		lunabot_mutex.unlock()
 
 
-func _on_receive(channel: int, data: PackedByteArray) -> void:
-	call_deferred("emit", "something_received")
+func _on_receive(channel: int) -> void:
+	call_deferred("emit_signal", "something_received")
+	lunabot_mutex.lock()
+	var data := lunabot.get_packet()
+	
 	match channel:
 		Channels.IMPORTANT:
+			# TODO
 			pass
 		
 		Channels.CAMERA:
@@ -105,7 +109,7 @@ func _on_receive(channel: int, data: PackedByteArray) -> void:
 			if err != OK:
 				push_error("Bad frame: " + str(err))
 				return
-			call_deferred("emit", "camera_frame_received", frame)
+			call_deferred("emit_signal", "camera_frame_received", frame)
 		
 		Channels.ODOMETRY:
 			var x := data.decode_float(0)
@@ -113,22 +117,23 @@ func _on_receive(channel: int, data: PackedByteArray) -> void:
 			if x == 0.0 or y == 0.0:
 				push_error("Invalid odometry origin")
 			var origin := Vector2(x, y)
-			call_deferred("emit", "odometry_received", origin)
+			call_deferred("emit_signal", "odometry_received", origin)
 		
 		Channels.STEERING:
 			if data.size() != 2:
 				push_error("Invalid steering packet")
 				return
 			
-			lunabot_mutex.lock()
 			echo_steering = steering_data != data
-			lunabot_mutex.unlock()
+	
+	lunabot_mutex.unlock()
 
 
 func raw_send(channel: int, data: PackedByteArray, flags: int) -> void:
 	lunabot_mutex.lock()
 	if lunabot == null:
 		push_warning("Lunabot not connected to yet!")
+		lunabot_mutex.unlock()
 		return
 	var err := lunabot.send(channel, data, flags)
 	lunabot_mutex.unlock()
@@ -151,9 +156,7 @@ func send_important_msg(msg: ImportantMessage) -> void:
 		# We don't need to echo since we are sending a reliable message
 		echo_steering = false
 		lunabot_mutex.unlock()
-	var data := PackedByteArray([0])
-	data.encode_u8(0, msg)
-	raw_send_reliable(0, data)
+	raw_send_reliable(Channels.IMPORTANT, PackedByteArray([msg]))
 
 
 func send_steering(drive: float, steering: float) -> void:
