@@ -42,7 +42,6 @@ class Drive(Node):
         unready = []
         for _ in range(6):
             line = self.controller.readline().decode()
-            # self.get_logger().info(line)
             if "0" in line:
                 unready.append(line)
 
