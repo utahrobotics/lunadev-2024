@@ -30,7 +30,7 @@ RUN apt-get install ros-humble-ros-base python3-argcomplete -y --no-install-reco
 RUN apt-get install python3-dev build-essential -y --no-install-recommends
 
 # Upgrade setuptools, then install pip packages not present in rosdep, and rosdep itself
-RUN pip install --upgrade setuptools && \
+RUN pip install setuptools==58.2.0 && \
     pip install pyvesc rosdep && \
     pip install --use-pep517 pyenet
 
