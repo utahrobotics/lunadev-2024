@@ -4,6 +4,7 @@ import enet
 from enum import IntEnum
 from rclpy.node import Node
 from struct import Struct
+from global_msgs.msg import Steering
 
 
 class Channels(IntEnum):
@@ -29,6 +30,7 @@ class Telemetry(Node):
         self.thr = Thread(target=self.run)
         self.thr.start()
         self.steering_struct = Struct("bb")
+        self.steering_pub = self.create_publisher(Steering, 'steering', 10)
 
     def run(self):
         logger = self.get_logger()
@@ -102,9 +104,10 @@ class Telemetry(Node):
             logger.warn(f"Unexpected channel: {channel}")
 
     def publish_steering(self, drive: int, steering: int) -> None:
-        drive /= 127
-        steering /= 127
-        self.get_logger().info(f"{drive} {steering}")
+        msg = Steering()
+        msg.drive = drive / 127
+        msg.steering = steering / 127
+        self.steering_pub.publish(msg)
 
 
 def main(args=None):
