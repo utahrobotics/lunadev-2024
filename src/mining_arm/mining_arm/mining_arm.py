@@ -125,14 +125,14 @@ class MiningArm(Node):
         # self.is_arm_vel_set = False
         self.set_arm_velocity_sub = self.create_subscription(
             Float32,
-            "set_arm_velocity",
+            "target_arm_velocity",
             self.set_arm_velocity,
             10
         )
 
         self.set_drum_velocity_sub = self.create_subscription(
             Float32,
-            "set_drum_velocity",
+            "target_drum_velocity",
             self.set_drum_velocity,
             10
         )

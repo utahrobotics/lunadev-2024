@@ -20,7 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'telemetry = telemetry.telemetry:main'
+            'telemetry = telemetry.telemetry:main',
+            'telemetry_arch = telemetry.telemetry:main_arch'
         ],
     },
 )

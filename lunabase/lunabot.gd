@@ -1,7 +1,9 @@
 extends Node
 
 
-enum Channels { IMPORTANT, CAMERA, ODOMETRY, STEERING, MAX }
+const USE_ARCHIMEDES := true
+
+enum Channels { IMPORTANT, CAMERA, ODOMETRY, CONTROLS, MAX }
 enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA }
 
 signal connected
@@ -16,11 +18,16 @@ var running := true
 var thread := Thread.new()
 var lunabot: ENetPacketPeer
 var lunabot_mutex := Mutex.new()
-var steering_data: PackedByteArray
-var echo_steering := false
+var controls_data: PackedByteArray
+var echo_controls := false
 
 
 func _ready() -> void:
+	if USE_ARCHIMEDES:
+		controls_data = PackedByteArray([0, 0, 0, 0])
+	else:
+		controls_data = PackedByteArray([0, 0, 0])
+	
 	server = ENetConnection.new()
 	var err := server.create_host_bound("*", 43721, 1, 0, 0, 0)
 	if err != OK:
@@ -88,8 +95,8 @@ func _run_thr():
 				_on_receive(channel)
 		
 		lunabot_mutex.lock()
-		if echo_steering:
-			raw_send_unreliable(Channels.STEERING, steering_data)
+		if echo_controls:
+			raw_send_unreliable(Channels.CONTROLS, controls_data)
 		lunabot_mutex.unlock()
 
 
@@ -119,12 +126,16 @@ func _on_receive(channel: int) -> void:
 			var origin := Vector2(x, y)
 			call_deferred("emit_signal", "odometry_received", origin)
 		
-		Channels.STEERING:
-			if data.size() != 2:
-				push_error("Invalid steering packet")
+		Channels.CONTROLS:
+			if USE_ARCHIMEDES:
+				if data.size() != 4:
+					push_error("Invalid controls packet")
+					return
+			elif data.size() != 3:
+				push_error("Invalid controls packet")
 				return
 			
-			echo_steering = steering_data != data
+			echo_controls = controls_data != data
 	
 	lunabot_mutex.unlock()
 
@@ -168,10 +179,31 @@ func send_steering(drive: float, steering: float) -> void:
 		push_warning("Steering lesser than -1!")
 	
 	lunabot_mutex.lock()
-	steering_data = PackedByteArray([0, 0])
-	steering_data.encode_s8(0, roundi(drive * 127))
-	steering_data.encode_s8(1, roundi(steering * 127))
-	echo_steering = true
+	controls_data.encode_s8(0, roundi(drive * 127))
+	controls_data.encode_s8(1, roundi(steering * 127))
+	echo_controls = true
+	lunabot_mutex.unlock()
+
+
+func send_arm_controls(arm_vel: float, drum_vel:=0.0) -> void:
+	if arm_vel > 1:
+		arm_vel = 1
+		push_warning("Arm velocity greater than 1!")
+	if arm_vel < -1:
+		arm_vel = -1
+		push_warning("Arm velocity lesser than -1!")
+	if drum_vel > 1:
+		drum_vel = 1
+		push_warning("Drum velocity greater than 1!")
+	if drum_vel < -1:
+		drum_vel = -1
+		push_warning("Drum velocity lesser than -1!")
+	
+	lunabot_mutex.lock()
+	controls_data.encode_s8(2, roundi(arm_vel * 127))
+	if USE_ARCHIMEDES:
+		controls_data.encode_s8(3, roundi(drum_vel * 127))
+	echo_controls = true
 	lunabot_mutex.unlock()
 
 

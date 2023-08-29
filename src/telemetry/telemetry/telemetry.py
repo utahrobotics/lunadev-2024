@@ -5,6 +5,7 @@ from enum import IntEnum
 from rclpy.node import Node
 from struct import Struct
 from global_msgs.msg import Steering
+from std_msgs.msg import Float32
 
 
 class Channels(IntEnum):
@@ -20,15 +21,32 @@ class ImportantMessage(IntEnum):
     DISABLE_CAMERA = 1
 
 
+class ControlScheme(IntEnum):
+    ARCHIMEDES = 0
+    UNNAMED = 1
+
+
 class Telemetry(Node):
-    def __init__(self):
+    def __init__(self, scheme: int):
         super().__init__("telemetry")
         self.address = b"host.docker.internal"
         self.port = 43721
+        self.steering_pub = self.create_publisher(Steering, 'steering', 10)
+        self.arm_vel_pub = self.create_publisher(
+            Float32, 'target_arm_velocity', 10
+        )
+
+        self.scheme = scheme
+        if scheme == ControlScheme.ARCHIMEDES:
+            self.steering_struct = Struct("bbbb")
+            self.drum_vel_pub = self.create_publisher(
+                Float32, 'target_drum_velocity', 10
+            )
+        else:
+            self.steering_struct = Struct("bbb")
+
         self.thr = Thread(target=self.run)
         self.thr.start()
-        self.steering_struct = Struct("bb")
-        self.steering_pub = self.create_publisher(Steering, 'steering', 10)
 
     def run(self):
         logger = self.get_logger()
@@ -101,11 +119,26 @@ class Telemetry(Node):
                 Channels.STEERING,
                 enet.Packet(data, enet.PACKET_FLAG_UNSEQUENCED)
             )
-            drive, steering = self.steering_struct.unpack(data)
+            result = self.steering_struct.unpack(data)
+
+            if self.scheme == ControlScheme.ARCHIMEDES:
+                drive, steering, arm_vel, drum_vel = result
+
+                msg = Float32()
+                msg.data = drum_vel / 127
+                self.drum_vel_pub.publish(msg)
+
+            else:
+                drive, steering, arm_vel = result
+
             msg = Steering()
             msg.drive = drive / 127
             msg.steering = steering / 127
             self.steering_pub.publish(msg)
+
+            msg = Float32()
+            msg.data = arm_vel / 127
+            self.arm_vel_pub.publish(msg)
 
         else:
             logger.warn(f"Unexpected channel: {channel}")
@@ -114,16 +147,24 @@ class Telemetry(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    node = Telemetry()
+    node = Telemetry(ControlScheme.UNNAMED)
 
     rclpy.spin(node)
 
-    # Destroy the node explicitly
-    # (optional - otherwise it will be done automatically
-    # when the garbage collector destroys the node object)
+    node.destroy_node()
+    # rclpy.shutdown()
+
+
+def main_arch(args=None):
+    rclpy.init(args=args)
+
+    node = Telemetry(ControlScheme.ARCHIMEDES)
+
+    rclpy.spin(node)
+
     node.destroy_node()
     # rclpy.shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    raise Exception("Please run from ROS 2")

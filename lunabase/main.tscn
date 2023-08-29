@@ -1,4 +1,22 @@
-[gd_scene load_steps=10 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=11 format=3 uid="uid://b8qgudi6vkflb"]
+
+[sub_resource type="GDScript" id="GDScript_45865"]
+script/source = "extends MarginContainer
+
+
+func _ready() -> void:
+	set_process_input(false)
+	Lunabot.connected.connect(func(): set_process_input(true))
+	Lunabot.disconnected.connect(func(): set_process_input(false))
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadMotion:
+		Lunabot.send_arm_controls(
+			Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\"),
+			Input.get_action_strength(\"SpinDrumClockwise\") - Input.get_action_strength(\"SpinDrumCounterClockwise\")
+		)
+"
 
 [sub_resource type="GDScript" id="GDScript_wemvy"]
 script/source = "extends Label
@@ -152,6 +170,7 @@ theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
+script = SubResource("GDScript_45865")
 
 [node name="Control" type="Control" parent="."]
 layout_mode = 2
