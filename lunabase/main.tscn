@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=10 format=3 uid="uid://b8qgudi6vkflb"]
 
 [sub_resource type="GDScript" id="GDScript_wemvy"]
 script/source = "extends Label
@@ -44,6 +44,17 @@ colors = PackedColorArray(0, 0, 0, 1, 0, 0, 0, 1)
 [sub_resource type="GradientTexture2D" id="GradientTexture2D_adsri"]
 gradient = SubResource("Gradient_k12v6")
 height = 32
+
+[sub_resource type="GDScript" id="GDScript_67ds2"]
+script/source = "extends TextureRect
+
+
+func _ready() -> void:
+	Lunabot.camera_frame_received.connect(
+		func(img: Image):
+			texture = ImageTexture.create_from_image(img)
+	)
+"
 
 [sub_resource type="GDScript" id="GDScript_amk46"]
 script/source = "extends Button
@@ -128,7 +139,7 @@ func _update() -> void:
 	else:
 		mouse_default_cursor_shape = Control.CURSOR_ARROW
 		$CenterContainer/Label.text = \"Click to Drive\"
-		Lunabot.send_important_msg(Lunabot.ImportantMessage.STOP_DRIVE)
+		Lunabot.send_steering(0, 0)
 "
 
 [node name="Main" type="MarginContainer"]
@@ -180,6 +191,7 @@ layout_mode = 2
 texture = SubResource("GradientTexture2D_adsri")
 expand_mode = 5
 stretch_mode = 5
+script = SubResource("GDScript_67ds2")
 
 [node name="HBoxContainer" type="HBoxContainer" parent="Control/VBoxContainer"]
 layout_mode = 2

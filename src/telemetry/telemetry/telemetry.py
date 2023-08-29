@@ -18,8 +18,6 @@ class Channels(IntEnum):
 class ImportantMessage(IntEnum):
     ENABLE_CAMERA = 0
     DISABLE_CAMERA = 1
-    STOP_DRIVE = 2
-    STOP_ARM = 3
 
 
 class Telemetry(Node):
@@ -35,10 +33,11 @@ class Telemetry(Node):
     def run(self):
         logger = self.get_logger()
         host = enet.Host(None, 1, 0, 0, 0)
+        addr = enet.Address(self.address, self.port)
 
         logger.info("Connecting to lunabase...")
         while True:
-            peer = host.connect(enet.Address(self.address, self.port), Channels.MAX)
+            peer = host.connect(addr, Channels.MAX)
 
             # Connect Loop
             while True:
@@ -51,7 +50,7 @@ class Telemetry(Node):
                     break
 
                 elif event.type == enet.EVENT_TYPE_DISCONNECT:
-                    peer = host.connect(enet.Address(self.address, self.port), 1)
+                    peer = host.connect(addr, Channels.MAX)
 
                 elif event.type != enet.EVENT_TYPE_NONE:
                     logger.warn(f"Received non-connect event: {event.type}")
@@ -63,12 +62,14 @@ class Telemetry(Node):
                 event = host.service(1000)
 
                 if event.type == enet.EVENT_TYPE_CONNECT:
-                    logger.warn(f"Somehow connected to a peer: {event.peer.address}")
+                    logger.warn("Somehow connected to a peer:"
+                                f"{event.peer.address}")
 
                 elif event.type == enet.EVENT_TYPE_DISCONNECT:
                     if event.peer.address != peer.address:
                         logger.warn(
-                            f"Somehow disconnected from a peer: {event.peer.address}"
+                            "Somehow disconnected from a peer:"
+                            f"{event.peer.address}"
                         )
                         continue
                     logger.error("Disconnected from lunabase!")
@@ -77,7 +78,8 @@ class Telemetry(Node):
                 elif event.type == enet.EVENT_TYPE_RECEIVE:
                     if event.peer.address != peer.address:
                         logger.warn(
-                            f"Somehow received from a different peer: {event.peer.address}"
+                            "Somehow received from a different peer:"
+                            f"{event.peer.address}"
                         )
                         continue
                     self.on_receive(event.channelID, event.packet.data, peer)
@@ -92,22 +94,21 @@ class Telemetry(Node):
         logger = self.get_logger()
 
         if channel == Channels.IMPORTANT:
-            if data[0] == ImportantMessage.STOP_DRIVE:
-                self.publish_steering(0, 0)
+            pass
 
         elif channel == Channels.STEERING:
-            peer.send(Channels.STEERING, enet.Packet(data, enet.PACKET_FLAG_UNSEQUENCED))
+            peer.send(
+                Channels.STEERING,
+                enet.Packet(data, enet.PACKET_FLAG_UNSEQUENCED)
+            )
             drive, steering = self.steering_struct.unpack(data)
-            self.publish_steering(drive, steering)
+            msg = Steering()
+            msg.drive = drive / 127
+            msg.steering = steering / 127
+            self.steering_pub.publish(msg)
 
         else:
             logger.warn(f"Unexpected channel: {channel}")
-
-    def publish_steering(self, drive: int, steering: int) -> None:
-        msg = Steering()
-        msg.drive = drive / 127
-        msg.steering = steering / 127
-        self.steering_pub.publish(msg)
 
 
 def main(args=None):

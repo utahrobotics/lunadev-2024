@@ -2,7 +2,7 @@ extends Node
 
 
 enum Channels { IMPORTANT, CAMERA, ODOMETRY, STEERING, MAX }
-enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA, STOP_DRIVE, STOP_ARM }
+enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA }
 
 signal connected
 signal disconnected
@@ -150,12 +150,6 @@ func raw_send_unreliable(channel: int, data: PackedByteArray) -> void:
 
 
 func send_important_msg(msg: ImportantMessage) -> void:
-	if msg == ImportantMessage.STOP_DRIVE:
-		lunabot_mutex.lock()
-		steering_data = PackedByteArray([0, 0])
-		# We don't need to echo since we are sending a reliable message
-		echo_steering = false
-		lunabot_mutex.unlock()
 	raw_send_reliable(Channels.IMPORTANT, PackedByteArray([msg]))
 
 

@@ -31,8 +31,11 @@ RUN apt-get install python3-dev build-essential -y --no-install-recommends
 
 # Upgrade setuptools, then install pip packages not present in rosdep, and rosdep itself
 RUN pip install setuptools==58.2.0 && \
-    pip install pyvesc rosdep && \
+    pip install pyserial rosdep && \
     pip install --use-pep517 pyenet
+
+# Install pyvesc from github as it is 4 years newer than from pypi
+RUN pip install git+https://github.com/LiamBindle/PyVESC.git
 
 # Init and update rosdep
 RUN rosdep init && rosdep update
