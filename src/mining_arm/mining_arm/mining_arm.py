@@ -5,12 +5,14 @@ from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 
 from pyvesc import VESC
+from serial import SerialException
 from threading import Event, Thread
 from mining_arm.angle_sense import AngleSensor
 from multiprocessing import Value
 
 # from global_msgs.action import SetArmAngle
 from std_msgs.msg import Float32
+from py_globals.wrappers import ErrorWrapper
 
 
 class MiningArm(Node):
@@ -69,15 +71,27 @@ class MiningArm(Node):
             )
         )
 
-        self.arm_motor = VESC(
-            serial_port=self.get_parameter("arm_motor_port")
-            .get_parameter_value()
-            .string_value
+        def on_err(e: Exception):
+            self.get_logger().debug(str(e))
+
+        self.arm_motor = ErrorWrapper(
+            lambda: VESC(
+                serial_port=self.get_parameter("arm_motor_port")
+                .get_parameter_value()
+                .string_value
+            ),
+            SerialException,
+            on_err
         )
-        self.drum_motor = VESC(
-            serial_port=self.get_parameter("drum_motor_port")
-            .get_parameter_value()
-            .string_value
+
+        self.drum_motor = ErrorWrapper(
+            lambda: VESC(
+                serial_port=self.get_parameter("drum_motor_port")
+                .get_parameter_value()
+                .string_value
+            ),
+            SerialException,
+            on_err
         )
 
         self.arm_angle = 0
@@ -155,13 +169,13 @@ class MiningArm(Node):
                 vel = arm_vel.value
                 if vel > 0:
                     if self.arm_angle >= max_angle:
-                        self.arm_motor.set_duty_cycle(0)
+                        self.arm_motor.exec(lambda x: x.set_duty_cycle(0))
                         continue
                 elif self.arm_angle < min_angle:
-                    self.arm_motor.set_duty_cycle(0)
+                    self.arm_motor.exec(lambda x: x.set_duty_cycle(0))
                     continue
 
-                self.arm_motor.set_duty_cycle(vel * scale)
+                self.arm_motor.exec(lambda x: x.set_duty_cycle(vel * scale))
 
         Thread(
             target=send_arm_velocity,
@@ -172,8 +186,8 @@ class MiningArm(Node):
 
     def close(self):
         # self.updating_arm_angle = False
-        self.arm_motor.stop_heartbeat()
-        self.drum_motor.stop_heartbeat()
+        self.arm_motor.exec(lambda x: x.stop_heartbeat())
+        self.drum_motor.exec(lambda x: x.stop_heartbeat())
 
     # def set_arm_angle_callback(self, goal_handle: ServerGoalHandle):
     #     if self.setting_arm_angle:
@@ -238,7 +252,7 @@ class MiningArm(Node):
                 f"Received out of bounds drum velocity: {msg.data}"
             )
             return
-        self.drum_motor.set_duty_cycle(msg.data)
+        self.drum_motor.exec(lambda x: x.set_duty_cycle(msg.data))
 
 
 def main():

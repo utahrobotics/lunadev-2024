@@ -8,6 +8,7 @@
   <license>TODO: License declaration</license>
 
   <exec_depend>global_msgs</exec_depend>
+  <exec_depend>py_globals</exec_depend>
   <exec_depend>python3-serial</exec_depend>
   
   <test_depend>python3-gpiozero</test_depend>

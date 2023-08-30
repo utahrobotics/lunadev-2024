@@ -5,7 +5,7 @@ services:
       DISPLAY: "unix:0"
     privileged: true
     tty: true
-    pull_policy: always
+    # pull_policy: always
     network_mode: host
     working_dir: "/root/lunadev-2024"
     volumes:

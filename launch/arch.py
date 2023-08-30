@@ -2,6 +2,7 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
+
 def generate_launch_description():
     return LaunchDescription([
         Node(
@@ -11,12 +12,12 @@ def generate_launch_description():
         ),
         Node(
             package='telemetry',
-            executable='telemetry',
+            executable='telemetry_arch',
             name='telemetry'
         ),
-        Node(
-            package='mining_arm',
-            executable='mining_arm',
-            name='mining_arm'
-        )
+        # Node(
+        #     package='mining_arm',
+        #     executable='mining_arm',
+        #     name='mining_arm'
+        # )
     ])
