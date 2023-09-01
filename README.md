@@ -25,21 +25,21 @@ If you can't open this repository using DevContainers, I can really only offer t
 
 If you did both, send me a message and we'll work it through.
 
-## LunaServer
+## Lunaserver
 
-Another way to work which I think is better for you guys is to connect to LunaServer. LunaServer is the computer that will run on the robot on competition day, but until then is just a computer that is on 24/7.
+Another way to work which I think is better for you guys is to connect to Lunaserver. Lunaserver is the computer that will run on the robot on competition day, but until then is just a computer that is on 24/7.
 It will be connected to all the sensors we will use, and maybe a microcontroller for you to test stuff on. The set up is a bit more involved however, so you could wait until I demo how to connect to it in person.
 If you are more tech savvy, you are welcome to follow the following instructions:
 
-1. Provide me with your preferred username and password/public-key for me to set up an account on LunaServer for you
+1. Provide me with your preferred username and password/public-key for me to set up an account on Lunaserver for you
 2. Either get a VPN into the University network, or use `lab1-1.eng.utah.edu` or any other of the lab computers as an SSH proxy. You do not need to do this if you are already on the Campus wifi/ethernet
-3. SSH into LunaServer with the credentials you gave to me. You will have an empty home directory waiting for you to set up. You will need to login to github yourself using `gh auth login`
+3. SSH into Lunaserver with the credentials you gave to me. You will have an empty home directory waiting for you to set up. You will need to login to github yourself using `gh auth login`
 
 If you use VSCode as your SSH client, you can then follow the first set of steps with DevContainers just like normal. Only this time, your Dev Container will have access to all the sensors we will use.
 
-## Note about LunaServer
+## Note about Lunaserver
 
-Obviously, you will notice that there isn't an IP address for LunaServer, and that is because we don't have it set up yet. The instructions are here because I am writing them in advance. However, you can still
+Obviously, you will notice that there isn't an IP address for Lunaserver, and that is because we don't have it set up yet. The instructions are here because I am writing them in advance. However, you can still
 provide me with your preferred username and credentials right now and I will set them up when it is ready.
 
 ## Wiki
