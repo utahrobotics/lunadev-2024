@@ -29,7 +29,7 @@ class ControlScheme(IntEnum):
 class Telemetry(Node):
     def __init__(self, scheme: int):
         super().__init__("telemetry")
-        self.address = b"host.docker.internal"
+        self.address = b"192.168.137.1"
         self.port = 43721
         self.steering_pub = self.create_publisher(Steering, 'steering', 10)
         self.arm_vel_pub = self.create_publisher(

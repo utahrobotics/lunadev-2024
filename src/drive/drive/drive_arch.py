@@ -20,7 +20,7 @@ class Drive(Node):
         super().__init__("drive")
 
         def on_err(e: Exception):
-            self.get_logger().debug(str(e))
+            self.get_logger().error(str(e))
 
         self.spare_controller = ErrorWrapper(
             lambda: VESC(serial_port="/dev/spare_motor"),
@@ -48,7 +48,7 @@ class Drive(Node):
             unready = []
 
             for _ in range(6):
-                line = self.controller.readline().decode()
+                line = controller.readline().decode()
                 if "0" in line:
                     unready.append(line)
 
