@@ -41,3 +41,6 @@ If you use VSCode as your SSH client, you can then follow the first set of steps
 
 Obviously, you will notice that there isn't an IP address for LunaServer, and that is because we don't have it set up yet. The instructions are here because I am writing them in advance. However, you can still
 provide me with your preferred username and credentials right now and I will set them up when it is ready.
+
+## Wiki
+There is a [wiki](https://github.com/utahrobotics/lunadev-2024/wiki) for this repository that contains lots of useful information. Please read through it if you want to contribute effectively.
