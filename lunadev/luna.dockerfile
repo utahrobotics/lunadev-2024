@@ -37,6 +37,9 @@ RUN pip install setuptools==58.2.0 && \
 # Install pyvesc from github as it is 4 years newer than from pypi
 RUN pip install git+https://github.com/LiamBindle/PyVESC.git
 
+# Install pypozyx
+RUN pip install pypozyx
+
 # Init and update rosdep
 RUN rosdep init && rosdep update
 
