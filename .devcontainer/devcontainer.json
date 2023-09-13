@@ -1,0 +1,20 @@
+{
+	"name": "Lunadev",
+	"dockerComposeFile": [
+		"../lunadev/compose.yaml"
+	],
+
+	"service": "lunadev",
+
+	"workspaceFolder": "/root/lunadev-2024",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.isort",
+				"ms-python.vscode-pylance",
+				"ms-python.flake8"
+			]
+		}
+	}
+}
