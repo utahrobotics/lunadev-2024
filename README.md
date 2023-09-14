@@ -30,7 +30,7 @@ If you did both, send me a message and we'll work it through.
 Another way to work which I think is better for you guys is to connect to Lunaserver. Lunaserver is the computer that will run on the robot on competition day, but until then is just a computer that is on 24/7.
 It will be connected to all the sensors we will use, and maybe a microcontroller for you to test stuff on. You will use a technique called SSH to connect to Lunaserver. There is a dedicated extension in VScode for this that you should use. [Here is a guide](https://code.visualstudio.com/docs/remote/ssh#_connect-to-a-remote-host).
 
-The address is `8.tcp.us-cal-1.ngrok.io` and the port is `15376`. This is subject to change so please check these values first if you face a connection issue.
+The address is `8.tcp.us-cal-1.ngrok.io` and the port is `15376`. This is subject to change so please check these values first if you face a connection issue. If you are on campus wifi, the following address may work too: `10.17.143.214` with port `22`. This is a more direct connection and can be faster than the former address.
 
 Before connecting for your first time, provide me with your preferred username and password for me to set up an account on Lunaserver for you. There is a guest account, username is `usr` and password is `usr`. This account does not have much access so you shouldn't use it to do your work.
 
