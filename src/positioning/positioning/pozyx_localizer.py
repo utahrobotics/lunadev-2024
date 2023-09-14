@@ -1,18 +1,19 @@
 from pypozyx import *
 
 # Import Pose, Point and Quarternion as msg type, to differentiate from Pozyx classes of same name
-import geometry_msgs.msg.Pose as MsgPose
-import geometry_msgs.msg.Point as MsgPoint
-import geometry_msgs.msg.Quarternion as MsgQuaternion
+from geometry_msgs.msg import Pose as MsgPose
+from geometry_msgs.msg import Point as MsgPoint
+from geometry_msgs.msg import Quaternion as MsgQuaternion
 
 import yaml
+
 
 class PozyxLocalizer:
     """
     Pozyx localizer class
 
     This class connects to a pozyx tag through a USB serial connection and returns the current position from the pozyx
-    environment. 
+    environment.
 
     Attributes
     ----------
@@ -25,14 +26,14 @@ class PozyxLocalizer:
     remote: boolean, optional
         Set to True if using multiple tags. Defaults to False.
     algorithm: int, optional
-        The type of pozyx positionging algorithm. POZYX_POS_ALG_UWB_ONLY is enabled by default. 
+        The type of pozyx positionging algorithm. POZYX_POS_ALG_UWB_ONLY is enabled by default.
     anchors: DeviceCoordinates[]
-        List of Coordinates objects. Coordinates is explaining the coordinates of the anchors in the Pozyx system. 
+        List of Coordinates objects. Coordinates is explaining the coordinates of the anchors in the Pozyx system.
     dimension: int, optional
-        The amount of dimentions to use. Either 2D, 3D, 5D. 
+        The amount of dimentions to use. Either 2D, 3D, 5D.
     height: int, optional
         The height of the Pozyx system in mm. This is only used when the dimentions is in 3D. Defaults to 1000mm.
-    
+
     Methods
     -------
     parseYamlConfig(path)
@@ -61,11 +62,11 @@ class PozyxLocalizer:
         remote: boolean, optional
             Set to True if using multiple tags. Defaults to False.
         algorithm: int, optional
-            The type of pozyx positionging algorithm. POZYX_POS_ALG_UWB_ONLY is enabled by default. 
+            The type of pozyx positionging algorithm. POZYX_POS_ALG_UWB_ONLY is enabled by default.
         anchors: Coordinates[]
-            List of Coordinates objects. Coordinates is explaining the coordinates of the anchors in the Pozyx system. 
+            List of Coordinates objects. Coordinates is explaining the coordinates of the anchors in the Pozyx system.
         dimension: int, optional
-            The amount of dimentions to use. Either 2D, 3D, 5D. 
+            The amount of dimentions to use. Either 2D, 3D, 5D.
         height: int, optional
             The height of the Pozyx system in mm. This is only used when the dimentions is in 3D. Defaults to 1000mm.
         """
@@ -80,7 +81,7 @@ class PozyxLocalizer:
         self.anchors = anchors
         self.height = height
 
-        if type(self.anchors) == str: 
+        if type(self.anchors) == str:
             self.parseYamlConfig(self.anchors)
 
         if not remote:
@@ -95,7 +96,7 @@ class PozyxLocalizer:
 
     def parseYamlConfig(self, path):
         """
-        Parsing the configuration file to the self.anchors as a list of anchors. 
+        Parsing the configuration file to the self.anchors as a list of anchors.
 
         Parameters
         ----------
@@ -104,7 +105,7 @@ class PozyxLocalizer:
         """
         anchors = []
 
-        with open(path, "r") as file: 
+        with open(path, "r") as file:
             configYaml = yaml.safe_load(file)
             for anchor in configYaml["anchors"]:
                 coordinates = Coordinates(anchor["coordinates"]["x"], anchor["coordinates"]["y"], anchor["coordinates"]["z"])
@@ -119,15 +120,15 @@ class PozyxLocalizer:
 
         Paramters
         ---------
-        tagName: 
-            The name of the serial port. Use this variable for connecting to a USB port manually. If not used, this method will detect the USB port automatically. 
+        tagName:
+            The name of the serial port. Use this variable for connecting to a USB port manually. If not used, this method will detect the USB port automatically.
         """
         if tagName is None:
             serialPort = get_first_pozyx_serial_port()
             print('Auto assigning serial port: ' + str(serialPort))
         else:
             serialPort = tagName
-        
+
         connection = PozyxSerial(serialPort)
 
         if connection is None:
@@ -137,18 +138,18 @@ class PozyxLocalizer:
 
     def setAnchorsManually(self, saveToFlash=False):
         """
-        Using anchors that is provided in self.anchors. 
+        Using anchors that is provided in self.anchors.
 
         Paramters
         ---------
         saveToFlash: boolean, optional
-            If set to True. The tag will save the anchors posisions to it's flash memory. 
+            If set to True. The tag will save the anchors posisions to it's flash memory.
         """
         status = self.pozyx.clearDevices(self.remoteID)
 
         for anchor in self.anchors:
             status &= self.pozyx.addDevice(anchor, self.remoteID)
-        
+
         if len(self.anchors) > 4:
             status &= self.pozyx.setSelectionOfAnchors(POZYX_ANCHOR_SEL_AUTO,len(self.anchors), remote_id=self.remoteID)
 
@@ -157,13 +158,13 @@ class PozyxLocalizer:
             self.pozyx.saveRegisters([PozyxRegisters.POSITIONING_NUMBER_OF_ANCHORS], remote_id=self.remoteID)
 
         return status
-        
+
     def loop(self):
         """
-        Getting the position of the connected tag and returning it. 
+        Getting the position of the connected tag and returning it.
         """
         # Define variable to store Position and orientation
-        position = Coordinate()
+        position = Coordinates()
         orientation = Quaternion()
 
         # Set position and orientation
@@ -171,14 +172,14 @@ class PozyxLocalizer:
         self.pozyx.getQuaternion(orientation, remote_id=self.remoteID)
 
         # Set ROS pose to values form Pozyx
-        self.pose = Pose(
-            MsgPoint(position.x, position.y, position.z),
-            MsgQuaternion(orientation.x, orientation.y, orientation.z, orientation.w)
+        self.pose = MsgPose(
+            position=MsgPoint(x=position.x, y=position.y, z=position.z),
+            orientation=MsgQuaternion(x=orientation.x, y=orientation.y, z=orientation.z, w=orientation.w)
         )
 
-        if status == POZYX_SUCCESS: 
+        if status == POZYX_SUCCESS:
             print(self.posAndOrientatonToString())
-        else: 
+        else:
             statusString = "failure" if status == POZYX_FAILURE else "timeout"
             print('Error: Do positioning failed due to ' + statusString)
 
@@ -188,15 +189,9 @@ class PozyxLocalizer:
         """
         return 'Current position:\n  ' + str(self.position) + '\nCurrent orientation\n  ' + str(self.orientation) + '\n'
 
-if __name__ == '__main__':
-    anchors = [
-        DeviceCoordinates(0x682c, 1, Coordinates(-1993, 1084, 0)),
-        DeviceCoordinates(0x6869, 1, Coordinates(1954, -1739, 0)),
-        DeviceCoordinates(0x680b, 1, Coordinates(-355, 1742, 0)),
-        DeviceCoordinates(0x6851, 1, Coordinates(176, -3328, 0))
-    ]
 
-    localizer = PozyxLocalizer(anchors = "PozyxConfig.yaml")
+if __name__ == '__main__':
+    localizer = PozyxLocalizer("PozyxConfig.yaml")
 
     while True:
         localizer.loop()
