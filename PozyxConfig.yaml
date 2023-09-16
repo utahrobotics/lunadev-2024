@@ -3,7 +3,7 @@ anchors:
     id: 0x671a
     flag: 1
     coordinates:
-      x: 5635
+      x: 5630
       y: 12459
       z: 0
   - anchor2:
