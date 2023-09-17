@@ -15,6 +15,10 @@ else
 fi'
 # Run rviz
 alias rviz='ros2 run rviz2 rviz2'
+
+# Start VNC
+alias startvnc='python3 /root/lunadev-2024/lunadev/start_vnc.py'
+
 # Try srcinstall
 if [ -f /root/lunadev-2024/install/setup.bash ]; then
     source /root/lunadev-2024/install/setup.bash
