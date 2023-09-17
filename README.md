@@ -38,6 +38,10 @@ After connecting, VSCode may ask you to type in your password very frequently. S
 
 If you use the VSCode SSH extension, you can then follow the first set of steps with DevContainers just like normal. Only this time, your Dev Container will have access to all the sensors we will use.
 
+## VNC
+
+VNC is a very useful feature that allows Lunadev to share its screen with you so that you can run regular applications, such as RViz2. [Refer to the guide here.](https://github.com/utahrobotics/lunadev-2024/tree/main/lunadev)
+
 ## Wiki
 
 There is a [wiki](https://github.com/utahrobotics/lunadev-2024/wiki) for this repository that contains lots of useful information. Please read through it if you want to contribute effectively.
