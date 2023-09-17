@@ -58,5 +58,15 @@ RUN apt-get install -y --no-install-recommends \
     ros-humble-rviz2 \
     ros-humble-rviz-visual-tools
 
+# Install vnc, xvfb in order to create a 'fake' display and firefox
+RUN apt-get install -y x11vnc xvfb
+RUN mkdir ~/.vnc
+
+# VNC Port
+EXPOSE 5900/tcp
+
+# Setup a password
+# RUN x11vnc -storepasswd usr ~/.vnc/passwd
+
 COPY base_bashrc_append.sh /bashrc_append
 RUN ["/bin/bash", "-c", "cat /bashrc_append >> /root/.bashrc && rm /bashrc_append"]
