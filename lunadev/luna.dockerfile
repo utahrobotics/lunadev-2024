@@ -59,7 +59,7 @@ RUN apt-get install -y --no-install-recommends \
     ros-humble-rviz-visual-tools
 
 # Install VNC and socat
-RUN apt-get install -y x11vnc socat
+RUN apt-get install -y x11vnc socat xvfb
 
 COPY base_bashrc_append.sh /bashrc_append
 RUN ["/bin/bash", "-c", "cat /bashrc_append >> /root/.bashrc && rm /bashrc_append"]
