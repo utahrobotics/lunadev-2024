@@ -1,0 +1,6 @@
+ATTRS{interface}=="Intel(R) RealSense(TM) Depth Camera 455  Depth", ATTR{index}=="0", SYMLINK+="rs_depth0"
+ATTRS{interface}=="Intel(R) RealSense(TM) Depth Camera 455  Depth", ATTR{index}=="1", SYMLINK+="rs_depth1"
+ATTRS{interface}=="Intel(R) RealSense(TM) Depth Camera 455  Depth", ATTR{index}=="2", SYMLINK+="rs_depth2"
+ATTRS{interface}=="Intel(R) RealSense(TM) Depth Camera 455  Depth", ATTR{index}=="3", SYMLINK+="rs_depth3"
+ATTRS{interface}=="Intel(R) RealSense(TM) Depth Camera 455  RGB", ATTR{index}=="0", SYMLINK+="rs_color0"
+ATTRS{interface}=="Intel(R) RealSense(TM) Depth Camera 455  RGB", ATTR{index}=="1", SYMLINK+="rs_color1"

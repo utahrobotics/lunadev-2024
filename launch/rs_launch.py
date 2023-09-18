@@ -36,9 +36,9 @@ configurable_parameters = [
     {'name': 'rgb_camera.profile',           'default': '0,0,0', 'description': 'color image width'},
     {'name': 'rgb_camera.enable_auto_exposure', 'default': 'true', 'description': 'enable/disable auto exposure for color image'},
     {'name': 'enable_color',                 'default': 'true', 'description': 'enable color stream'},
-    {'name': 'enable_infra1',                'default': 'true', 'description': 'enable infra1 stream'},
-    {'name': 'enable_infra2',                'default': 'true', 'description': 'enable infra2 stream'},
-    {'name': 'infra_rgb',                    'default': 'true', 'description': 'enable infra2 stream'},
+    {'name': 'enable_infra1',                'default': 'false', 'description': 'enable infra1 stream'},
+    {'name': 'enable_infra2',                'default': 'false', 'description': 'enable infra2 stream'},
+    {'name': 'infra_rgb',                    'default': 'false', 'description': 'enable infra2 stream'},
     {'name': 'enable_fisheye1',              'default': 'true', 'description': 'enable fisheye1 stream'},
     {'name': 'enable_fisheye2',              'default': 'true', 'description': 'enable fisheye2 stream'},
     {'name': 'enable_confidence',            'default': 'true', 'description': 'enable depth stream'},
@@ -94,6 +94,7 @@ def launch_setup(context, *args, **kwargs):
     _config_file = LaunchConfiguration("config_file").perform(context)
     params_from_file = {} if _config_file == "''" else yaml_to_dict(_config_file)
     log_level = 'info'
+
     # Realsense
     if (os.getenv('ROS_DISTRO') == "dashing") or (os.getenv('ROS_DISTRO') == "eloquent"):
         return [
