@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import subprocess
 import secrets
 import os
