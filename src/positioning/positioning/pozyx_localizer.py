@@ -177,17 +177,15 @@ class PozyxLocalizer:
             orientation=MsgQuaternion(x=orientation.x, y=orientation.y, z=orientation.z, w=orientation.w)
         )
 
-        if status == POZYX_SUCCESS:
-            print(self.posAndOrientatonToString())
-        else:
+        if status != POZYX_SUCCESS:
             statusString = "failure" if status == POZYX_FAILURE else "timeout"
             print('Error: Do positioning failed due to ' + statusString)
 
-    def posAndOrientatonToString(self):
-        """
-        Returning a string with the x,y,z coordinates of the position and the orientation.
-        """
-        return 'Current position:\n  ' + str(self.position) + '\nCurrent orientation\n  ' + str(self.orientation) + '\n'
+    # def posAndOrientatonToString(self):
+    #     """
+    #     Returning a string with the x,y,z coordinates of the position and the orientation.
+    #     """
+    #     return 'Current position:\n  ' + str(self.position) + '\nCurrent orientation\n  ' + str(self.orientation) + '\n'
 
 
 if __name__ == '__main__':

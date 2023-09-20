@@ -26,6 +26,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Steering.msg"
   "action/SetArmAngle.action"
+  "msg/CompressedImagePacket.msg"
 )
 
 if(BUILD_TESTING)

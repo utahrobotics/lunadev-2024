@@ -5,6 +5,7 @@ from enum import IntEnum
 from rclpy.node import Node
 from struct import Struct
 from global_msgs.msg import Steering
+from global_msgs.msg import CompressedImagePacket
 from std_msgs.msg import Float32
 
 
@@ -35,6 +36,13 @@ class Telemetry(Node):
         self.arm_vel_pub = self.create_publisher(
             Float32, 'target_arm_velocity', 10
         )
+        self.camera_image_buffer = bytearray()
+        self.camera_listener = self.create_subscription(
+            CompressedImagePacket,
+            'compressed_image',
+            self.receive_image,
+            10
+        )
 
         self.scheme = scheme
         if scheme == ControlScheme.ARCHIMEDES:
@@ -47,6 +55,9 @@ class Telemetry(Node):
 
         self.thr = Thread(target=self.run)
         self.thr.start()
+
+    def receive_image(self, img: CompressedImagePacket):
+        self.camera_image_buffer += img.data
 
     def run(self):
         logger = self.get_logger()
@@ -107,6 +118,11 @@ class Telemetry(Node):
                     host = enet.Host(None, 1, 0, 0, 0)
                     logger.error("Host has returned an error! Restarting...")
                     break
+
+                peer.send(
+                    Channels.CAMERA,
+                    enet.Packet(self.camera_image_buffer, enet.PACKET_FLAG_UNSEQUENCED)
+                )
 
     def on_receive(self, channel: int, data: bytes, peer) -> None:
         logger = self.get_logger()

@@ -61,5 +61,11 @@ RUN apt-get install -y --no-install-recommends \
 # Install VNC and socat
 RUN apt-get install -y x11vnc socat xvfb
 
+# Configure git
+RUN git config pull.rebase false
+
+# Install ffmpeg
+RUN apt install ffmpeg
+
 COPY base_bashrc_append.sh /bashrc_append
 RUN ["/bin/bash", "-c", "cat /bashrc_append >> /root/.bashrc && rm /bashrc_append"]
