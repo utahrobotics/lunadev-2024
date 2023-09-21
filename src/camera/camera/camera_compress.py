@@ -34,9 +34,9 @@ class CameraCompress(Node):
             Image,
             '/camera/color/image_raw',
             self.camera_callback_callback,
-            10
+            30
         )
-        self.compressed_pub = self.create_publisher(CompressedImagePacket, 'compressed_image', 10)
+        self.compressed_pub = self.create_publisher(CompressedImagePacket, 'compressed_image', 100)
 
         self.count = 0
         self.probe_complete = False
@@ -69,6 +69,8 @@ class CameraCompress(Node):
     def camera_callback_callback(self, img: Image):
         if self.probe_complete and time() - self.last_processed_frame_time < 1.0 / self.target_fps:
             return
+
+        self.last_processed_frame_time = time()
         try:
             i = 0
             while i < len(img.data):

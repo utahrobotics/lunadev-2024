@@ -4,17 +4,25 @@ import os
 from time import sleep
 
 
-parent_dir = os.path.dirname(__file__)
-full_sock_path = f"{parent_dir}/tele.sock"
-if os.path.exists(full_sock_path):
-    os.remove(full_sock_path)
+def main():
+    full_sock_path = "/root/lunadev-2024/lunadev/tele.sock"
+    if os.path.exists(full_sock_path):
+        os.remove(full_sock_path)
 
-popen = subprocess.Popen(
-    ["socat", "UNIX-LISTEN:lunadev/tele.sock,reuseaddr,", "UDP4-LISTEN:43721"]
-)
+    popen = subprocess.Popen(
+        ["socat", "UNIX-LISTEN:lunadev/tele.sock,reuseaddr,", "UDP4-LISTEN:43721"]
+    )
 
-while not os.path.exists(full_sock_path):
-    sleep(0.3)
+    while not os.path.exists(full_sock_path):
+        sleep(0.3)
 
-subprocess.run(["chmod", "777", full_sock_path])
-sys.exit(popen.wait())
+    subprocess.run(["chmod", "777", full_sock_path])
+    if __name__ == "__main__":
+        print("Telemetry tunnel started successfully!")
+        sys.exit(popen.wait())
+    else:
+        print("[telemetry_tunnel] Telemetry tunnel started successfully!")
+
+
+if __name__ == "__main__":
+    main()

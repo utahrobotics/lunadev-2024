@@ -1,5 +1,4 @@
 import rclpy
-from threading import Thread
 import enet
 from enum import IntEnum
 from rclpy.node import Node
@@ -7,6 +6,8 @@ from struct import Struct
 from global_msgs.msg import Steering
 from global_msgs.msg import CompressedImagePacket
 from std_msgs.msg import Float32
+from queue import Queue
+from multiprocessing import Process
 
 
 class Channels(IntEnum):
@@ -36,7 +37,7 @@ class Telemetry(Node):
         self.arm_vel_pub = self.create_publisher(
             Float32, 'target_arm_velocity', 10
         )
-        self.camera_image_buffer = bytearray()
+        self.camera_image_buffer = Queue()
         self.camera_listener = self.create_subscription(
             CompressedImagePacket,
             'compressed_image',
@@ -53,11 +54,11 @@ class Telemetry(Node):
         else:
             self.steering_struct = Struct("bbb")
 
-        self.thr = Thread(target=self.run)
+        self.thr = Process(target=self.run)
         self.thr.start()
 
     def receive_image(self, img: CompressedImagePacket):
-        self.camera_image_buffer += img.data
+        self.camera_image_buffer.put(img.data)
 
     def run(self):
         logger = self.get_logger()
@@ -119,10 +120,11 @@ class Telemetry(Node):
                     logger.error("Host has returned an error! Restarting...")
                     break
 
-                peer.send(
-                    Channels.CAMERA,
-                    enet.Packet(self.camera_image_buffer, enet.PACKET_FLAG_UNSEQUENCED)
-                )
+                while not self.camera_image_buffer.empty():
+                    peer.send(
+                        Channels.CAMERA,
+                        enet.Packet(self.camera_image_buffer.get(), enet.PACKET_FLAG_UNSEQUENCED)
+                    )
 
     def on_receive(self, channel: int, data: bytes, peer) -> None:
         logger = self.get_logger()
