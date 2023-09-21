@@ -62,7 +62,7 @@ RUN apt-get install -y --no-install-recommends \
 RUN apt-get install -y x11vnc socat xvfb
 
 # Configure git
-RUN git config pull.rebase false
+RUN git config --global pull.rebase false
 
 # Install ffmpeg
 RUN apt-get install ffmpeg
