@@ -49,7 +49,7 @@ class PozyxLocalizer:
 
 
     """
-    def __init__(self, anchors, port=None, remoteID=0x00, remote=False, algorithm=POZYX_POS_ALG_UWB_ONLY, dimension=POZYX_2D, height=1000):
+    def __init__(self, anchors, port=None):
         """
         Attributes
         ----------
@@ -71,21 +71,13 @@ class PozyxLocalizer:
             The height of the Pozyx system in mm. This is only used when the dimentions is in 3D. Defaults to 1000mm.
         """
 
-        self.deviceID = None    # ID of the master device
         self.pose = MsgPose()   # Position and orientation of the Pozyx tag in a ROS Pose type
 
         self.pozyx = None           # Pozyx class
-        self.remoteID = remoteID
-        self.algorithm = algorithm
-        self.dimension = dimension
         self.anchors = anchors
-        self.height = height
 
         if type(self.anchors) == str:
             self.parseYamlConfig(self.anchors)
-
-        if not remote:
-            self.remoteID = None
 
         if port is None:
             self.pozyx = self.createSerialConnectionToTag()
@@ -145,17 +137,17 @@ class PozyxLocalizer:
         saveToFlash: boolean, optional
             If set to True. The tag will save the anchors posisions to it's flash memory.
         """
-        status = self.pozyx.clearDevices(self.remoteID)
+        status = self.pozyx.clearDevices()
 
         for anchor in self.anchors:
-            status &= self.pozyx.addDevice(anchor, self.remoteID)
+            status &= self.pozyx.addDevice(anchor)
 
         if len(self.anchors) > 4:
-            status &= self.pozyx.setSelectionOfAnchors(POZYX_ANCHOR_SEL_AUTO,len(self.anchors), remote_id=self.remoteID)
+            status &= self.pozyx.setSelectionOfAnchors(POZYX_ANCHOR_SEL_AUTO, len(self.anchors))
 
         if saveToFlash:
-            self.pozyx.saveAnchorIds(remote_id=self.remoteID)
-            self.pozyx.saveRegisters([PozyxRegisters.POSITIONING_NUMBER_OF_ANCHORS], remote_id=self.remoteID)
+            self.pozyx.saveAnchorIds()
+            self.pozyx.saveRegisters([PozyxRegisters.POSITIONING_NUMBER_OF_ANCHORS])
 
         return status
 
@@ -168,8 +160,8 @@ class PozyxLocalizer:
         orientation = Quaternion()
 
         # Set position and orientation
-        status = self.pozyx.doPositioning(position, self.dimension, self.height, self.algorithm, remote_id=self.remoteID)
-        self.pozyx.getQuaternion(orientation, remote_id=self.remoteID)
+        status = self.pozyx.doPositioning(position, PozyxConstants.DIMENSION_2D)
+        self.pozyx.getQuaternion(orientation)
 
         # Set ROS pose to values form Pozyx
         self.pose = MsgPose(
@@ -180,12 +172,6 @@ class PozyxLocalizer:
         if status != POZYX_SUCCESS:
             statusString = "failure" if status == POZYX_FAILURE else "timeout"
             print('Error: Do positioning failed due to ' + statusString)
-
-    # def posAndOrientatonToString(self):
-    #     """
-    #     Returning a string with the x,y,z coordinates of the position and the orientation.
-    #     """
-    #     return 'Current position:\n  ' + str(self.position) + '\nCurrent orientation\n  ' + str(self.orientation) + '\n'
 
 
 if __name__ == '__main__':
