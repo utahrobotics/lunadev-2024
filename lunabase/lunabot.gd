@@ -1,10 +1,11 @@
 extends Node
 
 
-const USE_ARCHIMEDES := true
+const RECV_FROM := 43762
+const USE_ARCHIMEDES := false
 
 enum Channels { IMPORTANT, CAMERA, ODOMETRY, CONTROLS, MAX }
-enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA }
+enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA, PING }
 
 signal connected
 signal disconnected
@@ -29,7 +30,7 @@ func _ready() -> void:
 		controls_data = PackedByteArray([0, 0, 0])
 	
 	server = ENetConnection.new()
-	var err := server.create_host_bound("*", 43721, 1, 0, 0, 0)
+	var err := server.create_host_bound("*", RECV_FROM, 1, 0, 0, 0)
 	if err != OK:
 		push_error("Failed to start ENet Server: " + str(err))
 		return
@@ -46,11 +47,21 @@ func is_lunabot_connected() -> bool:
 
 
 func _run_thr():
+	var last_receive_time := Time.get_ticks_msec()
+	var pinged := false
 	while running:
 		var result: Array = server.service(200)
 		
 		lunabot_mutex.lock()
 		if lunabot != null:
+			if not pinged and Time.get_ticks_msec() - last_receive_time >= 3000:
+				pinged = true
+				lunabot.send(
+					Channels.IMPORTANT,
+					PackedByteArray([ImportantMessage.PING]),
+					ENetPacketPeer.FLAG_RELIABLE
+				)
+				
 			call_deferred(
 				"emit_signal",
 				"network_statistics",
@@ -89,15 +100,31 @@ func _run_thr():
 					continue
 				lunabot = null
 				lunabot_mutex.unlock()
+				push_error("Lost connection to lunabot!")
 				call_deferred("emit_signal", "disconnected")
 				
 			ENetConnection.EventType.EVENT_RECEIVE:
+				last_receive_time = Time.get_ticks_msec()
+				pinged = false
 				_on_receive(channel)
 		
 		lunabot_mutex.lock()
 		if echo_controls:
 			raw_send_unreliable(Channels.CONTROLS, controls_data)
 		lunabot_mutex.unlock()
+	
+	if lunabot != null:
+		lunabot_mutex.lock()
+		lunabot.peer_disconnect()
+		while true:
+			var result: Array = server.service(200)
+			var event_type: ENetConnection.EventType = result[0]
+			
+			if event_type == ENetConnection.EventType.EVENT_DISCONNECT:
+				break
+		lunabot_mutex.unlock()
+	
+	server.destroy()
 
 
 func _on_receive(channel: int) -> void:
@@ -107,16 +134,10 @@ func _on_receive(channel: int) -> void:
 	
 	match channel:
 		Channels.IMPORTANT:
-			# TODO
 			pass
 		
 		Channels.CAMERA:
-			var frame := Image.new()
-			var err := frame.load_webp_from_buffer(data)
-			if err != OK:
-				push_error("Bad frame: " + str(err))
-				return
-			call_deferred("emit_signal", "camera_frame_received", frame)
+			Ffmpeg.process_data(data)
 		
 		Channels.ODOMETRY:
 			var x := data.decode_float(0)

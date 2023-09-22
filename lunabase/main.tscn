@@ -1,4 +1,7 @@
-[gd_scene load_steps=11 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=13 format=3 uid="uid://b8qgudi6vkflb"]
+
+[ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="1_hl7kb"]
+[ext_resource type="AudioStream" uid="uid://cephremnedhtp" path="res://addons/kenney_interface_sounds/error_002.wav" id="2_kejy0"]
 
 [sub_resource type="GDScript" id="GDScript_45865"]
 script/source = "extends MarginContainer
@@ -8,6 +11,8 @@ func _ready() -> void:
 	set_process_input(false)
 	Lunabot.connected.connect(func(): set_process_input(true))
 	Lunabot.disconnected.connect(func(): set_process_input(false))
+	Lunabot.connected.connect($Connected.play)
+	Lunabot.disconnected.connect($Disconnected.play)
 
 
 func _input(event: InputEvent) -> void:
@@ -249,6 +254,12 @@ grow_vertical = 2
 [node name="Label" type="Label" parent="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect/CenterContainer"]
 layout_mode = 2
 text = "Click to Drive"
+
+[node name="Connected" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("1_hl7kb")
+
+[node name="Disconnected" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("2_kejy0")
 
 [connection signal="pressed" from="Control/VBoxContainer/HBoxContainer/EnableCamera" to="Control/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
 [connection signal="mouse_exited" from="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" to="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" method="_on_mouse_exited"]
