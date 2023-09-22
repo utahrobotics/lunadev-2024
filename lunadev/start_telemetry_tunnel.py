@@ -10,18 +10,20 @@ def main():
         os.remove(full_sock_path)
 
     popen = subprocess.Popen(
-        ["socat", "UNIX-LISTEN:lunadev/tele.sock,reuseaddr,", "UDP4-LISTEN:43721"]
+        [
+            "socat",
+            "UNIX-LISTEN:lunadev/tele.sock,reuseaddr,fork,",
+            "UDP4-LISTEN:43721"
+        ],
+        stderr=subprocess.DEVNULL
     )
 
     while not os.path.exists(full_sock_path):
         sleep(0.3)
 
     subprocess.run(["chmod", "777", full_sock_path])
-    if __name__ == "__main__":
-        print("Telemetry tunnel started successfully!")
-        sys.exit(popen.wait())
-    else:
-        print("[telemetry_tunnel] Telemetry tunnel started successfully!")
+    print("Telemetry tunnel started successfully!")
+    sys.exit(popen.wait())
 
 
 if __name__ == "__main__":
