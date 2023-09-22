@@ -16,16 +16,25 @@ def generate_launch_description():
         #     executable='drive',
         #     name='drive'
         # ),
+        # Start telemetry
         Node(
             package='telemetry',
             executable='telemetry',
             name='telemetry'
         ),
+        # Start camera image compressor
         Node(
             package='camera',
             executable='compress',
             name='compress'
         ),
+        # Start Pozyx
+        Node(
+            package='positioning',
+            executable='positioning',
+            name='positioning'
+        ),
+        # Start RealSense camera
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([
                 os.path.join(
