@@ -21,12 +21,12 @@ parser.add_argument('-d', "--diagnostics", action="store_true")
 args = parser.parse_args()
 
 UDP_HEADER_SIZE = 8     # 8 bytes
-DIAGNOSTIC_WINDOW = 10
+DIAGNOSTIC_WINDOW = 3
 DIAGNOSTIC_DELAY = 2
 
-# First item in list is time step
-# Second item is bandwidth during that time step
-diagnostic_buffer = [[0, 0] for _ in range(DIAGNOSTIC_WINDOW)]
+# First item in list is timestamp
+# Second item is packet size
+diagnostic_buffer = []
 diagnostics_enabled = args.diagnostics
 running = True
 
@@ -34,6 +34,14 @@ running = True
 def print_diagnostics():
     while running:
         time.sleep(DIAGNOSTIC_DELAY)
+
+        for i, (timestamp, _) in enumerate(diagnostic_buffer):
+            if time.time() - timestamp < DIAGNOSTIC_WINDOW:
+                del diagnostic_buffer[0:i]
+                break
+        else:
+            diagnostic_buffer.clear()
+
         print(
             "Bandwidth:",
             round(sum((n for _, n in diagnostic_buffer)) / 1000 / DIAGNOSTIC_WINDOW * 8, 3),
@@ -48,14 +56,10 @@ def track_data(data: bytes):
     if not diagnostics_enabled:
         return
 
-    current_time_step = int(time.time())
-    diagnostic = diagnostic_buffer[current_time_step % DIAGNOSTIC_WINDOW]
-
-    if diagnostic[0] != current_time_step:
-        diagnostic[0] = current_time_step
-        diagnostic[1] = 0
-
-    diagnostic[1] += len(data) + UDP_HEADER_SIZE
+    diagnostic_buffer.append((
+        time.time(),
+        len(data) + UDP_HEADER_SIZE
+    ))
 
 
 tcp_sock = None

@@ -14,8 +14,7 @@ def main():
             "socat",
             "UNIX-LISTEN:lunadev/tele.sock,reuseaddr,fork,",
             "UDP4-LISTEN:43721"
-        ],
-        stderr=subprocess.DEVNULL
+        ]
     )
 
     while not os.path.exists(full_sock_path):

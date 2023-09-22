@@ -22,8 +22,7 @@ class CameraCompress(Node):
                 "-i", "-",
                 "-c:v", "libvpx-vp9",
                 "-b:v", "1500k",
-                # "-g", "72",
-                "-f", "matroska", "-"
+                "-f", "mpegts", "-"
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

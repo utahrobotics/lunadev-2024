@@ -6,8 +6,7 @@ from struct import Struct
 from global_msgs.msg import Steering
 from global_msgs.msg import CompressedImagePacket
 from std_msgs.msg import Float32
-from queue import Queue
-from multiprocessing import Process
+from multiprocessing import Process, Queue, Value
 
 
 class Channels(IntEnum):
@@ -54,11 +53,16 @@ class Telemetry(Node):
         else:
             self.steering_struct = Struct("bbb")
 
+        self.connected = Value('b', False)
         self.thr = Process(target=self.run)
         self.thr.start()
 
     def receive_image(self, img: CompressedImagePacket):
-        self.camera_image_buffer.put(img.data)
+        with self.connected.get_lock():
+            if not self.connected.value:
+                return
+
+        self.camera_image_buffer.put(bytes(img.data))
 
     def run(self):
         logger = self.get_logger()
@@ -87,6 +91,13 @@ class Telemetry(Node):
 
             logger.info("Connected to lunabase!")
 
+            # Empty camera buffer
+            while not self.camera_image_buffer.empty():
+                self.camera_image_buffer.get()
+
+            with self.connected.get_lock():
+                self.connected.value = True
+
             # Main Loop
             while True:
                 event = host.service(1000)
@@ -102,6 +113,8 @@ class Telemetry(Node):
                             f"{event.peer.address}"
                         )
                         continue
+                    with self.connected.get_lock():
+                        self.connected.value = True
                     logger.error("Disconnected from lunabase!")
                     break
 
@@ -120,10 +133,27 @@ class Telemetry(Node):
                     logger.error("Host has returned an error! Restarting...")
                     break
 
+                data = bytearray()
                 while not self.camera_image_buffer.empty():
+                    data += self.camera_image_buffer.get()
+
+                    while len(data) >= 512:
+                        peer.send(
+                            Channels.CAMERA,
+                            enet.Packet(
+                                data[0:512],
+                                enet.PACKET_FLAG_UNSEQUENCED | enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
+                            )
+                        )
+                        del data[0:512]
+
+                if len(data) > 0:
                     peer.send(
                         Channels.CAMERA,
-                        enet.Packet(self.camera_image_buffer.get(), enet.PACKET_FLAG_UNSEQUENCED)
+                        enet.Packet(
+                            data,
+                            enet.PACKET_FLAG_UNSEQUENCED | enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
+                        )
                     )
 
     def on_receive(self, channel: int, data: bytes, peer) -> None:
