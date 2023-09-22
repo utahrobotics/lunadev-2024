@@ -49,7 +49,8 @@ def print_diagnostics():
         )
 
 
-threading.Thread(target=print_diagnostics).start()
+if diagnostics_enabled:
+    threading.Thread(target=print_diagnostics).start()
 
 
 def track_data(data: bytes):

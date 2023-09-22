@@ -11,17 +11,18 @@ class CameraCompress(Node):
     def __init__(self):
         super().__init__("camera_compress")
 
-        self.target_fps = 10
+        self.target_fps = 4
         self.ffmpeg = subprocess.Popen(
             [
                 "ffmpeg",
                 "-f", "rawvideo",
                 "-pix_fmt", "rgb24",
                 "-s", "1280x720",
-                "-r", "10",
+                "-r", "4",
                 "-i", "-",
                 "-c:v", "libvpx-vp9",
                 "-b:v", "1500k",
+                "-vf", 'scale=64:-1',
                 "-f", "mpegts", "-"
             ],
             stdin=subprocess.PIPE,
@@ -46,8 +47,12 @@ class CameraCompress(Node):
 
     def read_stdout(self):
         try:
+            buffer = bytearray()
             while True:
-                data = self.ffmpeg.stdout.read(1024 * 8)
+                try:
+                    data = self.ffmpeg.stdout.read(188)
+                except KeyboardInterrupt:
+                    break
 
                 if len(data) == 0:
                     err = b""
@@ -58,8 +63,13 @@ class CameraCompress(Node):
                         err += packet
                     raise Exception(err.decode())
 
-                self.compressed_pub.publish(CompressedImagePacket(data=data))
+                buffer += data
                 self.probe_complete = True
+                while len(buffer) >= 188:
+                    self.compressed_pub.publish(
+                        CompressedImagePacket(data=buffer[0:188])
+                    )
+                    del buffer[0:188]
 
         except BrokenPipeError:
             # Error will be caught in camera callback
@@ -83,6 +93,9 @@ class CameraCompress(Node):
                     break
                 err += packet
             raise Exception(err.decode())
+
+        except KeyboardInterrupt:
+            return
 
 
 def main(args=None):

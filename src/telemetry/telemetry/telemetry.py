@@ -20,6 +20,7 @@ class Channels(IntEnum):
 class ImportantMessage(IntEnum):
     ENABLE_CAMERA = 0
     DISABLE_CAMERA = 1
+    PING = 2
 
 
 class ControlScheme(IntEnum):
@@ -68,14 +69,20 @@ class Telemetry(Node):
         logger = self.get_logger()
         host = enet.Host(None, 1, 0, 0, 0)
         addr = enet.Address(self.address, self.port)
+        running = True
 
         logger.info("Connecting to lunabase...")
-        while True:
+        while running:
             peer = host.connect(addr, Channels.MAX)
 
             # Connect Loop
             while True:
-                event = host.service(1000)
+                try:
+                    event = host.service(1000)
+                except KeyboardInterrupt:
+                    running = False
+                    break
+
                 if event.type == enet.EVENT_TYPE_CONNECT:
                     if event.peer.address != peer.address:
                         logger.warn("Somehow connected to wrong peer")
@@ -89,6 +96,9 @@ class Telemetry(Node):
                 elif event.type != enet.EVENT_TYPE_NONE:
                     logger.warn(f"Received non-connect event: {event.type}")
 
+            if not running:
+                break
+
             logger.info("Connected to lunabase!")
 
             # Empty camera buffer
@@ -98,9 +108,22 @@ class Telemetry(Node):
             with self.connected.get_lock():
                 self.connected.value = True
 
+            camera_stream_buffer = bytearray()
             # Main Loop
             while True:
-                event = host.service(1000)
+                try:
+                    event = host.service(1000)
+                except KeyboardInterrupt:
+                    logger.warn("Disconnecting due to Ctrl-C...")
+                    peer.disconnect()
+
+                    while True:
+                        event = host.service(1000)
+                        if event.type == enet.EVENT_TYPE_DISCONNECT:
+                            break
+                    running = False
+                    logger.warn("Disconnect due to Ctrl-C successful!")
+                    break
 
                 if event.type == enet.EVENT_TYPE_CONNECT:
                     logger.warn("Somehow connected to a peer:"
@@ -133,34 +156,32 @@ class Telemetry(Node):
                     logger.error("Host has returned an error! Restarting...")
                     break
 
-                data = bytearray()
                 while not self.camera_image_buffer.empty():
-                    data += self.camera_image_buffer.get()
+                    camera_stream_buffer += self.camera_image_buffer.get()
 
-                    while len(data) >= 512:
+                    while len(camera_stream_buffer) >= 188:
                         peer.send(
                             Channels.CAMERA,
                             enet.Packet(
-                                data[0:512],
-                                enet.PACKET_FLAG_UNSEQUENCED | enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
+                                camera_stream_buffer[0:188],
+                                enet.PACKET_FLAG_RELIABLE
+                                # enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
                             )
                         )
-                        del data[0:512]
-
-                if len(data) > 0:
-                    peer.send(
-                        Channels.CAMERA,
-                        enet.Packet(
-                            data,
-                            enet.PACKET_FLAG_UNSEQUENCED | enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
-                        )
-                    )
+                        del camera_stream_buffer[0:188]
 
     def on_receive(self, channel: int, data: bytes, peer) -> None:
         logger = self.get_logger()
 
         if channel == Channels.IMPORTANT:
-            pass
+            if data[0] == ImportantMessage.PING:
+                peer.send(
+                    Channels.IMPORTANT,
+                    enet.Packet(
+                        bytearray([ImportantMessage.PING]),
+                        enet.PACKET_FLAG_RELIABLE
+                    )
+                )
 
         elif channel == Channels.STEERING:
             peer.send(
@@ -199,6 +220,7 @@ def main(args=None):
 
     rclpy.spin(node)
 
+    node.thr.kill()
     node.destroy_node()
     # rclpy.shutdown()
 
@@ -210,6 +232,7 @@ def main_arch(args=None):
 
     rclpy.spin(node)
 
+    node.thr.kill()
     node.destroy_node()
     # rclpy.shutdown()
 

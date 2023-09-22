@@ -24,14 +24,17 @@ class Positioning(Node):
         self.thr.start()
 
     def run(self):
-        while True:
-            self.localizer.loop()
-            self.pose_cov_pub.publish(
-                PoseWithCovariance(pose=self.localizer.pose)
-            )
-            self.pose_pub.publish(
-                self.localizer.pose
-            )
+        try:
+            while True:
+                self.localizer.loop()
+                self.pose_cov_pub.publish(
+                    PoseWithCovariance(pose=self.localizer.pose)
+                )
+                self.pose_pub.publish(
+                    self.localizer.pose
+                )
+        except KeyboardInterrupt:
+            return
 
 
 def main(args=None):
