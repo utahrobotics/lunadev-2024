@@ -1,3 +1,4 @@
+import queue
 import rclpy
 import enet
 from enum import IntEnum
@@ -37,7 +38,7 @@ class Telemetry(Node):
         self.arm_vel_pub = self.create_publisher(
             Float32, 'target_arm_velocity', 10
         )
-        self.camera_image_buffer = Queue()
+        self.camera_image_buffer = Queue(1)
         self.camera_listener = self.create_subscription(
             CompressedImagePacket,
             'compressed_image',
@@ -63,7 +64,10 @@ class Telemetry(Node):
             if not self.connected.value:
                 return
 
-        self.camera_image_buffer.put(bytes(img.data))
+        try:
+            self.camera_image_buffer.put_nowait(bytes(img.data))
+        except queue.Full:
+            pass
 
     def run(self):
         logger = self.get_logger()
@@ -78,7 +82,7 @@ class Telemetry(Node):
             # Connect Loop
             while True:
                 try:
-                    event = host.service(1000)
+                    event = host.service(0)
                 except KeyboardInterrupt:
                     running = False
                     break
@@ -108,17 +112,16 @@ class Telemetry(Node):
             with self.connected.get_lock():
                 self.connected.value = True
 
-            camera_stream_buffer = bytearray()
             # Main Loop
             while True:
                 try:
-                    event = host.service(1000)
+                    event = host.service(50)
                 except KeyboardInterrupt:
                     logger.warn("Disconnecting due to Ctrl-C...")
                     peer.disconnect()
 
                     while True:
-                        event = host.service(1000)
+                        event = host.service(0)
                         if event.type == enet.EVENT_TYPE_DISCONNECT:
                             break
                     running = False
@@ -156,19 +159,16 @@ class Telemetry(Node):
                     logger.error("Host has returned an error! Restarting...")
                     break
 
-                while not self.camera_image_buffer.empty():
-                    camera_stream_buffer += self.camera_image_buffer.get()
-
-                    while len(camera_stream_buffer) >= 188:
-                        peer.send(
-                            Channels.CAMERA,
-                            enet.Packet(
-                                camera_stream_buffer[0:188],
-                                enet.PACKET_FLAG_RELIABLE
-                                # enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
-                            )
+                try:
+                    peer.send(
+                        Channels.CAMERA,
+                        enet.Packet(
+                            self.camera_image_buffer.get_nowait(),
+                            enet.PACKET_FLAG_UNSEQUENCED | enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
                         )
-                        del camera_stream_buffer[0:188]
+                    )
+                except queue.Empty:
+                    pass
 
     def on_receive(self, channel: int, data: bytes, peer) -> None:
         logger = self.get_logger()
