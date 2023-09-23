@@ -34,7 +34,7 @@ class CameraCompress(Node):
 
         self.last_processed_frame_time = time()
         img = Image.frombytes("RGB", (1280, 720), bytes(img.data))  \
-            .resize((int(1280 * 0.15), int(720 * 0.15)), Image.LANCZOS)
+            .resize((int(1280 // 5), int(720 // 5)), Image.LANCZOS)
 
         webp_buf = io.BytesIO()
         img.save(webp_buf, "webp", quality=0, method=6)

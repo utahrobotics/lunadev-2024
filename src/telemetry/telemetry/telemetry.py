@@ -1,3 +1,4 @@
+from math import ceil
 import queue
 import rclpy
 import enet
@@ -29,6 +30,9 @@ class ControlScheme(IntEnum):
     UNNAMED = 1
 
 
+MAX_PACKET_SIZE = 200
+
+
 class Telemetry(Node):
     def __init__(self, scheme: int):
         super().__init__("telemetry")
@@ -55,6 +59,8 @@ class Telemetry(Node):
         else:
             self.steering_struct = Struct("bbb")
 
+        self.image_first_fragment_struct = Struct("IBB")
+        self.image_fragment_struct = Struct("IB")
         self.connected = Value('b', False)
         self.thr = Process(target=self.run)
         self.thr.start()
@@ -70,6 +76,7 @@ class Telemetry(Node):
             pass
 
     def run(self):
+        camera_image_index = 0
         logger = self.get_logger()
         host = enet.Host(None, 1, 0, 0, 0)
         addr = enet.Address(self.address, self.port)
@@ -160,13 +167,24 @@ class Telemetry(Node):
                     break
 
                 try:
-                    peer.send(
-                        Channels.CAMERA,
-                        enet.Packet(
-                            self.camera_image_buffer.get_nowait(),
-                            enet.PACKET_FLAG_UNSEQUENCED | enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
+                    image_data = self.camera_image_buffer.get_nowait()
+                    fragment_count = ceil(len(image_data) / MAX_PACKET_SIZE)
+
+                    for fragment_idx in range(fragment_count):
+                        if fragment_idx == 0:
+                            data = self.image_first_fragment_struct.pack(camera_image_index, fragment_idx, fragment_count) + image_data[0:MAX_PACKET_SIZE]
+                        else:
+                            data = self.image_fragment_struct.pack(camera_image_index, fragment_idx) + image_data[fragment_idx * MAX_PACKET_SIZE:(fragment_idx + 1) * MAX_PACKET_SIZE]
+
+                        peer.send(
+                            Channels.CAMERA,
+                            enet.Packet(
+                                data,
+                                enet.PACKET_FLAG_UNSEQUENCED | enet.PACKET_FLAG_UNRELIABLE_FRAGMENT
+                            )
                         )
-                    )
+
+                    camera_image_index += 1
                 except queue.Empty:
                     pass
 
