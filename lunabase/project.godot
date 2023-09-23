@@ -18,7 +18,6 @@ config/icon="res://icon.png"
 [autoload]
 
 Lunabot="*res://lunabot.gd"
-Ffmpeg="*res://ffmpeg.gd"
 
 [display]
 

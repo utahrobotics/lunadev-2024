@@ -34,7 +34,6 @@ func _ready() -> void:
 	if err != OK:
 		push_error("Failed to start ENet Server: " + str(err))
 		return
-#	server.compress(ENetConnection.COMPRESS_ZLIB)
 	thread.start(_run_thr)
 
 
@@ -137,7 +136,11 @@ func _on_receive(channel: int) -> void:
 			pass
 		
 		Channels.CAMERA:
-			Ffmpeg.process_data(data)
+			var img := Image.new()
+			var err := img.load_webp_from_buffer(data)
+			if err != OK:
+				push_error("Error parsing camera frame: %s" % err)
+			call_deferred("emit_signal", "camera_frame_received", img)
 		
 		Channels.ODOMETRY:
 			var x := data.decode_float(0)
