@@ -65,7 +65,7 @@ RUN apt-get install -y x11vnc socat xvfb
 RUN git config --global pull.rebase false
 
 # Install Localization algorithm
-RUN apt-get install ros-<ros2-distro>-robot-localization
+RUN apt-get install ros-humble-robot-localization
 
 COPY base_bashrc_append.sh /bashrc_append
 RUN ["/bin/bash", "-c", "cat /bashrc_append >> /root/.bashrc && rm /bashrc_append"]
