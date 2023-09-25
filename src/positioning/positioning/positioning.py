@@ -2,21 +2,17 @@ import rclpy
 from threading import Thread
 from rclpy.node import Node
 from positioning.pozyx_localizer import PozyxLocalizer
-from geometry_msgs.msg import Pose, PoseWithCovariance
+from geometry_msgs.msg import PoseWithCovariance, PoseWithCovarianceStamped
+from std_msgs.msg import Header
 
 
 class Positioning(Node):
     def __init__(self):
         super().__init__("positioning")
         self.localizer = PozyxLocalizer("PozyxConfig.yaml")
-        self.pose_cov_pub = self.create_publisher(
-            PoseWithCovariance,
-            'pozyx_pose',
-            10
-        )
         self.pose_pub = self.create_publisher(
-            Pose,
-            'pozyx_pose_no_cov',
+            PoseWithCovarianceStamped,
+            'pozyx_pose',
             10
         )
 
@@ -27,11 +23,14 @@ class Positioning(Node):
         try:
             while True:
                 self.localizer.loop()
-                self.pose_cov_pub.publish(
-                    PoseWithCovariance(pose=self.localizer.pose)
-                )
                 self.pose_pub.publish(
-                    self.localizer.pose
+                    PoseWithCovarianceStamped(
+                        header=Header(
+                            stamp=self.get_clock().now().to_msg(),
+                            frame_id="pozyx_frame"
+                        ),
+                        pose=PoseWithCovariance(pose=self.localizer.pose)
+                    )
                 )
         except KeyboardInterrupt:
             return

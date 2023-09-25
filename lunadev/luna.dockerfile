@@ -56,13 +56,18 @@ RUN apt-get install ros-humble-nav2-bringup '~ros-humble-turtlebot3-.*' -y --no-
 # Install rviz2
 RUN apt-get install -y --no-install-recommends \
     ros-humble-rviz2 \
-    ros-humble-rviz-visual-tools
+    ros-humble-rviz-visual-tools \
+    ros-humble-imu-tools
 
 # Install VNC and socat
 RUN apt-get install -y x11vnc socat xvfb
 
 # Install Localization algorithm
 RUN apt-get install -y --no-install-recommends ros-humble-robot-localization
+
+# Install mapping and localization package
+# Note: This is quite big
+RUN apt-get install -y --no-install-recommends ros-humble-rtabmap-ros
 
 # Configure git
 RUN git config --global pull.rebase false
