@@ -1,7 +1,7 @@
 extends Node
 
 
-const RECV_FROM := 43762
+const RECV_FROM := 43721
 const USE_ARCHIMEDES := false
 
 enum Channels { IMPORTANT, CAMERA, ODOMETRY, CONTROLS, MAX }
@@ -48,11 +48,12 @@ func is_lunabot_connected() -> bool:
 func _run_thr():
 	var last_receive_time := Time.get_ticks_msec()
 	var pinged := false
+	
 	while running:
 		var result: Array = server.service(200)
 		
 		lunabot_mutex.lock()
-		if lunabot != null:
+		if lunabot != null and lunabot.is_active():
 			if not pinged and Time.get_ticks_msec() - last_receive_time >= 3000:
 				pinged = true
 				lunabot.send(
@@ -60,7 +61,7 @@ func _run_thr():
 					PackedByteArray([ImportantMessage.PING]),
 					ENetPacketPeer.FLAG_RELIABLE
 				)
-				
+			
 			call_deferred(
 				"emit_signal",
 				"network_statistics",
@@ -87,6 +88,7 @@ func _run_thr():
 				lunabot_mutex.lock()
 				if lunabot != null:
 					push_error("New connection to lunabot even though we are already connected!")
+					lunabot_mutex.unlock()
 					continue
 				lunabot = peer
 				lunabot_mutex.unlock()
@@ -96,6 +98,7 @@ func _run_thr():
 				lunabot_mutex.lock()
 				if lunabot == null:
 					push_error("Disconnection to lunabot even though we were never connected!")
+					lunabot_mutex.unlock()
 					continue
 				lunabot = null
 				lunabot_mutex.unlock()
@@ -112,11 +115,11 @@ func _run_thr():
 			raw_send_unreliable(Channels.CONTROLS, controls_data)
 		lunabot_mutex.unlock()
 	
-	if lunabot != null:
+	if lunabot != null and lunabot.is_active():
 		lunabot_mutex.lock()
 		lunabot.peer_disconnect()
 		while true:
-			var result: Array = server.service(200)
+			var result: Array = server.service(0)
 			var event_type: ENetConnection.EventType = result[0]
 			
 			if event_type == ENetConnection.EventType.EVENT_DISCONNECT:
@@ -124,6 +127,11 @@ func _run_thr():
 		lunabot_mutex.unlock()
 	
 	server.destroy()
+
+
+var camera_image_buffers: Array[PackedByteArray]
+var camera_image_idx := -1
+var collected_fragment_count: int
 
 
 func _on_receive(channel: int) -> void:
@@ -136,6 +144,45 @@ func _on_receive(channel: int) -> void:
 			pass
 		
 		Channels.CAMERA:
+			var current_camera_image_index := data.decode_u32(0)
+			var current_camera_image_fragment_idx := data.decode_u8(4)
+			
+			if current_camera_image_fragment_idx == 0:
+				if current_camera_image_index <= camera_image_idx:
+					print_debug("Out of order fragment A")
+					return
+				
+				collected_fragment_count = 1
+				camera_image_idx = current_camera_image_index
+				var fragment_count := data.decode_u8(5)
+				camera_image_buffers.clear()
+				camera_image_buffers.append(data.slice(6))
+				
+				if fragment_count > 1:
+					for _i in range(fragment_count - 1):
+						camera_image_buffers.append(PackedByteArray())
+					return
+			
+			elif current_camera_image_index != camera_image_idx:
+				print_debug("Out of order fragment B")
+				return
+			
+			else:
+				if not camera_image_buffers[current_camera_image_fragment_idx].is_empty():
+					push_error("Received the same fragment again!")
+					return
+				
+				camera_image_buffers[current_camera_image_fragment_idx] = data.slice(5)
+				collected_fragment_count += 1
+				
+				if collected_fragment_count < camera_image_buffers.size():
+					return
+			
+			data = camera_image_buffers[0]
+			
+			for i in range(1, camera_image_buffers.size()):
+				data.append_array(camera_image_buffers[i])
+			
 			var img := Image.new()
 			var err := img.load_webp_from_buffer(data)
 			if err != OK:
