@@ -1,5 +1,5 @@
 ### ekf config file ###
-ekf_filter_node:
+ekf_filter:
     ros__parameters:
 # The frequency, in Hz, at which the filter will output a position estimate. Note that the filter will not begin
 # computation until it receives at least one message from one of theinputs. It will then run continuously at the
@@ -13,7 +13,7 @@ ekf_filter_node:
         two_d_mode: true
 
 # Whether to publish the acceleration state. Defaults to false if unspecified.
-        publish_acceleration: true
+        publish_acceleration: false
 
 # Whether to broadcast the transformation over the /tf topic. Defaultsto true if unspecified.
         publish_tf: true
@@ -30,10 +30,12 @@ ekf_filter_node:
         map_frame: map              # Defaults to "map" if unspecified
         odom_frame: odom            # Defaults to "odom" if unspecified
         base_link_frame: base_link  # Defaults to "base_link" ifunspecified
-        world_frame: odom           # Defaults to the value ofodom_frame if unspecified
+        world_frame: odom           # Defaults to the value of odom_frame if unspecified
 
-        pose0: /pozyx_pose
-        pse0_config: [true,  true,  true,
+        print_diagnostics: true
+
+        pose0: /pozyx/pose
+        pose0_config: [true, true, true,
                        true, true, true,
                        false, false, false,
                        false, false, false,
@@ -41,7 +43,7 @@ ekf_filter_node:
 
         imu0: /camera/imu
         imu0_config: [false, false, false,
-                      false,  false,  false,
+                      false, false, false,
+                      false, false, false,
                       true, true, true,
-                      true, true, true,
-                      false, false, false]
+                      true, true, true]

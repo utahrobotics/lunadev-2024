@@ -236,7 +236,10 @@ def main(args=None):
 
     node = Telemetry(ControlScheme.UNNAMED)
 
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
 
     node.thr.kill()
     node.destroy_node()

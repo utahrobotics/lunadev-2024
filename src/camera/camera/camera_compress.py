@@ -48,7 +48,10 @@ def main(args=None):
 
     node = CameraCompress()
 
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
 
     node.destroy_node()
     # rclpy.shutdown()

@@ -5,7 +5,6 @@ from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
@@ -66,6 +65,25 @@ def generate_launch_description():
             parameters=[
                 os.path.join(launchers_pkg_share, 'config/ekf.yaml'),
                 # {'use_sim_time': LaunchConfiguration('use_sim_time')}
+            ]
+        ),
+        # Start rtabmap SLAM
+        Node(
+            package='rtabmap_slam',
+            executable='rtabmap',
+            name='rtabmap',
+            remappings=[
+                ('/scan_cloud', '/camera/depth/color/points'),
+                ('/rgb/camera_info', '/camera/color/camera_info'),
+                ('/rgb/image', '/camera/color/image_raw'),
+            ],
+            arguments=['--delete_db_on_start'],
+            parameters=[
+                {
+                    "subscribe_scan_cloud": True,
+                    "subscribe_depth": False,
+                    "odom_frame_id": "camera_imu_optical_frame"
+                }
             ]
         ),
         # Start RealSense camera

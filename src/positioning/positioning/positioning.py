@@ -12,7 +12,7 @@ class Positioning(Node):
         self.localizer = PozyxLocalizer("PozyxConfig.yaml")
         self.pose_pub = self.create_publisher(
             PoseWithCovarianceStamped,
-            'pozyx_pose',
+            '/pozyx/pose',
             10
         )
 
@@ -20,9 +20,12 @@ class Positioning(Node):
         self.thr.start()
 
     def run(self):
-        try:
-            while True:
+        while True:
+            try:
                 self.localizer.loop()
+            except KeyboardInterrupt:
+                return
+            try:
                 self.pose_pub.publish(
                     PoseWithCovarianceStamped(
                         header=Header(
@@ -32,8 +35,8 @@ class Positioning(Node):
                         pose=PoseWithCovariance(pose=self.localizer.pose)
                     )
                 )
-        except KeyboardInterrupt:
-            return
+            except Exception:
+                return
 
 
 def main(args=None):
@@ -41,7 +44,10 @@ def main(args=None):
 
     node = Positioning()
 
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
 
     node.destroy_node()
     # rclpy.shutdown()
