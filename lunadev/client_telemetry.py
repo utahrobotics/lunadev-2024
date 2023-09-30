@@ -12,8 +12,8 @@ parser = argparse.ArgumentParser(
 )
 
 parser.add_argument('username')
-parser.add_argument('hostname')
-parser.add_argument('port')
+# parser.add_argument('hostname')
+# parser.add_argument('port')
 parser.add_argument('keyfile')
 parser.add_argument('-tp', '--tunnel_port', default=43721, type=int)
 parser.add_argument('-d', "--diagnostics", action="store_true")
@@ -114,8 +114,8 @@ while True:
     tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     process = subprocess.Popen([
         "ssh",
-        f"{args.username}@{args.hostname}",
-        "-p", args.port,
+        f"{args.username}@5.tcp.ngrok.io",
+        "-p", "22735",
         "-i", args.keyfile,
         "-T",
         "-L", f"43722:/home/{args.username}/lunadev-2024/lunadev/tele.sock"
