@@ -82,7 +82,23 @@ def generate_launch_description():
                 {
                     "subscribe_scan_cloud": True,
                     "subscribe_depth": False,
-                    "odom_frame_id": "camera_imu_optical_frame"
+                    "odom_frame_id": "odom",
+                }
+            ]
+        ),
+        Node(
+            package='rtabmap_viz',
+            executable='rtabmap_viz',
+            name='rtabmap_viz',
+            remappings=[
+                ('/scan_cloud', '/camera/depth/color/points'),
+                ('/rgb/camera_info', '/camera/color/camera_info'),
+                ('/rgb/image', '/camera/color/image_raw'),
+            ],
+            parameters=[
+                {
+                    "subscribe_scan_cloud": True,
+                    "odom_frame_id": "odom",
                 }
             ]
         ),
