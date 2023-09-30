@@ -60,7 +60,7 @@ RUN apt-get install -y --no-install-recommends \
     ros-humble-imu-tools
 
 # Install VNC and socat
-RUN apt-get install -y x11vnc xfce4 socat xvfb
+RUN apt-get install -y --no-install-recommends x11vnc xfce4 socat xvfb
 
 # Install Localization algorithm
 RUN apt-get install -y --no-install-recommends ros-humble-robot-localization
