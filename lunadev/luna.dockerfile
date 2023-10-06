@@ -50,8 +50,9 @@ RUN apt-get install python3-colcon-common-extensions build-essential -y --no-ins
 RUN apt-get install ros-humble-realsense2-camera -y --no-install-recommends
 
 # Install nav2 components as separate layers (to make it easier to upload and cache)
-RUN apt-get install ros-humble-navigation2 -y --no-install-recommends
-RUN apt-get install ros-humble-nav2-bringup '~ros-humble-turtlebot3-.*' -y --no-install-recommends
+RUN apt-get install -y --no-install-recommends ros-humble-navigation2
+RUN apt-get install -y --no-install-recommends ros-humble-nav2-bringup '~ros-humble-turtlebot3-.*'
+RUN apt-get install -y --no-install-recommends ros-humble-xacro
 
 # Install rviz2
 RUN apt-get install -y --no-install-recommends \
@@ -61,6 +62,11 @@ RUN apt-get install -y --no-install-recommends \
 
 # Install VNC and socat
 RUN apt-get install -y --no-install-recommends x11vnc xfce4 xfce4-terminal xterm socat xvfb
+
+ENV VNC_RESOLUTION=1024x640 \
+    DISPLAY=:1 \
+    TERM=xterm \
+    DEBIAN_FRONTEND=noninteractive \
 
 # Install Localization algorithm
 RUN apt-get install -y --no-install-recommends ros-humble-robot-localization
