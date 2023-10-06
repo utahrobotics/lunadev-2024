@@ -66,7 +66,7 @@ RUN apt-get install -y --no-install-recommends x11vnc xfce4 xfce4-terminal xterm
 ENV VNC_RESOLUTION=1024x640 \
     DISPLAY=:1 \
     TERM=xterm \
-    DEBIAN_FRONTEND=noninteractive \
+    DEBIAN_FRONTEND=noninteractive
 
 # Install Localization algorithm
 RUN apt-get install -y --no-install-recommends ros-humble-robot-localization
