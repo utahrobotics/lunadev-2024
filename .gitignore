@@ -1,7 +1,2 @@
-build/
-.vscode/
-install/
-log/
-__pycache__
-lunadev/vnc_logs.txt
-nohup.out
+/target
+Cargo.lock
