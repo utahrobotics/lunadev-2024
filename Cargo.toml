@@ -1,11 +1,19 @@
 [workspace]
 members = [
     "unros-core",
+    "telemetry",
+    "global-msgs",
+    "archimedes",
+    "drive",
 ]
 
 [workspace.dependencies]
-log = "0.4"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "tracing", "parking-lot"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "tracing", "parking_lot", "signal"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 console-subscriber = { version = "0.2", features = ["parking_lot"]}
+tokio-rayon = "2"
+anyhow = "1"
+async-trait = "0.1"
+fxhash = "0.2"
+static_assertions = "1"
