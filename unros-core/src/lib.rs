@@ -1,15 +1,14 @@
-use std::{future::Future, sync::Arc, time::Instant, pin::Pin};
+use std::{future::Future, pin::Pin, sync::Arc, time::Instant};
 
 pub use anyhow;
-use anyhow::Context;
 pub use async_trait::async_trait;
 pub use log;
 use log::{error, info};
 use serde::Deserialize;
 use static_assertions::assert_impl_all;
+pub use tokio;
 use tokio::task::JoinSet;
 pub use tokio_rayon::{self, rayon};
-pub use tokio;
 
 // pub trait Variadic {
 //     fn contains<T: 'static>() -> bool;
@@ -66,6 +65,30 @@ macro_rules! node_error {
     };
 }
 
+// pub struct RuntimeContext {
+//     alive_receiver: broadcast::Receiver<()>,
+// }
+
+// impl Clone for RuntimeContext {
+//     fn clone(&self) -> Self {
+//         Self { alive_receiver: self.alive_receiver.resubscribe() }
+//     }
+// }
+
+// impl RuntimeContext {
+//     pub fn is_alive(&self) -> bool {
+//         matches!( self.alive_receiver.try_recv(), Err(TryRecvError::Empty) | Err(TryRecvError::Lagged(_)) | Ok(()))
+//     }
+
+//     pub async fn wait_until_death(&mut self) {
+//         loop {
+//             if let Err(RecvError::Closed) = self.alive_receiver.recv().await {
+//                 break
+//             }
+//         }
+//     }
+// }
+
 #[async_trait]
 pub trait Node: Send + 'static {
     fn set_name(&mut self, name: String);
@@ -74,36 +97,36 @@ pub trait Node: Send + 'static {
 }
 
 pub struct Signal<T: Clone> {
-    mut_async_fns: Vec<Box<dyn FnMut(T) -> Box<dyn Future<Output = ()> + Send + Unpin> + Send + Sync>>,
-    mut_fns: Vec<Box<dyn FnMut(T) + Send + Sync>>,
+    async_fns: Vec<Box<dyn Fn(T) -> Box<dyn Future<Output = ()> + Send + Unpin> + Send + Sync>>,
     fns: Vec<Box<dyn Fn(T) + Send + Sync>>,
 }
 
-
 impl<T: Clone> Default for Signal<T> {
     fn default() -> Self {
-        Self { mut_async_fns: Default::default(), mut_fns: Default::default(), fns: Default::default() }
+        Self {
+            async_fns: Default::default(),
+            fns: Default::default(),
+        }
     }
 }
 
 impl<T: Clone> Signal<T> {
-    pub async fn emit(&mut self, msg: T) {
-        for async_fn in &mut self.mut_async_fns {
+    pub async fn emit(&self, msg: T) {
+        for async_fn in &self.async_fns {
             async_fn(msg.clone()).await;
         }
-        self.mut_fns.iter_mut().for_each(|x| x(msg.clone()));
         self.fns.iter().for_each(|x| x(msg.clone()));
     }
 
-    pub fn connect_to(&mut self, receiver: impl FnMut(T) + Send + Sync + 'static) {
-        self.mut_fns.push(Box::new(receiver));
+    pub fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static) {
+        self.fns.push(Box::new(receiver));
     }
 
-    pub fn connect_to_async<F>(&mut self, mut receiver: impl FnMut(T) -> F + Send + Sync + 'static)
+    pub fn connect_to_async<F>(&mut self, receiver: impl Fn(T) -> F + Send + Sync + 'static)
     where
         F: Future<Output = ()> + Send + Unpin + 'static,
     {
-        self.mut_async_fns
+        self.async_fns
             .push(Box::new(move |x| Box::new(receiver(x))));
     }
 
@@ -137,9 +160,9 @@ impl<T: Clone> Signal<T> {
 
 assert_impl_all!(Signal<()>: Send, Sync);
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct RunOptions {
-    log_file: Option<String>,
+    pub log_file: Option<String>,
 }
 
 #[tokio::main]
@@ -206,9 +229,12 @@ pub async fn run_all(
         };
         tokio::select! {
             option = tasks.join_next() => {
-                let Some(result) = option else { break Ok(()) };
+                let Some(result) = option else {
+                    info!("All Nodes terminated. Exiting...");
+                    break;
+                };
                 if let Err((e, name)) = result? {
-                    break Err(e).context(format!("{name} has faced an error"));
+                    error!("{name} has faced the following error: {e}");
                 }
             }
             result = ctrl_c_fut => {
@@ -217,9 +243,13 @@ pub async fn run_all(
                     ctrl_c_failed = true;
                 } else {
                     info!("Ctrl-C received. Exiting...");
-                    break Ok(());
+                    break;
                 }
             }
         }
     }
+
+    tasks.abort_all();
+    while let Some(_) = tasks.join_next().await {}
+    Ok(())
 }

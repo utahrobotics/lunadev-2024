@@ -1,16 +1,11 @@
 [package]
-name = "telemetry"
+name = "camera"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+nokhwa = { version = "0.10", features = ["input-native"] }
 unros-core = { path = "../unros-core" }
-enet = "0.3.0"
-global-msgs = { path = "../global-msgs" }
-num_enum = "0.7.1"
 image = { workspace = true }
-crossbeam = "0.8"
-webp = "0.2"
-ordered-float = { workspace = true }
