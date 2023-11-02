@@ -1,5 +1,5 @@
 from multiprocessing import Pool
-from typing import Callable, Iterable, Tuple, Union
+from typing import Iterable, Union
 from filterpy.kalman import UnscentedKalmanFilter, MerweScaledSigmaPoints
 from filterpy.common import Q_discrete_white_noise
 import numpy as np
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     travel_plan = TravelPlan(
         [np.array([1., 1.]), np.array([5.6, 1.])],
         [np.array([5.6, 3.]), 30, np.array([5.6, 1.]), 30],
-        360
+        1800
     )
     plan = travel_plan.to_test_plan()
     # plot_val(plan, 1)
@@ -323,8 +323,8 @@ if __name__ == "__main__":
         results = p.map(
             run_args,
             [
-                (plan, gen_ukf, 0.001, 0.001, "0.001 z_std")
-            ] * 40
+                (plan, gen_ukf, 0.0001, 0.0001, "0.001 z_std")
+            ] * 20
         )
     sim_time = time.time() - start_time
     results_sorted = {}

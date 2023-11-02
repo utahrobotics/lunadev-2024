@@ -2,7 +2,7 @@ extends Node
 
 
 const RECV_FROM := 43721
-const USE_ARCHIMEDES := false
+const USE_ARCHIMEDES := true
 
 enum Channels { IMPORTANT, CAMERA, ODOMETRY, CONTROLS, MAX }
 enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA, PING }
@@ -270,6 +270,7 @@ func send_arm_controls(arm_vel: float, drum_vel:=0.0) -> void:
 		drum_vel = -1
 		push_warning("Drum velocity lesser than -1!")
 	
+	print_debug(str(arm_vel) + " " + str(drum_vel))
 	lunabot_mutex.lock()
 	controls_data.encode_s8(2, roundi(arm_vel * 127))
 	if USE_ARCHIMEDES:

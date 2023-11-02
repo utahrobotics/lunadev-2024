@@ -17,8 +17,13 @@ func _ready() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadMotion:
-		Lunabot.send_arm_controls(
+#		print(Input.get_action_strength(\"DriveForward\"))
+		Lunabot.send_steering(
 			Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\"),
+			Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")
+		)
+		Lunabot.send_arm_controls(
+			Input.get_action_strength(\"MoveArmUp\") - Input.get_action_strength(\"MoveArmDown\"),
 			Input.get_action_strength(\"SpinDrumClockwise\") - Input.get_action_strength(\"SpinDrumCounterClockwise\")
 		)
 "
