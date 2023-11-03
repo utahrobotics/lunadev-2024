@@ -1,6 +1,16 @@
-use std::{future::Future, pin::Pin, sync::Arc, time::Instant};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
+    time::Instant,
+};
 
 pub use anyhow;
+use anyhow::Context;
 pub use async_trait::async_trait;
 pub use log;
 use log::{error, info};
@@ -96,6 +106,51 @@ pub trait Node: Send + 'static {
     async fn run(self) -> anyhow::Result<()>;
 }
 
+struct RunError {
+    err: anyhow::Error,
+    name: String,
+    critical: bool,
+}
+
+pub struct Runnable {
+    critical: Arc<AtomicBool>,
+    run: Box<dyn FnOnce(&mut JoinSet<Result<(), RunError>>)>,
+}
+
+impl<N: Node> From<N> for Runnable {
+    fn from(value: N) -> Self {
+        Self::new(value)
+    }
+}
+
+impl Runnable {
+    pub fn new<N: Node>(node: N) -> Self {
+        let critical = Arc::new(AtomicBool::new(false));
+        Self {
+            critical: critical.clone(),
+            run: Box::new(move |tasks| {
+                tasks.spawn(async move {
+                    let name = node.get_name().to_owned();
+                    log::info!("Initializing {}", name);
+                    node.run().await.map_err(|err| RunError {
+                        err,
+                        name,
+                        critical: critical.load(atomic::Ordering::SeqCst),
+                    })
+                });
+            }),
+        }
+    }
+
+    pub fn make_critical(&mut self) {
+        self.critical.store(true, atomic::Ordering::SeqCst);
+    }
+
+    pub fn make_not_critical(&mut self) {
+        self.critical.store(false, atomic::Ordering::SeqCst);
+    }
+}
+
 pub struct Signal<T: Clone> {
     async_fns: Vec<Box<dyn Fn(T) -> Box<dyn Future<Output = ()> + Send + Unpin> + Send + Sync>>,
     fns: Vec<Box<dyn Fn(T) + Send + Sync>>,
@@ -162,48 +217,56 @@ assert_impl_all!(Signal<()>: Send, Sync);
 
 #[derive(Deserialize, Default)]
 pub struct RunOptions {
-    pub log_file: Option<String>,
+    #[serde(default)]
+    pub runtime_name: String,
 }
+
+const LOGS_DIR: &str = "logs";
 
 #[tokio::main]
 pub async fn run_all(
-    runnables: impl IntoIterator<Item = impl Node>,
-    run_options: RunOptions,
+    runnables: impl IntoIterator<Item = Runnable>,
+    mut run_options: RunOptions,
 ) -> anyhow::Result<()> {
+    if !AsRef::<Path>::as_ref(LOGS_DIR)
+        .try_exists()
+        .context("Failed to check if logging directory exists. Do we have permissions?")?
+    {
+        std::fs::DirBuilder::new()
+            .create(LOGS_DIR)
+            .context("Failed to create logging directory. Do we have permissions?")?;
+    }
+    if !run_options.runtime_name.is_empty() {
+        run_options.runtime_name += "_";
+    }
+    let log_file_name = format!(
+        "{}{}.log",
+        run_options.runtime_name,
+        humantime::format_rfc3339(std::time::SystemTime::now())
+    );
     let start_time = Instant::now();
+
     fern::Dispatch::new()
+        .format(move |out, message, record| {
+            let secs = start_time.elapsed().as_secs_f32();
+            out.finish(format_args!(
+                "[{:0>1}:{:.2} {} {}] {}",
+                (secs / 60.0).floor(),
+                secs % 60.0,
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
         // Add blanket level filter -
         .level(log::LevelFilter::Debug)
         // Output to stdout, files, and other Dispatch configurations
         .chain(
             fern::Dispatch::new()
-                .format(|out, message, record| {
-                    out.finish(format_args!(
-                        "[{} {} {}] {}",
-                        humantime::format_rfc3339(std::time::SystemTime::now()),
-                        record.level(),
-                        record.target(),
-                        message
-                    ))
-                })
-                .chain(
-                    run_options
-                        .log_file
-                        .map(|x| fern::log_file(x))
-                        .unwrap_or(fern::log_file("logs.txt"))?,
-                ),
+                .chain(fern::log_file(PathBuf::from(LOGS_DIR).join(log_file_name))?),
         )
         .chain(
             fern::Dispatch::new()
-                .format(move |out, message, record| {
-                    out.finish(format_args!(
-                        "[{:.2} {} {}] {}",
-                        start_time.elapsed().as_secs_f32(),
-                        record.level(),
-                        record.target(),
-                        message
-                    ))
-                })
                 .level(log::LevelFilter::Info)
                 .chain(std::io::stdout()),
         )
@@ -212,11 +275,7 @@ pub async fn run_all(
 
     let mut tasks = JoinSet::new();
     for runnable in runnables {
-        tasks.spawn(async move {
-            log::info!("Initializing {}", runnable.get_name());
-            let name = runnable.get_name().to_owned();
-            runnable.run().await.map_err(|e| (e, name))
-        });
+        (runnable.run)(&mut tasks);
     }
 
     let mut ctrl_c_failed = false;
@@ -233,8 +292,14 @@ pub async fn run_all(
                     info!("All Nodes terminated. Exiting...");
                     break;
                 };
-                if let Err((e, name)) = result? {
-                    error!("{name} has faced the following error: {e}");
+                if let Err(RunError { err, name, critical }) = result? {
+                    let mut err_string = format!("{err:?}");
+                    err_string = err_string.replace('\n', "\n\t");
+                    error!("{name} has faced the following error:\n\t{err_string}");
+                    if critical {
+                        error!("Critical node has terminated! Exiting...");
+                        break;
+                    }
                 }
             }
             result = ctrl_c_fut => {

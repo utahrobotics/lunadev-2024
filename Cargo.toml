@@ -7,7 +7,8 @@ members = [
     "drive",
     "camera",
     "apriltag",
-    "realsense"
+    "realsense",
+    "positioning"
 ]
 
 [workspace.dependencies]

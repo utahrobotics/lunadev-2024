@@ -11,5 +11,5 @@ fn main() -> anyhow::Result<()> {
     let run_options = RunOptions {
         ..Default::default()
     };
-    run_all([telemetry], run_options)
+    run_all([telemetry.into()], run_options)
 }

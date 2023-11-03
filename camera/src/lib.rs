@@ -68,7 +68,8 @@ impl Node for Camera {
         let res_y = self.res_y;
 
         tokio_rayon::spawn(move || {
-            let mut camera = nokhwa::Camera::new(index, requested)?;
+            let mut camera =
+                nokhwa::Camera::new(index, requested).context("Failed to initialize camera")?;
             loop {
                 let frame = camera.frame()?;
                 let decoded = frame.decode_image::<RgbFormat>().unwrap();

@@ -17,5 +17,5 @@ fn main() -> anyhow::Result<()> {
     let run_options = RunOptions {
         ..Default::default()
     };
-    run_all([camera], run_options)
+    run_all([camera.into()], run_options)
 }

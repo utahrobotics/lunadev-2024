@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 realsense-rust = "1.2"
+unros-core = { path = "../unros-core" }
+image = { workspace = true }
