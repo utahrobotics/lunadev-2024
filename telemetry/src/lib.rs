@@ -3,7 +3,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    }, time::Duration,
+    },
 };
 
 use crossbeam::queue::SegQueue;
@@ -14,7 +14,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use unros_core::{
     anyhow, async_trait,
-    log::{warn, error},
+    log::error,
     node_error, node_info, node_warn,
     tokio::runtime::Handle,
     tokio_rayon::{self},
