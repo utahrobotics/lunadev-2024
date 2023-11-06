@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-realsense-rust = "1.2"
+realsense-rust = { version = "1.2", features = ["buildtime-bindgen"] }
 unros-core = { path = "../unros-core" }
 image = { workspace = true }

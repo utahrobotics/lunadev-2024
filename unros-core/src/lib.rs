@@ -13,7 +13,7 @@ pub use anyhow;
 use anyhow::Context;
 pub use async_trait::async_trait;
 pub use log;
-use log::{error, info};
+use log::{error, info, warn};
 use serde::Deserialize;
 use static_assertions::assert_impl_all;
 pub use tokio;
@@ -276,6 +276,10 @@ pub async fn run_all(
     let mut tasks = JoinSet::new();
     for runnable in runnables {
         (runnable.run)(&mut tasks);
+    }
+    if tasks.is_empty() {
+        warn!("No nodes to run. Exiting...");
+        return Ok(())
     }
 
     let mut ctrl_c_failed = false;

@@ -1,13 +1,33 @@
-use std::{sync::{Arc, Mutex}, ops::Deref};
+use std::{sync::{Arc, Mutex}, ops::Deref, collections::HashSet, path::Path};
 
-use realsense_rust::{device::Device, context::Context, pipeline::InactivePipeline, kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind}, config::Config, frame::{DepthFrame, GyroFrame, ColorFrame}};
-use unros_core::{Node, async_trait, anyhow, node_warn, tokio_rayon, Signal};
+use image::{DynamicImage, ImageBuffer, Rgb};
+use realsense_rust::{device::Device, context::Context, pipeline::InactivePipeline, kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind, Rs2ProductLine}, config::Config, frame::{GyroFrame, ColorFrame}};
+use unros_core::{Node, async_trait, anyhow, node_warn, tokio_rayon, Signal, tokio::runtime::Handle};
 
 pub struct RealSenseCamera {
     name: String,
     device: Device,
     context: Arc<Mutex<Context>>,
-    image_received: Signal<DynamicImage>
+    image_received: Signal<Arc<DynamicImage>>
+}
+
+
+impl RealSenseCamera {
+    pub fn open(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let mut context = Context::new()?;
+        let device = context.add_device(path)?;
+        Ok(
+            Self {
+                name: "realsense".into(),
+                device,
+                context: Arc::new(Mutex::new(context)),
+                image_received: Default::default()
+            }
+        )
+    }
+    pub fn image_received_signal(&mut self) -> &mut Signal<Arc<DynamicImage>> {
+        &mut self.image_received
+    }
 }
 
 
@@ -43,8 +63,10 @@ impl Node for RealSenseCamera {
 
         // Change pipeline's type from InactivePipeline -> ActivePipeline
         let mut pipeline = pipeline.start(Some(config))?;
+        let handle = Handle::current();
 
         tokio_rayon::spawn(move || {
+            let image_received = Arc::new(self.image_received);
             loop {
                 let frames = pipeline.wait(None)?;
 
@@ -60,24 +82,47 @@ impl Node for RealSenseCamera {
                 // }
 
                 // Get color
-                let mut color_frames = frames.frames_of_type::<ColorFrame>();
-                if !color_frames.is_empty() {
-                    let depth_frame = depth_frames.pop().unwrap();
-                    let tmp_distance =
-                        depth_frame.distance(depth_frame.width() / 2, depth_frame.height() / 2)?;
-                    if tmp_distance != 0.0 {
-                        distance = tmp_distance;
+                for frame in frames.frames_of_type::<ColorFrame>() {
+                    unsafe {
+                        let image_size = frame.width() * frame.height() * 3;
+                        let ptr: *const _ = frame.get_data();
+                        let ptr: *const u8 = ptr.cast();
+                        let buf = std::slice::from_raw_parts(ptr, image_size).to_vec();
+                        let img = ImageBuffer::<Rgb<u8>, _>::from_raw(frame.width() as u32, frame.height() as u32, buf).ok_or_else(|| anyhow::anyhow!("Failed to convert RealSense color frame into image"))?;
+                        let img = DynamicImage::from(img);
+
+                        let image_received = image_received.clone();
+                        handle.spawn(async move {
+                            image_received.emit(Arc::new(img)).await;
+                        });
                     }
                 }
 
                 // Get gyro
                 let motion_frames = frames.frames_of_type::<GyroFrame>();
-                if !motion_frames.is_empty() {
-                    motion = *motion_frames[0].rotational_velocity();
-                }
-
+                
             }
         }).await
 
     }
+}
+
+
+pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSenseCamera>> {
+    let context = Context::new()?;
+    let devices = context.query_devices(HashSet::new());
+    let context = Arc::new(Mutex::new(context));
+
+    Ok(
+        devices
+            .into_iter()
+            .map(move |device| {
+                RealSenseCamera {
+                    device,
+                    context: context.clone(),
+                    name: "realsense".into(),
+                    image_received: Default::default()
+                }
+            })
+    )
 }
