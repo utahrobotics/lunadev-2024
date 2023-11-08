@@ -1,35 +1,89 @@
-use std::{borrow::Cow, collections::VecDeque, future::Future, pin::Pin, sync::{Arc, mpsc::{Sender, Receiver, channel}}};
+use std::{
+    collections::VecDeque,
+    future::Future,
+    pin::Pin,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc,
+    },
+    time::Duration, ops::Deref,
+};
 
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros_core::{
-    anyhow, async_trait,
+    anyhow, async_trait, node_error, rayon,
     tokio::{
         self,
-        sync::{mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender}, Mutex}, runtime::Handle,
+        runtime::Handle,
+        sync::{
+            mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+            Mutex,
+        },
     },
-    Node, OwnedSignal, Signal, rayon,
+    Node, OwnedSignal, Signal, node_info, log::info,
 };
 
 pub struct SerialConnection {
     name: String,
-    stream: SerialStream,
+    path: Arc<str>,
+    baud_rate: u32,
+    stream: Option<SerialStream>,
     msg_received: OwnedSignal<Arc<[u8]>>,
     msg_to_send_sender: UnboundedSender<Arc<[u8]>>,
     msg_to_send_receiver: UnboundedReceiver<Arc<[u8]>>,
+    tolerate_error: bool,
 }
 
 impl SerialConnection {
-    pub fn new<'a>(path: impl Into<Cow<'a, str>>, baud_rate: u32) -> tokio_serial::Result<Self> {
-        let mut stream = tokio_serial::new(path, baud_rate).open_native_async()?;
-        stream.set_exclusive(true)?;
+    pub async fn new<'a>(
+        path: String,
+        baud_rate: u32,
+        tolerate_error: bool,
+    ) -> anyhow::Result<Self> {
         let (msg_to_send_sender, msg_to_send_receiver) = unbounded_channel();
-        Ok(Self {
+
+        let mut out = Self {
             name: "serial_connection".into(),
-            stream,
+            path: path.into_boxed_str().into(),
+            stream: None,
+            baud_rate,
             msg_received: Default::default(),
             msg_to_send_sender,
             msg_to_send_receiver,
-        })
+            tolerate_error,
+        };
+
+        out.connect().await?;
+
+        Ok(out)
+    }
+
+    async fn connect(&mut self) -> anyhow::Result<()> {
+        let path = self.path.clone();
+        let baud_rate = self.baud_rate;
+        let result: tokio_serial::Result<_> = (|| {
+            let mut stream = tokio_serial::new(path.deref(), baud_rate).open_native_async()?;
+            stream.set_exclusive(true)?;
+            Ok(stream)
+        })();
+
+        let stream = if self.tolerate_error {
+            match result {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    node_error!(self, "Failed to connect to: {}: {e}", self.path);
+                    None
+                }
+            }
+        } else {
+            Some(result?)
+        };
+        
+        if stream.is_some() {
+            node_info!(self, "Succesfully connected to: {}", self.path);
+        }
+        self.stream = stream;
+        Ok(())
     }
 
     pub fn get_msg_received_signal(&mut self) -> &mut OwnedSignal<Arc<[u8]>> {
@@ -49,59 +103,85 @@ impl Node for SerialConnection {
     fn set_name(&mut self, name: String) {
         self.name = name;
     }
+
     fn get_name(&self) -> &str {
         &self.name
     }
+
     async fn run(mut self) -> anyhow::Result<()> {
         let mut buf = Vec::with_capacity(1024);
         let mut send_buf = VecDeque::with_capacity(1024);
 
-        loop {
+        'main: loop {
+            let Some(stream) = self.stream.as_mut() else {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                self.connect().await?;
+                continue;
+            };
+
             let write_fut: Pin<Box<dyn Future<Output = std::io::Result<()>> + Send>> =
                 if send_buf.is_empty() {
                     Box::pin(std::future::pending())
                 } else {
-                    Box::pin(self.stream.writable())
+                    Box::pin(stream.writable())
                 };
-            tokio::select! {
-                result = self.stream.readable() => {
-                    result?;
-                    let max_buf_size = self.stream.bytes_to_read()? as usize;
-                    if max_buf_size > buf.len() {
-                        buf.resize(max_buf_size, 0);
-                    }
-                    let n = match self.stream.try_read(&mut buf) {
-                        Ok(n) => n,
-                        Err(e) => if e.kind() == std::io::ErrorKind::WouldBlock {
-                            continue;
-                        } else {
-                            return Err(e.into());
-                        }
-                    };
-                    let bytes = buf.split_at(n).0.to_vec();
-                    self.msg_received.emit(bytes.into_boxed_slice().into()).await;
 
+            info!("b");
+            let result: anyhow::Result<()> = 'outer: {
+                tokio::select! {
+                    result = stream.readable() => {
+                        info!("READABLE");
+                        result?;
+                        let max_buf_size = stream.bytes_to_read()? as usize;
+                        if max_buf_size > buf.len() {
+                            buf.resize(max_buf_size, 0);
+                        }
+                        let n = match stream.try_read(&mut buf) {
+                            Ok(n) => n,
+                            Err(e) => if e.kind() == std::io::ErrorKind::WouldBlock {
+                                continue 'main;
+                            } else {
+                                break 'outer Err(e.into());
+                            }
+                        };
+                        let bytes = buf.split_at(n).0.to_vec();
+                        self.msg_received.emit(bytes.into_boxed_slice().into()).await;
+
+                    }
+                    msg = self.msg_to_send_receiver.recv() => {
+                        info!("c");
+                        let msg = msg.unwrap();
+                        send_buf.extend(msg.into_iter());
+                    }
+                    result = write_fut => {
+                        info!("d");
+                        result?;
+                        let n = stream.try_write(send_buf.make_contiguous())?;
+                        send_buf.drain(0..n);
+                    }
                 }
-                msg = self.msg_to_send_receiver.recv() => {
-                    let msg = msg.unwrap();
-                    send_buf.extend(msg.into_iter());
-                }
-                result = write_fut => {
-                    result?;
-                    let n = self.stream.try_write(send_buf.make_contiguous())?;
-                    send_buf.drain(0..n);
+                Ok(())
+            };
+
+            if let Err(e) = result {
+                if self.tolerate_error {
+                    node_error!(
+                        self,
+                        "Encountered the following error while communicating with: {}: {e}",
+                        self.path
+                    );
+                } else {
+                    break Err(e);
                 }
             }
         }
     }
 }
 
-
 struct VescReader {
     recv: std::sync::mpsc::Receiver<Arc<[u8]>>,
-    buffer: VecDeque<u8>
+    buffer: VecDeque<u8>,
 }
-
 
 impl embedded_hal::serial::Read<u8> for VescReader {
     type Error = ();
@@ -114,13 +194,11 @@ impl embedded_hal::serial::Read<u8> for VescReader {
     }
 }
 
-
 struct VescWriter {
     signal: Arc<Mutex<OwnedSignal<Arc<[u8]>>>>,
     buffer: Vec<u8>,
-    handle: Handle
+    handle: Handle,
 }
-
 
 impl embedded_hal::serial::Write<u8> for VescWriter {
     type Error = ();
@@ -140,7 +218,6 @@ impl embedded_hal::serial::Write<u8> for VescWriter {
     }
 }
 
-
 impl Signal<Arc<[u8]>> for VescWriter {
     fn connect_to(&mut self, receiver: impl Fn(Arc<[u8]>) + Send + Sync + 'static) {
         self.signal.blocking_lock().connect_to(receiver);
@@ -148,14 +225,18 @@ impl Signal<Arc<[u8]>> for VescWriter {
 
     fn connect_to_async<F>(&mut self, receiver: impl Fn(Arc<[u8]>) -> F + Send + Sync + 'static)
     where
-        F: Future<Output = ()> + Send + Unpin + 'static {
+        F: Future<Output = ()> + Send + Unpin + 'static,
+    {
         self.signal.blocking_lock().connect_to_async(receiver);
     }
 
     fn connect_to_non_blocking(&mut self, receiver: impl Fn(Arc<[u8]>) + Send + Sync + 'static)
     where
-        Arc<[u8]>: Send + 'static {
-        self.signal.blocking_lock().connect_to_non_blocking(receiver);
+        Arc<[u8]>: Send + 'static,
+    {
+        self.signal
+            .blocking_lock()
+            .connect_to_non_blocking(receiver);
     }
 
     fn connect_to_async_non_blocking<F>(
@@ -163,24 +244,24 @@ impl Signal<Arc<[u8]>> for VescWriter {
         receiver: impl Fn(Arc<[u8]>) -> F + Send + Sync + 'static,
     ) where
         F: Future<Output = ()> + Send + Unpin + 'static,
-        Arc<[u8]>: Send + 'static {
-        self.signal.blocking_lock().connect_to_async_non_blocking(receiver);
+        Arc<[u8]>: Send + 'static,
+    {
+        self.signal
+            .blocking_lock()
+            .connect_to_async_non_blocking(receiver);
     }
 }
 
-
 enum VescMessage {
     Current(u32),
-    Duty(u32)
+    Duty(u32),
 }
-
 
 pub struct VescConnection {
     serial: SerialConnection,
     vesc_msg_sender: Sender<VescMessage>,
-    vesc_msg_recv: Receiver<VescMessage>
+    vesc_msg_recv: Receiver<VescMessage>,
 }
-
 
 impl VescConnection {
     pub fn new(serial: SerialConnection) -> Self {
@@ -194,15 +275,18 @@ impl VescConnection {
 
     pub fn connect_current_from(&self, signal: &mut impl Signal<u32>) {
         let vesc_msg_sender = self.vesc_msg_sender.clone();
-        signal.connect_to(move |x| { let _ = vesc_msg_sender.send(VescMessage::Current(x)); })
+        signal.connect_to(move |x| {
+            let _ = vesc_msg_sender.send(VescMessage::Current(x));
+        })
     }
 
     pub fn connect_duty_from(&self, signal: &mut impl Signal<u32>) {
         let vesc_msg_sender = self.vesc_msg_sender.clone();
-        signal.connect_to(move |x| { let _ = vesc_msg_sender.send(VescMessage::Duty(x)); })
+        signal.connect_to(move |x| {
+            let _ = vesc_msg_sender.send(VescMessage::Duty(x));
+        })
     }
 }
-
 
 #[async_trait]
 impl Node for VescConnection {
@@ -213,20 +297,29 @@ impl Node for VescConnection {
         self.serial.get_name()
     }
     async fn run(mut self) -> anyhow::Result<()> {
-        let mut vesc_writer = VescWriter { signal: Default::default(), buffer: Default::default(), handle: Handle::current() };
+        let mut vesc_writer = VescWriter {
+            signal: Default::default(),
+            buffer: Default::default(),
+            handle: Handle::current(),
+        };
         self.serial.connect_from(&mut vesc_writer);
         let (send, recv) = std::sync::mpsc::channel();
-        let vesc_reader = VescReader { recv, buffer: Default::default() };
-        self.serial.get_msg_received_signal().connect_to(move |x| { let _ = send.send(x); });
+        let vesc_reader = VescReader {
+            recv,
+            buffer: Default::default(),
+        };
+        self.serial.get_msg_received_signal().connect_to(move |x| {
+            let _ = send.send(x);
+        });
         let mut vesc = vesc_comm::VescConnection::new(vesc_reader, vesc_writer);
 
-        rayon::spawn(move || {
-            loop {
-                let Ok(msg) = self.vesc_msg_recv.recv() else { break; };
-                match msg {
-                    VescMessage::Current(n) => vesc.set_current(n).unwrap(),
-                    VescMessage::Duty(n) => vesc.set_duty(n).unwrap(),
-                }
+        rayon::spawn(move || loop {
+            let Ok(msg) = self.vesc_msg_recv.recv() else {
+                break;
+            };
+            match msg {
+                VescMessage::Current(n) => vesc.set_current(n).unwrap(),
+                VescMessage::Duty(n) => vesc.set_duty(n).unwrap(),
             }
         });
 

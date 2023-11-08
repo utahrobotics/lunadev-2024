@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "tracing", "parking_lot", "signal", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "tracing", "parking_lot", "signal", "io-util", "time"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 console-subscriber = { version = "0.2", features = ["parking_lot"]}

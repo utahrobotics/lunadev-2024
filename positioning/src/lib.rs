@@ -5,9 +5,9 @@ use unros_core::{
     anyhow, async_trait, node_warn,
     tokio::{
         self,
-        sync::mpsc::{Receiver, Sender, channel},
+        sync::mpsc::{channel, Receiver, Sender},
     },
-    Node, PublicValue, Signal, OwnedWatchedPublicValue,
+    Node, OwnedWatchedPublicValue, PublicValue, Signal,
 };
 
 pub struct PositionFrame {

@@ -4,7 +4,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{self, AtomicBool},
-        Arc,
+        Arc, Once,
     },
     time::Instant,
 };
@@ -82,25 +82,34 @@ pub trait Node: Send + 'static {
     async fn run(self) -> anyhow::Result<()>;
 }
 
-
-pub struct FnNode<Fut, F> where Fut: Future<Output=anyhow::Result<()>> + Send + 'static, F: FnOnce() -> Fut + Send + 'static {
+pub struct FnNode<Fut, F>
+where
+    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+{
     name: String,
-    f: F
+    f: F,
 }
 
-
-impl<Fut, F> FnNode<Fut, F> where Fut: Future<Output=anyhow::Result<()>> + Send + 'static, F: FnOnce() -> Fut + Send + 'static {
+impl<Fut, F> FnNode<Fut, F>
+where
+    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+{
     pub fn new(f: F) -> Self {
         Self {
             name: "fn_node".into(),
-            f
+            f,
         }
     }
 }
 
-
 #[async_trait]
-impl<Fut, F> Node for FnNode<Fut, F> where Fut: Future<Output=anyhow::Result<()>> + Send + 'static, F: FnOnce() -> Fut + Send + 'static {
+impl<Fut, F> Node for FnNode<Fut, F>
+where
+    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
+{
     fn set_name(&mut self, name: String) {
         self.name = name;
     }
@@ -113,7 +122,6 @@ impl<Fut, F> Node for FnNode<Fut, F> where Fut: Future<Output=anyhow::Result<()>
         (self.f)().await
     }
 }
-
 
 struct RunError {
     err: anyhow::Error,
@@ -353,13 +361,11 @@ impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> Sig
 
 pub struct PublicValue<T: Clone + Send + Sync>(Arc<watch::Sender<T>>);
 
-
 impl<T: Clone + Send + Sync + Default> Default for PublicValue<T> {
     fn default() -> Self {
         Self::new(Default::default())
     }
 }
-
 
 impl<T: Clone + Send + Sync> PublicValue<T> {
     pub fn new(value: T) -> Self {
@@ -406,11 +412,9 @@ impl<T: Clone + Send + Sync> WatchedPublicValue<T> for OwnedWatchedPublicValue<T
     }
 }
 
-
 // pub struct ByteSignal {
 //     stream: DuplexStream
 // }
-
 
 // impl Signal<Arc<[u8]>> for ByteSignal {
 //     fn connect_to(&mut self, receiver: impl Fn(Arc<[u8]>) + Send + Sync + 'static) {
@@ -439,7 +443,6 @@ impl<T: Clone + Send + Sync> WatchedPublicValue<T> for OwnedWatchedPublicValue<T
 //     }
 // }
 
-
 #[derive(Deserialize, Default)]
 pub struct RunOptions {
     #[serde(default)]
@@ -447,12 +450,15 @@ pub struct RunOptions {
 }
 
 const LOGS_DIR: &str = "logs";
+static LOGGER_INITED: Once = Once::new();
 
-#[tokio::main]
-pub async fn run_all(
-    runnables: impl IntoIterator<Item = Runnable>,
-    mut run_options: RunOptions,
-) -> anyhow::Result<()> {
+
+pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
+    if LOGGER_INITED.is_completed() {
+        return Ok(())
+    }
+    LOGGER_INITED.call_once(|| { });
+    
     if !AsRef::<Path>::as_ref(LOGS_DIR)
         .try_exists()
         .context("Failed to check if logging directory exists. Do we have permissions?")?
@@ -461,17 +467,18 @@ pub async fn run_all(
             .create(LOGS_DIR)
             .context("Failed to create logging directory. Do we have permissions?")?;
     }
-    if !run_options.runtime_name.is_empty() {
-        run_options.runtime_name += "_";
+    let mut runtime_name = run_options.runtime_name.clone();
+    if !runtime_name.is_empty() {
+        runtime_name += "_";
     }
     let log_file_name = format!(
         "{}{}.log",
-        run_options.runtime_name,
+        runtime_name,
         humantime::format_rfc3339(std::time::SystemTime::now())
     );
     let start_time = Instant::now();
 
-    fern::Dispatch::new()
+    let _ = fern::Dispatch::new()
         .format(move |out, message, record| {
             let secs = start_time.elapsed().as_secs_f32();
             out.finish(format_args!(
@@ -496,7 +503,25 @@ pub async fn run_all(
                 .chain(std::io::stdout()),
         )
         // Apply globally
-        .apply()?;
+        .apply();
+    Ok(())
+}
+
+
+#[tokio::main]
+pub async fn run_all(
+    runnables: impl IntoIterator<Item = Runnable>,
+    run_options: RunOptions,
+) -> anyhow::Result<()> {
+    async_run_all(runnables, run_options).await
+}
+
+
+pub async fn async_run_all(
+    runnables: impl IntoIterator<Item = Runnable>,
+    run_options: RunOptions,
+) -> anyhow::Result<()> {
+    init_logger(&run_options)?;
 
     let mut tasks = JoinSet::new();
     for runnable in runnables {
