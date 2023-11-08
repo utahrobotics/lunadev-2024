@@ -17,7 +17,7 @@ use log::{error, info, warn};
 use serde::Deserialize;
 use static_assertions::assert_impl_all;
 pub use tokio;
-use tokio::{sync::watch, task::JoinSet};
+use tokio::{sync::watch, task::JoinSet, io::DuplexStream};
 pub use tokio_rayon::{self, rayon};
 
 // pub trait Variadic {
@@ -398,6 +398,40 @@ impl<T: Clone + Send + Sync> WatchedPublicValue<T> for OwnedWatchedPublicValue<T
         self.recv.borrow_and_update().clone()
     }
 }
+
+
+// pub struct ByteSignal {
+//     stream: DuplexStream
+// }
+
+
+// impl Signal<Arc<[u8]>> for ByteSignal {
+//     fn connect_to(&mut self, receiver: impl Fn(Arc<[u8]>) + Send + Sync + 'static) {
+//         self.stream.read
+//     }
+
+//     fn connect_to_async<F>(&mut self, receiver: impl Fn(Arc<[u8]>) -> F + Send + Sync + 'static)
+//     where
+//         F: Future<Output = ()> + Send + Unpin + 'static {
+//         todo!()
+//     }
+
+//     fn connect_to_non_blocking(&mut self, receiver: impl Fn(Arc<[u8]>) + Send + Sync + 'static)
+//     where
+//         Arc<[u8]>: Send + 'static {
+//         todo!()
+//     }
+
+//     fn connect_to_async_non_blocking<F>(
+//         &mut self,
+//         receiver: impl Fn(Arc<[u8]>) -> F + Send + Sync + 'static,
+//     ) where
+//         F: Future<Output = ()> + Send + Unpin + 'static,
+//         Arc<[u8]>: Send + 'static {
+//         todo!()
+//     }
+// }
+
 
 #[derive(Deserialize, Default)]
 pub struct RunOptions {

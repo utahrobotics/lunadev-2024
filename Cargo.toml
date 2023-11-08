@@ -3,7 +3,7 @@ members = [
     "unros-core",
     "telemetry",
     "global-msgs",
-    "archimedes",
+    "lunabot",
     "drive",
     "camera",
     "apriltag",
@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "tracing", "parking_lot", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "tracing", "parking_lot", "signal", "io-util"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 console-subscriber = { version = "0.2", features = ["parking_lot"]}
