@@ -1,7 +1,7 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use telemetry::Telemetry;
-use unros_core::{anyhow, log::info, run_all, RunOptions};
+use unros_core::{anyhow, log::info, run_all, RunOptions, Signal};
 
 fn main() -> anyhow::Result<()> {
     let mut telemetry = Telemetry::new(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 43721));
