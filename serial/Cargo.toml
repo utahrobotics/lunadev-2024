@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 tokio-serial = "5"
+unros-core = { path = "../unros-core" }
