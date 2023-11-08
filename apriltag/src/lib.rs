@@ -2,7 +2,7 @@ use std::sync::{mpsc, Arc};
 
 use apriltag::{families::Tag16h5, DetectorBuilder, Image};
 use apriltag_image::{
-    image::{ImageBuffer, Luma, DynamicImage},
+    image::{DynamicImage, ImageBuffer, Luma},
     ImageExt,
 };
 use unros_core::{
@@ -23,7 +23,6 @@ pub struct AprilTagDetector {
     tag_detected: Option<OwnedSignal<DetectedAprilTag>>,
 }
 
-
 impl AprilTagDetector {
     pub fn new() -> Self {
         let (image_sender, image_receiver) = mpsc::sync_channel(10);
@@ -31,7 +30,7 @@ impl AprilTagDetector {
             name: "apriltag".into(),
             image_sender,
             image_receiver,
-            tag_detected: Some(OwnedSignal::default())
+            tag_detected: Some(OwnedSignal::default()),
         }
     }
 
@@ -42,7 +41,6 @@ impl AprilTagDetector {
         });
     }
 }
-
 
 #[async_trait]
 impl Node for AprilTagDetector {

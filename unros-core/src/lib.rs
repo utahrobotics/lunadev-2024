@@ -17,7 +17,7 @@ use log::{error, info, warn};
 use serde::Deserialize;
 use static_assertions::assert_impl_all;
 pub use tokio;
-use tokio::task::JoinSet;
+use tokio::{sync::watch, task::JoinSet};
 pub use tokio_rayon::{self, rayon};
 
 // pub trait Variadic {
@@ -151,7 +151,6 @@ impl Runnable {
     }
 }
 
-
 // #[async_trait]
 pub trait Signal<T> {
     // async fn emit(&self, msg: T);
@@ -172,6 +171,9 @@ pub trait Signal<T> {
     ) where
         F: Future<Output = ()> + Send + Unpin + 'static,
         T: Send + 'static;
+
+    // fn map<V: Clone + Send + Sync + 'static>(&mut self, f: impl Fn(T) -> V + Send + Sync) -> MappedSignal<V, T>
+    // where T: Clone + Send + Sync + 'static;
 }
 
 pub struct OwnedSignal<T: Clone + Send + Sync> {
@@ -237,18 +239,68 @@ impl<T: Clone + Send + Sync> Signal<T> for OwnedSignal<T> {
             });
         }));
     }
+
+    // fn map<V: Clone + Send + Sync + 'static>(&mut self, f: impl Fn(T) -> V + Send + Sync) -> MappedSignal<V, T>
+    // where T: Clone + Send + Sync + 'static {
+    //     let mapper: Box<dyn Fn(T) -> V + Send + Sync> = Box::new(f);
+    //     MappedSignal { signal: SignalVariant::Owned(self), mapper: mapper.into() }
+    // }
 }
 
 assert_impl_all!(OwnedSignal<()>: Send, Sync);
 
+// enum SignalVariant<'a, T: Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static=()> {
+//     Owned(&'a mut OwnedSignal<T>),
+//     Mapped(&'a mut MappedSignal<'a, T, V>)
+// }
 
-pub struct MappedSignal<'a, V: Clone + Send + Sync, T: Clone + Send + Sync> {
+// impl<'a, T: Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static> Signal<T> for SignalVariant<'a, T, V> {
+//     fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static) {
+//         match self {
+//             Self::Owned(x) => x.connect_to(receiver),
+//             Self::Mapped(x) => x.connect_to(receiver),
+//         }
+//     }
+
+//     fn connect_to_async<F>(&mut self, receiver: impl Fn(T) -> F + Send + Sync + 'static)
+//     where
+//         F: Future<Output = ()> + Send + Unpin + 'static {
+//             match self {
+//                 Self::Owned(x) => x.connect_to_async(receiver),
+//                 Self::Mapped(x) => x.connect_to_async(receiver),
+//             }
+//     }
+
+//     fn connect_to_non_blocking(&mut self, receiver: impl Fn(T) + Send + Sync + 'static)
+//     where
+//         T: Send + 'static {
+//             match self {
+//                 Self::Owned(x) => x.connect_to_non_blocking(receiver),
+//                 Self::Mapped(x) => x.connect_to_non_blocking(receiver),
+//             }
+//     }
+
+//     fn connect_to_async_non_blocking<F>(
+//         &mut self,
+//         receiver: impl Fn(T) -> F + Send + Sync + 'static,
+//     ) where
+//         F: Future<Output = ()> + Send + Unpin + 'static,
+//         T: Send + 'static {
+//             match self {
+//                 Self::Owned(x) => x.connect_to_async_non_blocking(receiver),
+//                 Self::Mapped(x) => x.connect_to_async_non_blocking(receiver),
+//             }
+//     }
+// }
+
+pub struct MappedSignal<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> {
     signal: &'a mut OwnedSignal<T>,
-    mapper: Arc<dyn Fn(T) -> V + Send + Sync>
+    mapper: Arc<dyn Fn(T) -> V + Send + Sync>,
 }
 
-
-impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> Signal<V> for MappedSignal<'a, V, T> {
+impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> Signal<V>
+    for MappedSignal<'a, V, T>
+{
     fn connect_to(&mut self, receiver: impl Fn(V) + Send + Sync + 'static) {
         let mapper = self.mapper.clone();
         self.signal.connect_to(move |x| receiver(mapper(x)));
@@ -256,7 +308,7 @@ impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> Sig
 
     fn connect_to_async<F>(&mut self, receiver: impl Fn(V) -> F + Send + Sync + 'static)
     where
-        F: Future<Output = ()> + Send + Unpin + 'static
+        F: Future<Output = ()> + Send + Unpin + 'static,
     {
         let mapper = self.mapper.clone();
         self.signal.connect_to_async(move |x| receiver(mapper(x)));
@@ -264,10 +316,11 @@ impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> Sig
 
     fn connect_to_non_blocking(&mut self, receiver: impl Fn(V) + Send + Sync + 'static)
     where
-        V: Send + 'static
+        V: Send + 'static,
     {
         let mapper = self.mapper.clone();
-        self.signal.connect_to_non_blocking(move |x| receiver(mapper(x)));
+        self.signal
+            .connect_to_non_blocking(move |x| receiver(mapper(x)));
     }
 
     fn connect_to_async_non_blocking<F>(
@@ -275,13 +328,76 @@ impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> Sig
         receiver: impl Fn(V) -> F + Send + Sync + 'static,
     ) where
         F: Future<Output = ()> + Send + Unpin + 'static,
-        V: Send + 'static
+        V: Send + 'static,
     {
         let mapper = self.mapper.clone();
-        self.signal.connect_to_async_non_blocking(move |x| receiver(mapper(x)));
+        self.signal
+            .connect_to_async_non_blocking(move |x| receiver(mapper(x)));
     }
 }
 
+// impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> MappedSignal<'a, V, T> {
+//     pub fn map<X: Clone + Send + Sync + 'static>(&mut self, f: impl Fn(V) -> X + Send + Sync) -> MappedSignal<X, V>
+//     where V: Clone + Send + Sync + 'static {
+//         let mapper: Box<dyn Fn(V) -> X + Send + Sync> = Box::new(f);
+//         MappedSignal { signal: SignalVariant::Mapped(self), mapper: mapper.into() }
+//     }
+// }
+
+pub struct PublicValue<T: Clone + Send + Sync>(Arc<watch::Sender<T>>);
+
+
+impl<T: Clone + Send + Sync + Default> Default for PublicValue<T> {
+    fn default() -> Self {
+        Self::new(Default::default())
+    }
+}
+
+
+impl<T: Clone + Send + Sync> PublicValue<T> {
+    pub fn new(value: T) -> Self {
+        Self(Arc::new(watch::channel(value).0))
+    }
+
+    pub fn watch(&self) -> OwnedWatchedPublicValue<T> {
+        OwnedWatchedPublicValue {
+            _sender: self.0.clone(),
+            recv: self.0.subscribe(),
+        }
+    }
+
+    pub fn replace(&self, value: T) -> T {
+        self.0.send_replace(value)
+    }
+
+    pub fn get(&self) -> T {
+        self.0.borrow().clone()
+    }
+}
+
+#[async_trait]
+pub trait WatchedPublicValue<T: Clone + Send + Sync> {
+    async fn wait_for_change(&mut self) -> T;
+
+    fn get(&mut self) -> T;
+}
+
+#[derive(Clone)]
+pub struct OwnedWatchedPublicValue<T: Clone + Send + Sync> {
+    _sender: Arc<watch::Sender<T>>,
+    recv: watch::Receiver<T>,
+}
+
+#[async_trait]
+impl<T: Clone + Send + Sync> WatchedPublicValue<T> for OwnedWatchedPublicValue<T> {
+    async fn wait_for_change(&mut self) -> T {
+        self.recv.wait_for(|_| true).await.unwrap().clone()
+    }
+
+    fn get(&mut self) -> T {
+        self.recv.borrow_and_update().clone()
+    }
+}
 
 #[derive(Deserialize, Default)]
 pub struct RunOptions {
@@ -347,7 +463,7 @@ pub async fn run_all(
     }
     if tasks.is_empty() {
         warn!("No nodes to run. Exiting...");
-        return Ok(())
+        return Ok(());
     }
 
     let mut ctrl_c_failed = false;

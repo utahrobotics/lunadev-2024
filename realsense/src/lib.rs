@@ -1,35 +1,45 @@
-use std::{sync::{Arc, Mutex}, ops::Deref, collections::HashSet, path::Path};
+use std::{
+    collections::HashSet,
+    ops::Deref,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use image::{DynamicImage, ImageBuffer, Rgb};
-use realsense_rust::{device::Device, context::Context, pipeline::InactivePipeline, kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind, Rs2ProductLine}, config::Config, frame::{GyroFrame, ColorFrame}};
-use unros_core::{Node, async_trait, anyhow, node_warn, tokio_rayon, OwnedSignal, tokio::runtime::Handle};
+use realsense_rust::{
+    config::Config,
+    context::Context,
+    device::Device,
+    frame::{ColorFrame, GyroFrame},
+    kind::{Rs2CameraInfo, Rs2Format, Rs2ProductLine, Rs2StreamKind},
+    pipeline::InactivePipeline,
+};
+use unros_core::{
+    anyhow, async_trait, node_warn, tokio::runtime::Handle, tokio_rayon, Node, OwnedSignal,
+};
 
 pub struct RealSenseCamera {
     name: String,
     device: Device,
     context: Arc<Mutex<Context>>,
-    image_received: OwnedSignal<Arc<DynamicImage>>
+    image_received: OwnedSignal<Arc<DynamicImage>>,
 }
-
 
 impl RealSenseCamera {
     pub fn open(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let mut context = Context::new()?;
         let device = context.add_device(path)?;
-        Ok(
-            Self {
-                name: "realsense".into(),
-                device,
-                context: Arc::new(Mutex::new(context)),
-                image_received: Default::default()
-            }
-        )
+        Ok(Self {
+            name: "realsense".into(),
+            device,
+            context: Arc::new(Mutex::new(context)),
+            image_received: Default::default(),
+        })
     }
     pub fn image_received_signal(&mut self) -> &mut OwnedSignal<Arc<DynamicImage>> {
         &mut self.image_received
     }
 }
-
 
 #[async_trait]
 impl Node for RealSenseCamera {
@@ -42,7 +52,7 @@ impl Node for RealSenseCamera {
     async fn run(self) -> anyhow::Result<()> {
         let pipeline = InactivePipeline::try_from(self.context.lock().unwrap().deref())?;
         let mut config = Config::new();
-    
+
         let usb_cstr = self.device.info(Rs2CameraInfo::UsbTypeDescriptor).unwrap();
         let usb_val: f32 = usb_cstr.to_str().unwrap().parse().unwrap();
         if usb_val >= 3.0 {
@@ -88,7 +98,14 @@ impl Node for RealSenseCamera {
                         let ptr: *const _ = frame.get_data();
                         let ptr: *const u8 = ptr.cast();
                         let buf = std::slice::from_raw_parts(ptr, image_size).to_vec();
-                        let img = ImageBuffer::<Rgb<u8>, _>::from_raw(frame.width() as u32, frame.height() as u32, buf).ok_or_else(|| anyhow::anyhow!("Failed to convert RealSense color frame into image"))?;
+                        let img = ImageBuffer::<Rgb<u8>, _>::from_raw(
+                            frame.width() as u32,
+                            frame.height() as u32,
+                            buf,
+                        )
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("Failed to convert RealSense color frame into image")
+                        })?;
                         let img = DynamicImage::from(img);
 
                         let image_received = image_received.clone();
@@ -100,29 +117,21 @@ impl Node for RealSenseCamera {
 
                 // Get gyro
                 let motion_frames = frames.frames_of_type::<GyroFrame>();
-                
             }
-        }).await
-
+        })
+        .await
     }
 }
-
 
 pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSenseCamera>> {
     let context = Context::new()?;
     let devices = context.query_devices(HashSet::new());
     let context = Arc::new(Mutex::new(context));
 
-    Ok(
-        devices
-            .into_iter()
-            .map(move |device| {
-                RealSenseCamera {
-                    device,
-                    context: context.clone(),
-                    name: "realsense".into(),
-                    image_received: Default::default()
-                }
-            })
-    )
+    Ok(devices.into_iter().map(move |device| RealSenseCamera {
+        device,
+        context: context.clone(),
+        name: "realsense".into(),
+        image_received: Default::default(),
+    }))
 }
