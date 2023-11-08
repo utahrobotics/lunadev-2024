@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 eskf = "0.2"
 unros-core = { path = "../unros-core" }
+nalgebra = "=0.25"
