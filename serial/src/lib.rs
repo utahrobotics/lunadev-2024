@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::VecDeque, future::Future, pin::Pin, sync::{Arc, mpsc::{Sender, Receiver}}};
+use std::{borrow::Cow, collections::VecDeque, future::Future, pin::Pin, sync::{Arc, mpsc::{Sender, Receiver, channel}}};
 
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros_core::{
@@ -176,13 +176,22 @@ enum VescMessage {
 
 
 pub struct VescConnection {
-    pub serial: SerialConnection,
+    serial: SerialConnection,
     vesc_msg_sender: Sender<VescMessage>,
     vesc_msg_recv: Receiver<VescMessage>
 }
 
 
 impl VescConnection {
+    pub fn new(serial: SerialConnection) -> Self {
+        let (vesc_msg_sender, vesc_msg_recv) = channel();
+        Self {
+            serial,
+            vesc_msg_sender,
+            vesc_msg_recv,
+        }
+    }
+
     pub fn connect_current_from(&self, signal: &mut impl Signal<u32>) {
         let vesc_msg_sender = self.vesc_msg_sender.clone();
         signal.connect_to(move |x| { let _ = vesc_msg_sender.send(VescMessage::Current(x)); })

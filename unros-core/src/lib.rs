@@ -17,7 +17,7 @@ use log::{error, info, warn};
 use serde::Deserialize;
 use static_assertions::assert_impl_all;
 pub use tokio;
-use tokio::{sync::watch, task::JoinSet, io::DuplexStream};
+use tokio::{sync::watch, task::JoinSet};
 pub use tokio_rayon::{self, rayon};
 
 // pub trait Variadic {
@@ -75,36 +75,45 @@ macro_rules! node_error {
     };
 }
 
-// pub struct RuntimeContext {
-//     alive_receiver: broadcast::Receiver<()>,
-// }
-
-// impl Clone for RuntimeContext {
-//     fn clone(&self) -> Self {
-//         Self { alive_receiver: self.alive_receiver.resubscribe() }
-//     }
-// }
-
-// impl RuntimeContext {
-//     pub fn is_alive(&self) -> bool {
-//         matches!( self.alive_receiver.try_recv(), Err(TryRecvError::Empty) | Err(TryRecvError::Lagged(_)) | Ok(()))
-//     }
-
-//     pub async fn wait_until_death(&mut self) {
-//         loop {
-//             if let Err(RecvError::Closed) = self.alive_receiver.recv().await {
-//                 break
-//             }
-//         }
-//     }
-// }
-
 #[async_trait]
 pub trait Node: Send + 'static {
     fn set_name(&mut self, name: String);
     fn get_name(&self) -> &str;
     async fn run(self) -> anyhow::Result<()>;
 }
+
+
+pub struct FnNode<Fut, F> where Fut: Future<Output=anyhow::Result<()>> + Send + 'static, F: FnOnce() -> Fut + Send + 'static {
+    name: String,
+    f: F
+}
+
+
+impl<Fut, F> FnNode<Fut, F> where Fut: Future<Output=anyhow::Result<()>> + Send + 'static, F: FnOnce() -> Fut + Send + 'static {
+    pub fn new(f: F) -> Self {
+        Self {
+            name: "fn_node".into(),
+            f
+        }
+    }
+}
+
+
+#[async_trait]
+impl<Fut, F> Node for FnNode<Fut, F> where Fut: Future<Output=anyhow::Result<()>> + Send + 'static, F: FnOnce() -> Fut + Send + 'static {
+    fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    async fn run(self) -> anyhow::Result<()> {
+        (self.f)().await
+    }
+}
+
 
 struct RunError {
     err: anyhow::Error,
@@ -151,7 +160,6 @@ impl Runnable {
     }
 }
 
-// #[async_trait]
 pub trait Signal<T> {
     // async fn emit(&self, msg: T);
 
@@ -199,7 +207,6 @@ impl<T: Clone + Send + Sync> OwnedSignal<T> {
     }
 }
 
-// #[async_trait]
 impl<T: Clone + Send + Sync> Signal<T> for OwnedSignal<T> {
     fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static) {
         self.fns.push(Box::new(receiver));
