@@ -18,7 +18,7 @@ use unros_core::{
     node_error, node_info, node_warn,
     tokio::runtime::Handle,
     tokio_rayon::{self},
-    Node, Signal,
+    Node, OwnedSignal, Signal,
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -43,7 +43,7 @@ pub struct Telemetry {
     name: String,
     pub bandwidth_limit: u32,
     pub server_addr: Address,
-    steering_signal: Signal<Steering>,
+    steering_signal: OwnedSignal<Steering>,
     image_queue: Arc<SegQueue<Arc<DynamicImage>>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
 }
@@ -60,14 +60,14 @@ impl Telemetry {
         }
     }
 
-    pub fn subscribe_to_image(&self, signal: &mut Signal<Arc<DynamicImage>>) {
+    pub fn subscribe_to_image(&self, signal: &mut impl Signal<Arc<DynamicImage>>) {
         let queue = self.image_queue.clone();
         signal.connect_to(move |img| {
             queue.push(img);
         });
     }
 
-    pub fn get_steering_signal(&mut self) -> &mut Signal<Steering> {
+    pub fn get_steering_signal(&mut self) -> &mut OwnedSignal<Steering> {
         &mut self.steering_signal
     }
 

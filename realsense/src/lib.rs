@@ -2,13 +2,13 @@ use std::{sync::{Arc, Mutex}, ops::Deref, collections::HashSet, path::Path};
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 use realsense_rust::{device::Device, context::Context, pipeline::InactivePipeline, kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind, Rs2ProductLine}, config::Config, frame::{GyroFrame, ColorFrame}};
-use unros_core::{Node, async_trait, anyhow, node_warn, tokio_rayon, Signal, tokio::runtime::Handle};
+use unros_core::{Node, async_trait, anyhow, node_warn, tokio_rayon, OwnedSignal, tokio::runtime::Handle};
 
 pub struct RealSenseCamera {
     name: String,
     device: Device,
     context: Arc<Mutex<Context>>,
-    image_received: Signal<Arc<DynamicImage>>
+    image_received: OwnedSignal<Arc<DynamicImage>>
 }
 
 
@@ -25,7 +25,7 @@ impl RealSenseCamera {
             }
         )
     }
-    pub fn image_received_signal(&mut self) -> &mut Signal<Arc<DynamicImage>> {
+    pub fn image_received_signal(&mut self) -> &mut OwnedSignal<Arc<DynamicImage>> {
         &mut self.image_received
     }
 }

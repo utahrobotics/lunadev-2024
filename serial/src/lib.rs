@@ -1,12 +1,12 @@
 use std::{borrow::Cow, sync::Arc, future::Future, pin::Pin, collections::VecDeque};
 
 use tokio_serial::{SerialPortBuilderExt, SerialStream, SerialPort};
-use unros_core::{Signal, tokio::{sync::mpsc::{unbounded_channel, UnboundedSender, UnboundedReceiver}, self}, Node, async_trait, anyhow};
+use unros_core::{OwnedSignal, tokio::{sync::mpsc::{unbounded_channel, UnboundedSender, UnboundedReceiver}, self}, Node, async_trait, anyhow, Signal};
 
 pub struct SerialConnection {
     name: String,
     stream: SerialStream,
-    msg_received: Signal<Arc<[u8]>>,
+    msg_received: OwnedSignal<Arc<[u8]>>,
     msg_to_send_sender: UnboundedSender<Arc<[u8]>>,
     msg_to_send_receiver: UnboundedReceiver<Arc<[u8]>>,
 }
@@ -28,11 +28,11 @@ impl SerialConnection {
         )
     }
 
-    pub fn get_msg_received_signal(&mut self) -> &mut Signal<Arc<[u8]>> {
+    pub fn get_msg_received_signal(&mut self) -> &mut OwnedSignal<Arc<[u8]>> {
         &mut self.msg_received
     }
 
-    pub fn connect_from(&self, signal: &mut Signal<Arc<[u8]>>) {
+    pub fn connect_from(&self, signal: &mut impl Signal<Arc<[u8]>>) {
         let sender = self.msg_to_send_sender.clone();
         signal.connect_to(move |x| { let _ = sender.send(x); });
     }

@@ -9,7 +9,7 @@ use unros_core::{
     anyhow::{self, Context},
     async_trait,
     tokio::{self, sync::mpsc},
-    tokio_rayon, Node, Signal,
+    tokio_rayon, Node, OwnedSignal,
 };
 
 pub struct Camera {
@@ -18,7 +18,7 @@ pub struct Camera {
     pub res_y: u32,
     pub fps: u32,
     pub camera_index: u32,
-    image_received: Option<Signal<Arc<DynamicImage>>>,
+    image_received: Option<OwnedSignal<Arc<DynamicImage>>>,
 }
 
 impl Camera {
@@ -33,7 +33,7 @@ impl Camera {
         }
     }
 
-    pub fn image_received_signal(&mut self) -> &mut Signal<Arc<DynamicImage>> {
+    pub fn image_received_signal(&mut self) -> &mut OwnedSignal<Arc<DynamicImage>> {
         self.image_received.as_mut().unwrap()
     }
 }

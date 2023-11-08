@@ -6,7 +6,7 @@ use apriltag_image::{
     ImageExt,
 };
 use unros_core::{
-    anyhow, async_trait, node_info, tokio::runtime::Handle, tokio_rayon, Node, Signal,
+    anyhow, async_trait, node_info, tokio::runtime::Handle, tokio_rayon, Node, OwnedSignal, Signal,
 };
 
 #[derive(Clone, Copy)]
@@ -20,7 +20,7 @@ pub struct AprilTagDetector {
     name: String,
     image_sender: mpsc::SyncSender<ImageBuffer<Luma<u8>, Vec<u8>>>,
     image_receiver: mpsc::Receiver<ImageBuffer<Luma<u8>, Vec<u8>>>,
-    tag_detected: Option<Signal<DetectedAprilTag>>,
+    tag_detected: Option<OwnedSignal<DetectedAprilTag>>,
 }
 
 
@@ -31,14 +31,14 @@ impl AprilTagDetector {
             name: "apriltag".into(),
             image_sender,
             image_receiver,
-            tag_detected: Some(Signal::default())
+            tag_detected: Some(OwnedSignal::default())
         }
     }
 
-    pub fn connect_from(&self, image_signal: &mut Signal<DynamicImage>) {
+    pub fn connect_from(&self, image_signal: &mut impl Signal<Arc<DynamicImage>>) {
         let sender = self.image_sender.clone();
         image_signal.connect_to(move |x| {
-            let _ = sender.send(x.into_luma8());
+            let _ = sender.send(x.to_luma8());
         });
     }
 }

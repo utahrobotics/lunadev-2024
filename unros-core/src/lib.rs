@@ -151,12 +151,35 @@ impl Runnable {
     }
 }
 
-pub struct Signal<T: Clone> {
+
+// #[async_trait]
+pub trait Signal<T> {
+    // async fn emit(&self, msg: T);
+
+    fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static);
+
+    fn connect_to_async<F>(&mut self, receiver: impl Fn(T) -> F + Send + Sync + 'static)
+    where
+        F: Future<Output = ()> + Send + Unpin + 'static;
+
+    fn connect_to_non_blocking(&mut self, receiver: impl Fn(T) + Send + Sync + 'static)
+    where
+        T: Send + 'static;
+
+    fn connect_to_async_non_blocking<F>(
+        &mut self,
+        receiver: impl Fn(T) -> F + Send + Sync + 'static,
+    ) where
+        F: Future<Output = ()> + Send + Unpin + 'static,
+        T: Send + 'static;
+}
+
+pub struct OwnedSignal<T: Clone + Send + Sync> {
     async_fns: Vec<Box<dyn Fn(T) -> Box<dyn Future<Output = ()> + Send + Unpin> + Send + Sync>>,
     fns: Vec<Box<dyn Fn(T) + Send + Sync>>,
 }
 
-impl<T: Clone> Default for Signal<T> {
+impl<T: Clone + Send + Sync> Default for OwnedSignal<T> {
     fn default() -> Self {
         Self {
             async_fns: Default::default(),
@@ -165,19 +188,22 @@ impl<T: Clone> Default for Signal<T> {
     }
 }
 
-impl<T: Clone> Signal<T> {
+impl<T: Clone + Send + Sync> OwnedSignal<T> {
     pub async fn emit(&self, msg: T) {
         for async_fn in &self.async_fns {
             async_fn(msg.clone()).await;
         }
         self.fns.iter().for_each(|x| x(msg.clone()));
     }
+}
 
-    pub fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static) {
+// #[async_trait]
+impl<T: Clone + Send + Sync> Signal<T> for OwnedSignal<T> {
+    fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static) {
         self.fns.push(Box::new(receiver));
     }
 
-    pub fn connect_to_async<F>(&mut self, receiver: impl Fn(T) -> F + Send + Sync + 'static)
+    fn connect_to_async<F>(&mut self, receiver: impl Fn(T) -> F + Send + Sync + 'static)
     where
         F: Future<Output = ()> + Send + Unpin + 'static,
     {
@@ -185,7 +211,7 @@ impl<T: Clone> Signal<T> {
             .push(Box::new(move |x| Box::new(receiver(x))));
     }
 
-    pub fn connect_to_non_blocking(&mut self, receiver: impl Fn(T) + Send + Sync + 'static)
+    fn connect_to_non_blocking(&mut self, receiver: impl Fn(T) + Send + Sync + 'static)
     where
         T: Send + 'static,
     {
@@ -196,7 +222,7 @@ impl<T: Clone> Signal<T> {
         }));
     }
 
-    pub fn connect_to_async_non_blocking<F>(
+    fn connect_to_async_non_blocking<F>(
         &mut self,
         receiver: impl Fn(T) -> F + Send + Sync + 'static,
     ) where
@@ -213,7 +239,49 @@ impl<T: Clone> Signal<T> {
     }
 }
 
-assert_impl_all!(Signal<()>: Send, Sync);
+assert_impl_all!(OwnedSignal<()>: Send, Sync);
+
+
+pub struct MappedSignal<'a, V: Clone + Send + Sync, T: Clone + Send + Sync> {
+    signal: &'a mut OwnedSignal<T>,
+    mapper: Arc<dyn Fn(T) -> V + Send + Sync>
+}
+
+
+impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> Signal<V> for MappedSignal<'a, V, T> {
+    fn connect_to(&mut self, receiver: impl Fn(V) + Send + Sync + 'static) {
+        let mapper = self.mapper.clone();
+        self.signal.connect_to(move |x| receiver(mapper(x)));
+    }
+
+    fn connect_to_async<F>(&mut self, receiver: impl Fn(V) -> F + Send + Sync + 'static)
+    where
+        F: Future<Output = ()> + Send + Unpin + 'static
+    {
+        let mapper = self.mapper.clone();
+        self.signal.connect_to_async(move |x| receiver(mapper(x)));
+    }
+
+    fn connect_to_non_blocking(&mut self, receiver: impl Fn(V) + Send + Sync + 'static)
+    where
+        V: Send + 'static
+    {
+        let mapper = self.mapper.clone();
+        self.signal.connect_to_non_blocking(move |x| receiver(mapper(x)));
+    }
+
+    fn connect_to_async_non_blocking<F>(
+        &mut self,
+        receiver: impl Fn(V) -> F + Send + Sync + 'static,
+    ) where
+        F: Future<Output = ()> + Send + Unpin + 'static,
+        V: Send + 'static
+    {
+        let mapper = self.mapper.clone();
+        self.signal.connect_to_async_non_blocking(move |x| receiver(mapper(x)));
+    }
+}
+
 
 #[derive(Deserialize, Default)]
 pub struct RunOptions {

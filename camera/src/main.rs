@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use camera::Camera;
-use unros_core::{anyhow, log::info, run_all, Node, RunOptions};
+use unros_core::{anyhow, log::info, run_all, Node, RunOptions, Signal};
 
 fn main() -> anyhow::Result<()> {
     let frame_count = AtomicUsize::new(0);

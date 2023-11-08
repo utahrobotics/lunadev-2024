@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use realsense::{discover_all_realsense, RealSenseCamera};
-use unros_core::{anyhow, RunOptions, run_all, Runnable, log::info};
+use unros_core::{anyhow, RunOptions, run_all, Runnable, log::info, Signal};
 
 fn main() -> anyhow::Result<()> {
     // let camera = RealSenseCamera::open("/dev/bus/usb/003/003")?;
