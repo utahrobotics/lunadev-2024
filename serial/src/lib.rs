@@ -64,6 +64,7 @@ impl SerialConnection {
         let result: tokio_serial::Result<_> = (|| {
             let mut stream = tokio_serial::new(path.deref(), baud_rate).open_native_async()?;
             stream.set_exclusive(true)?;
+            stream.clear(tokio_serial::ClearBuffer::All)?;
             Ok(stream)
         })();
 
@@ -111,7 +112,7 @@ impl Node for SerialConnection {
     async fn run(mut self) -> anyhow::Result<()> {
         let mut buf = Vec::with_capacity(1024);
         let mut send_buf = VecDeque::with_capacity(1024);
-
+        
         'main: loop {
             let Some(stream) = self.stream.as_mut() else {
                 tokio::time::sleep(Duration::from_secs(2)).await;

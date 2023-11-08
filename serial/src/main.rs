@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
     let run_options = Default::default();
     init_logger(&run_options)?;
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
-    let mut serial = SerialConnection::new("/dev/ttyUSB0".into(), 115200, true).await?;
+    let mut serial = SerialConnection::new("/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00".into(), 115200, true).await?;
     serial.get_msg_received_signal().connect_to(|x| {
         stdout()
             .lock()

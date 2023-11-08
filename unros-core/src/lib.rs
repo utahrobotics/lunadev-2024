@@ -17,7 +17,7 @@ use log::{error, info, warn};
 use serde::Deserialize;
 use static_assertions::assert_impl_all;
 pub use tokio;
-use tokio::{sync::watch, task::JoinSet};
+use tokio::{sync::{watch, oneshot}, task::{JoinSet, JoinError, AbortHandle}};
 pub use tokio_rayon::{self, rayon};
 
 // pub trait Variadic {
@@ -131,7 +131,7 @@ struct RunError {
 
 pub struct Runnable {
     critical: Arc<AtomicBool>,
-    run: Box<dyn FnOnce(&mut JoinSet<Result<(), RunError>>)>,
+    run: Box<dyn FnOnce(&mut JoinSet<Result<Result<(), RunError>, (String, JoinError)>>, oneshot::Receiver<()>)>,
 }
 
 impl<N: Node> From<N> for Runnable {
@@ -145,15 +145,30 @@ impl Runnable {
         let critical = Arc::new(AtomicBool::new(false));
         Self {
             critical: critical.clone(),
-            run: Box::new(move |tasks| {
+            run: Box::new(move |tasks, recv| {
+                let name = node.get_name().to_owned();
+                let name2 = name.clone();
+                
                 tasks.spawn(async move {
-                    let name = node.get_name().to_owned();
-                    log::info!("Initializing {}", name);
-                    node.run().await.map_err(|err| RunError {
-                        err,
-                        name,
-                        critical: critical.load(atomic::Ordering::SeqCst),
-                    })
+                    let handle = tokio::spawn(async move {
+                        log::info!("Initializing {}", name);
+                        node.run().await.map_err(|err| RunError {
+                            err,
+                            name,
+                            critical: critical.load(atomic::Ordering::SeqCst),
+                        })
+                    });
+
+                    let abort = handle.abort_handle();
+
+                    tokio::spawn(async move {
+                        let _ = recv.await;
+                        abort.abort();
+                    });
+                    
+                    handle
+                        .await
+                        .map_err(|x| (name2, x))
                 });
             }),
         }
@@ -523,9 +538,12 @@ pub async fn async_run_all(
 ) -> anyhow::Result<()> {
     init_logger(&run_options)?;
 
+    let mut senders = Vec::new();
     let mut tasks = JoinSet::new();
     for runnable in runnables {
-        (runnable.run)(&mut tasks);
+        let (sender, recv) = oneshot::channel();
+        senders.push(sender);
+        (runnable.run)(&mut tasks, recv);
     }
     if tasks.is_empty() {
         warn!("No nodes to run. Exiting...");
@@ -546,7 +564,14 @@ pub async fn async_run_all(
                     info!("All Nodes terminated. Exiting...");
                     break;
                 };
-                if let Err(RunError { err, name, critical }) = result? {
+                let result = match result.unwrap() {
+                    Ok(x) => x,
+                    Err((name, _)) => {
+                        error!("{name} has panicked");
+                        continue;
+                    }
+                };
+                if let Err(RunError { err, name, critical }) = result {
                     let mut err_string = format!("{err:?}");
                     err_string = err_string.replace('\n', "\n\t");
                     error!("{name} has faced the following error:\n\t{err_string}");
@@ -568,7 +593,26 @@ pub async fn async_run_all(
         }
     }
 
-    tasks.abort_all();
-    while let Some(_) = tasks.join_next().await {}
+    drop(senders);
+    while let Some(result) = tasks.join_next().await {
+        let result = match result.unwrap() {
+            Ok(x) => x,
+            Err((name, e)) => {
+                if !e.is_cancelled() {
+                    error!("{name} has panicked");
+                }
+                continue;
+            }
+        };
+        if let Err(RunError { err, name, critical }) = result {
+            let mut err_string = format!("{err:?}");
+            err_string = err_string.replace('\n', "\n\t");
+            error!("{name} has faced the following error:\n\t{err_string}");
+            if critical {
+                error!("Critical node has terminated! Exiting...");
+                break;
+            }
+        }
+    }
     Ok(())
 }
