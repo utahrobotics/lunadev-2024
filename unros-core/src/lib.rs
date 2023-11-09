@@ -12,12 +12,16 @@ use std::{
 pub use anyhow;
 use anyhow::Context;
 pub use async_trait::async_trait;
+pub use bytes;
 pub use log;
 use log::{error, info, warn};
 use serde::Deserialize;
 use static_assertions::assert_impl_all;
 pub use tokio;
-use tokio::{sync::{watch, oneshot}, task::{JoinSet, JoinError}};
+use tokio::{
+    sync::{oneshot, watch},
+    task::{JoinError, JoinSet},
+};
 pub use tokio_rayon::{self, rayon};
 
 // pub trait Variadic {
@@ -131,7 +135,12 @@ struct RunError {
 
 pub struct Runnable {
     critical: Arc<AtomicBool>,
-    run: Box<dyn FnOnce(&mut JoinSet<Result<Result<(), RunError>, (String, JoinError)>>, oneshot::Receiver<()>)>,
+    run: Box<
+        dyn FnOnce(
+            &mut JoinSet<Result<Result<(), RunError>, (String, JoinError)>>,
+            oneshot::Receiver<()>,
+        ),
+    >,
 }
 
 impl<N: Node> From<N> for Runnable {
@@ -148,7 +157,7 @@ impl Runnable {
             run: Box::new(move |tasks, recv| {
                 let name = node.get_name().to_owned();
                 let name2 = name.clone();
-                
+
                 tasks.spawn(async move {
                     let handle = tokio::spawn(async move {
                         log::info!("Initializing {}", name);
@@ -165,10 +174,8 @@ impl Runnable {
                         let _ = recv.await;
                         abort.abort();
                     });
-                    
-                    handle
-                        .await
-                        .map_err(|x| (name2, x))
+
+                    handle.await.map_err(|x| (name2, x))
                 });
             }),
         }
@@ -467,13 +474,12 @@ pub struct RunOptions {
 const LOGS_DIR: &str = "logs";
 static LOGGER_INITED: Once = Once::new();
 
-
 pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     if LOGGER_INITED.is_completed() {
-        return Ok(())
+        return Ok(());
     }
-    LOGGER_INITED.call_once(|| { });
-    
+    LOGGER_INITED.call_once(|| {});
+
     if !AsRef::<Path>::as_ref(LOGS_DIR)
         .try_exists()
         .context("Failed to check if logging directory exists. Do we have permissions?")?
@@ -522,7 +528,6 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     Ok(())
 }
 
-
 #[tokio::main]
 pub async fn run_all(
     runnables: impl IntoIterator<Item = Runnable>,
@@ -530,7 +535,6 @@ pub async fn run_all(
 ) -> anyhow::Result<()> {
     async_run_all(runnables, run_options).await
 }
-
 
 pub async fn async_run_all(
     runnables: impl IntoIterator<Item = Runnable>,
@@ -604,7 +608,12 @@ pub async fn async_run_all(
                 continue;
             }
         };
-        if let Err(RunError { err, name, critical }) = result {
+        if let Err(RunError {
+            err,
+            name,
+            critical,
+        }) = result
+        {
             let mut err_string = format!("{err:?}");
             err_string = err_string.replace('\n', "\n\t");
             error!("{name} has faced the following error:\n\t{err_string}");

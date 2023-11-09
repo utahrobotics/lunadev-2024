@@ -17,4 +17,5 @@ fxhash = { workspace = true }
 tokio-rayon = { workspace = true }
 async-trait = { workspace = true }
 static_assertions = { workspace = true }
+bytes = "1"
 # crossbeam = { workspace = true }

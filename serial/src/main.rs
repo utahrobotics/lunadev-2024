@@ -5,7 +5,9 @@ use std::{
 
 use serial::SerialConnection;
 use unros_core::{
-    anyhow, async_run_all, tokio::{runtime::Handle, self}, tokio_rayon, FnNode, OwnedSignal, Signal, init_logger,
+    anyhow, async_run_all, init_logger,
+    tokio::{self, runtime::Handle},
+    tokio_rayon, FnNode, OwnedSignal, Signal,
 };
 
 #[tokio::main]
@@ -13,12 +15,16 @@ async fn main() -> anyhow::Result<()> {
     let run_options = Default::default();
     init_logger(&run_options)?;
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
-    let mut serial = SerialConnection::new("/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00".into(), 115200, true).await?;
+    let mut serial = SerialConnection::new("/dev/ttyACM5".into(), 115200, true).await?;
     serial.get_msg_received_signal().connect_to(|x| {
-        stdout()
-            .lock()
+        let stdout = stdout();
+        let mut stdout = stdout.lock();
+        stdout
             .write_all(&x)
             .expect("Stdout should have been writable");
+        stdout
+            .flush()
+            .expect("Stdout should have been flushable");
     });
     let mut write_signal: OwnedSignal<_> = Default::default();
     serial.connect_from(&mut write_signal);
@@ -35,13 +41,15 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 line.clear();
                 stdin.read_line(&mut line)?;
-                let line = line.clone().into_bytes().into_boxed_slice();
+                line += "\r";
+                let line = line.clone().into_bytes();
                 let write_signal = write_signal.clone();
                 handle.spawn(async move {
                     write_signal.emit(line.into()).await;
                 });
             }
-        }).await
+        })
+        .await
     });
 
     async_run_all([serial.into(), fn_node.into()], run_options).await
