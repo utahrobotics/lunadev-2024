@@ -17,7 +17,7 @@ use log::{error, info, warn};
 use serde::Deserialize;
 use static_assertions::assert_impl_all;
 pub use tokio;
-use tokio::{sync::{watch, oneshot}, task::{JoinSet, JoinError, AbortHandle}};
+use tokio::{sync::{watch, oneshot}, task::{JoinSet, JoinError}};
 pub use tokio_rayon::{self, rayon};
 
 // pub trait Variadic {
