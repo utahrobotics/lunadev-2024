@@ -176,7 +176,6 @@ impl Node for SerialConnection {
                     let n = reader.read(&mut buf).await?;
                     let bytes = buf.split_at(n).0.to_vec();
                     msg_received.emit(bytes.into()).await;
-                    println!("in");
                 }
             });
             let msg_to_send_receiver = self.msg_to_send_receiver.clone();
@@ -186,7 +185,6 @@ impl Node for SerialConnection {
                 loop {
                     let msg = msg_to_send_receiver.recv().await.unwrap();
                     writer.write_all(&msg).await?;
-                    println!("out");
                 }
             });
 
