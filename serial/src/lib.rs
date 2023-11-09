@@ -9,12 +9,13 @@ use std::{
     time::Duration, io,
 };
 
-use futures::{
-    stream::{SplitSink, SplitStream},
-    SinkExt, StreamExt,
-};
+// use crossbeam::queue::SegQueue;
+// use futures::{
+//     stream::{SplitSink, SplitStream},
+//     SinkExt, StreamExt,
+// };
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
-use tokio_util::codec::{BytesCodec, Decoder, Framed, Encoder};
+// use tokio_util::codec::{BytesCodec, Decoder, Framed, Encoder};
 use unros_core::{
     anyhow, async_trait,
     bytes::{Bytes, BytesMut, BufMut},
@@ -25,7 +26,7 @@ use unros_core::{
         sync::{
             mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
             Mutex,
-        }, task::JoinSet,
+        }, task::JoinSet, io::{AsyncReadExt, AsyncWriteExt},
     },
     Node, OwnedSignal, Signal, rayon,
 };
@@ -34,10 +35,7 @@ pub struct SerialConnection {
     name: String,
     path: Arc<str>,
     baud_rate: u32,
-    stream: Option<(
-        SplitSink<Framed<SerialStream, LineCodec>, Bytes>,
-        SplitStream<Framed<SerialStream, LineCodec>>,
-    )>,
+    stream: Option<SerialStream>,
     msg_received: Option<OwnedSignal<Bytes>>,
     msg_to_send_sender: UnboundedSender<Bytes>,
     msg_to_send_receiver: Arc<Mutex<UnboundedReceiver<Bytes>>>,
@@ -73,9 +71,9 @@ impl SerialConnection {
         let baud_rate = self.baud_rate;
         let result: tokio_serial::Result<_> = (|| {
             let mut stream = tokio_serial::new(path.deref(), baud_rate).open_native_async()?;
-            stream.set_exclusive(true)?;
+            stream.set_exclusive(false)?;
             stream.clear(tokio_serial::ClearBuffer::All)?;
-            Ok(LineCodec.framed(stream).split())
+            Ok(stream)
         })();
 
         let stream = if self.tolerate_error {
@@ -109,42 +107,42 @@ impl SerialConnection {
     }
 }
 
-struct LineCodec;
+// struct LineCodec;
 
-impl Decoder for LineCodec {
-    type Item = Bytes;
-    type Error = io::Error;
+// impl Decoder for LineCodec {
+//     type Item = Bytes;
+//     type Error = io::Error;
 
-    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // let newline = src.as_ref().iter().position(|b| *b == b'\n');
-        // if let Some(n) = newline {
-        //     let line = src.split_to(n + 1);
-        //     return match std::str::from_utf8(&line) {
-        //         Ok(s) => Ok(Some(s.as_bytes().to_vec().into())),
-        //         Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid String")),
-        //     };
-        // }
-        // Ok(None)
-        if !buf.is_empty() {
-            let len = buf.len();
-            Ok(Some(buf.split_to(len).into()))
-        } else {
-            Ok(None)
-        }
-    }
-}
+//     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+//         // let newline = src.as_ref().iter().position(|b| *b == b'\n');
+//         // if let Some(n) = newline {
+//         //     let line = src.split_to(n + 1);
+//         //     return match std::str::from_utf8(&line) {
+//         //         Ok(s) => Ok(Some(s.as_bytes().to_vec().into())),
+//         //         Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Invalid String")),
+//         //     };
+//         // }
+//         // Ok(None)
+//         if !buf.is_empty() {
+//             let len = buf.len();
+//             Ok(Some(buf.split_to(len).into()))
+//         } else {
+//             Ok(None)
+//         }
+//     }
+// }
 
-impl Encoder<Bytes> for LineCodec {
-    type Error = io::Error;
+// impl Encoder<Bytes> for LineCodec {
+//     type Error = io::Error;
 
-    fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        // println!("In writer {:?}", &item);
-        dst.reserve(item.len());
-        dst.put(item);
-        // dst.put_u8(b'\n');
-        Ok(())
-    }
-}
+//     fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
+//         // println!("In writer {:?}", &item);
+//         dst.reserve(item.len());
+//         dst.put(item);
+//         // dst.put_u8(b'\n');
+//         Ok(())
+//     }
+// }
 
 
 #[async_trait]
@@ -161,20 +159,24 @@ impl Node for SerialConnection {
         let msg_received = Arc::new(self.msg_received.take().unwrap());
 
         loop {
-            let Some((mut writer, mut reader)) = self.stream.take() else {
+            let Some(stream) = self.stream.take() else {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 self.connect().await?;
                 continue;
             };
 
+            let (mut reader, mut writer) = tokio::io::split(stream);
+
             let mut tasks = JoinSet::<anyhow::Result<()>>::new();
-            let path = self.path.clone();
             let msg_received = msg_received.clone();
 
             tasks.spawn(async move {
+                let mut buf = [0; 1024];
                 loop {
-                    let bytes = reader.next().await.ok_or_else(|| anyhow::anyhow!("Serial port at {path} has closed"))??;
+                    let n = reader.read(&mut buf).await?;
+                    let bytes = buf.split_at(n).0.to_vec();
                     msg_received.emit(bytes.into()).await;
+                    println!("in");
                 }
             });
             let msg_to_send_receiver = self.msg_to_send_receiver.clone();
@@ -183,7 +185,8 @@ impl Node for SerialConnection {
                 let mut msg_to_send_receiver = msg_to_send_receiver.lock().await;
                 loop {
                     let msg = msg_to_send_receiver.recv().await.unwrap();
-                    writer.send(msg).await?;
+                    writer.write_all(&msg).await?;
+                    println!("out");
                 }
             });
 
@@ -202,15 +205,15 @@ impl Node for SerialConnection {
     }
 }
 
-// impl Drop for SerialConnection {
-//     fn drop(&mut self) {
-//         if let Some(stream) = &mut self.stream {
-//             if let Err(e) = stream.clear(tokio_serial::ClearBuffer::All) {
-//                 node_error!(self, "Failed to clear buffer of serial device at: {}: {e}", self.path);
-//             }
-//         }
-//     }
-// }
+impl Drop for SerialConnection {
+    fn drop(&mut self) {
+        if let Some(stream) = &mut self.stream {
+            if let Err(e) = stream.clear(tokio_serial::ClearBuffer::All) {
+                node_error!(self, "Failed to clear buffer of serial device at: {}: {e}", self.path);
+            }
+        }
+    }
+}
 
 struct VescReader {
     recv: std::sync::mpsc::Receiver<Bytes>,
