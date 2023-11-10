@@ -3,10 +3,9 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::{
-        atomic::{self, AtomicBool},
         Arc, Once,
     },
-    time::Instant, num::NonZeroU32, collections::hash_map::Entry, ops::Deref,
+    time::Instant, num::NonZeroU32, collections::hash_map::Entry, ops::{Deref, Add},
 };
 
 pub use anyhow;
@@ -19,90 +18,34 @@ use log::{error, info, warn};
 use serde::Deserialize;
 pub use tokio;
 use tokio::{
-    sync::{oneshot, watch, broadcast, mpsc},
-    task::{JoinError, JoinSet},
+    sync::{watch, broadcast, mpsc},
+    task::JoinSet,
 };
 pub use tokio_rayon::{self, rayon};
 
-// pub trait Variadic {
-//     fn contains<T: 'static>() -> bool;
-//     fn is_unique<T>() -> bool;
-//     fn len() -> usize;
-// }
-
-// impl Variadic for () {
-//     fn contains<T>() -> bool {
-//         false
-//     }
-//     fn is_unique<T>() -> bool {
-//         true
-//     }
-//     fn len() -> usize {
-//         0
-//     }
-// }
-
-// impl<A: 'static, X: Variadic> Variadic for (A, X) {
-//     fn contains<T: 'static>() -> bool {
-//         if TypeId::of::<A>() == TypeId::of::<T>() {
-//             true
-//         } else {
-//             X::contains::<T>()
-//         }
-//     }
-//     fn is_unique<T>() -> bool {
-//         X::contains::<A>()
-//     }
-//     fn len() -> usize {
-//         1 + X::len()
-//     }
-// }
-
-#[macro_export]
-macro_rules! node_info {
-    ($node: expr, $($arg:tt)+) => {
-        $crate::log::info!(target: $node.get_name(), $($arg)+)
-    };
-}
-
-#[macro_export]
-macro_rules! node_warn {
-    ($node: expr, $($arg:tt)+) => {
-        $crate::log::warn!(target: $node.get_name(), $($arg)+)
-    };
-}
-
-#[macro_export]
-macro_rules! node_error {
-    ($node: expr, $($arg:tt)+) => {
-        $crate::log::error!(target: $node.get_name(), $($arg)+)
-    };
-}
 
 #[async_trait]
 pub trait Node: Send + 'static {
-    fn set_name(&mut self, name: String);
-    fn get_name(&self) -> &str;
-    async fn run(self) -> anyhow::Result<()>;
+    const DEFAULT_NAME: &'static str;
+
+    async fn run(self, context: RuntimeContext) -> anyhow::Result<()>;
 }
 
 pub struct FnNode<Fut, F>
 where
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-    F: FnOnce() -> Fut + Send + 'static,
+    F: FnOnce(RuntimeContext) -> Fut + Send + 'static,
 {
-    name: String,
     f: F,
 }
 
 impl<Fut, F> FnNode<Fut, F>
 where
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-    F: FnOnce() -> Fut + Send + 'static,
+    F: FnOnce(RuntimeContext) -> Fut + Send + 'static,
 {
     pub fn new(f: F) -> Self {
         Self {
-            name: "fn_node".into(),
             f,
         }
     }
@@ -112,35 +55,37 @@ where
 impl<Fut, F> Node for FnNode<Fut, F>
 where
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-    F: FnOnce() -> Fut + Send + 'static,
+    F: FnOnce(RuntimeContext) -> Fut + Send + 'static,
 {
-    fn set_name(&mut self, name: String) {
-        self.name = name;
-    }
+    const DEFAULT_NAME: &'static str = "fn_node";
 
-    fn get_name(&self) -> &str {
-        &self.name
-    }
-
-    async fn run(self) -> anyhow::Result<()> {
-        (self.f)().await
+    async fn run(self, context: RuntimeContext) -> anyhow::Result<()> {
+        (self.f)(context).await
     }
 }
 
+
+#[derive(Clone)]
+pub struct RuntimeContext {
+    name: Arc<str>
+}
+
+
+impl RuntimeContext {
+    pub fn get_name(&self) -> &Arc<str> {
+        &self.name
+    }
+}
+
+
 struct RunError {
-    err: anyhow::Error,
-    name: String,
-    critical: bool,
+    critical: bool
 }
 
 pub struct FinalizedNode {
-    critical: Arc<AtomicBool>,
-    run: Box<
-        dyn FnOnce(
-            &mut JoinSet<Result<Result<(), RunError>, (String, JoinError)>>,
-            oneshot::Receiver<()>,
-        ),
-    >,
+    critical: bool,
+    name: String,
+    run: Box<dyn FnOnce(Arc<str>) -> Pin<Box<dyn Future<Output=anyhow::Result<()>> + Send>> + Send>,
 }
 
 impl<N: Node> From<N> for FinalizedNode {
@@ -151,42 +96,58 @@ impl<N: Node> From<N> for FinalizedNode {
 
 impl FinalizedNode {
     pub fn new<N: Node>(node: N) -> Self {
-        let critical = Arc::new(AtomicBool::new(false));
         Self {
-            critical: critical.clone(),
-            run: Box::new(move |tasks, recv| {
-                let name = node.get_name().to_owned();
-                let name2 = name.clone();
-
-                tasks.spawn(async move {
-                    let handle = tokio::spawn(async move {
-                        log::info!("Initializing {}", name);
-                        node.run().await.map_err(|err| RunError {
-                            err,
-                            name,
-                            critical: critical.load(atomic::Ordering::SeqCst),
-                        })
-                    });
-
-                    let abort = handle.abort_handle();
-
-                    tokio::spawn(async move {
-                        let _ = recv.await;
-                        abort.abort();
-                    });
-
-                    handle.await.map_err(|x| (name2, x))
-                });
-            }),
+            critical: false,
+            name: N::DEFAULT_NAME.into(),
+            run: Box::new(|name| Box::pin(async move {
+                let context = RuntimeContext {
+                    name
+                };
+                node.run(context).await
+            }))
         }
     }
 
-    pub fn make_critical(&mut self) {
-        self.critical.store(true, atomic::Ordering::SeqCst);
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
     }
 
-    pub fn make_not_critical(&mut self) {
-        self.critical.store(false, atomic::Ordering::SeqCst);
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn set_critical(&mut self, value: bool) {
+        self.critical = value;
+    }
+
+    pub fn get_critical(&mut self) -> bool {
+        self.critical
+    }
+
+    async fn run(self, mut abort: broadcast::Receiver<()>) -> Result<(), RunError> {
+        let name: Arc<str> = Arc::from(self.name.into_boxed_str());
+        let handle = tokio::spawn((self.run)(name.clone()));
+        let abort_handle = handle.abort_handle();
+
+        tokio::spawn(async move {
+            let _ = abort.recv().await;
+            abort_handle.abort();
+        });
+
+        let result = match handle.await {
+            Ok(x) => x,
+            Err(e) => if e.is_cancelled() {
+                return Ok(())
+            } else {
+                error!("{} has panicked", name);
+                return Err(RunError { critical: self.critical })
+            }
+        };
+
+        result.map_err(|err| {
+            error!("{} has faced the following error: {err}", name);
+            RunError { critical: self.critical }
+        })
     }
 }
 
@@ -200,6 +161,12 @@ static_assertions::assert_impl_all!(UnboundedSubscription<()>: Send, Sync);
 
 
 impl<T: 'static> UnboundedSubscription<T> {
+    pub fn none() -> Self {
+        Self {
+            recv: Box::new(|| Box::pin(std::future::pending()))
+        }
+    }
+
     pub async fn recv(&mut self) -> T {
         (self.recv)().await
     }
@@ -233,57 +200,149 @@ impl<T: 'static> UnboundedSubscription<T> {
 }
 
 
-pub struct BoundedSubscription<T, S=T> {
-    recv: broadcast::Receiver<S>,
-    mapper: Box<dyn FnMut(S) -> T>
-}
+impl<T: 'static> Add for UnboundedSubscription<T> {
+    type Output = Self;
 
+    fn add(self, rhs: Self) -> Self::Output {
+        let recv1 = Arc::new(tokio::sync::Mutex::new(self.recv));
+        let recv2 = Arc::new(tokio::sync::Mutex::new(rhs.recv));
 
-impl<T: 'static, S: Clone + 'static> BoundedSubscription<T, S> {
-    pub async fn recv(&mut self) -> Result<T, u64> {
-        let value = match self.recv.recv().await {
-            Ok(x) => x,
-            Err(broadcast::error::RecvError::Closed) => {
-                std::future::pending::<()>().await;
-                unreachable!();
-            }
-            Err(broadcast::error::RecvError::Lagged(n)) => return Err(n)
-        };
-        Ok((self.mapper)(value))
-    }
+        Self {
+            recv: Box::new(move || {
+                let recv1 = recv1.clone();
+                let recv2 = recv2.clone();
 
-    pub fn map<V>(mut self, mut mapper: impl FnMut(T) -> V + 'static) -> BoundedSubscription<V, S> {
-        BoundedSubscription {
-            recv: self.recv,
-            mapper: Box::new(move |x| mapper((self.mapper)(x)))
+                Box::pin(async move {
+                    tokio::select! {
+                        value = async { (recv1.lock().await)().await } => { value }
+                        value = async { (recv2.lock().await)().await } => { value }
+                    }
+                })
+            })
         }
     }
 }
 
 
-pub struct WatchedSubscription<T, S=T> {
-    recv: watch::Receiver<Option<S>>,
-    mapper: Box<dyn FnMut(S) -> T>
+pub struct BoundedSubscription<T> {
+    recv: Box<dyn FnMut() -> Pin<Box<dyn Future<Output=Result<T, u64>>>> + Send + Sync>
 }
 
 
-impl<T: 'static, S: Clone + 'static> WatchedSubscription<T, S> {
-    pub async fn get(&mut self) -> T {
-        let value = loop {
-            if let Some(value) = self.recv.borrow_and_update().deref() {
-                break value.clone();
-            }
-            if self.recv.changed().await.is_err() {
-                std::future::pending::<()>().await;
-            }
-        };
-        (self.mapper)(value)
+static_assertions::assert_impl_all!(BoundedSubscription<()>: Send, Sync);
+
+
+impl<T: 'static> BoundedSubscription<T> {
+    pub fn none() -> Self {
+        Self {
+            recv: Box::new(|| Box::pin(std::future::pending()))
+        }
     }
 
-    pub fn map<V>(mut self, mut mapper: impl FnMut(T) -> V + 'static) -> WatchedSubscription<V, S> {
+    pub async fn recv(&mut self) -> Result<T, u64> {
+        (self.recv)().await
+    }
+
+    pub fn map<V>(self, mapper: impl FnMut(T) -> V + 'static + Send) -> BoundedSubscription<V> {
+        let mapper = Arc::new(std::sync::Mutex::new(mapper));
+        let recv = Arc::new(std::sync::Mutex::new(self.recv));
+
+        BoundedSubscription {
+            recv: Box::new(move || {
+                let mapper = mapper.clone();
+                let recv = recv.clone();
+
+                Box::pin(async move {
+                    let value = (recv.lock().unwrap())().await;
+                    value.map(|x| (mapper.lock().unwrap())(x))
+                })
+            })
+        }
+    }
+}
+
+
+impl<T: 'static> Add for BoundedSubscription<T> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let recv1 = Arc::new(tokio::sync::Mutex::new(self.recv));
+        let recv2 = Arc::new(tokio::sync::Mutex::new(rhs.recv));
+
+        Self {
+            recv: Box::new(move || {
+                let recv1 = recv1.clone();
+                let recv2 = recv2.clone();
+
+                Box::pin(async move {
+                    tokio::select! {
+                        value = async { (recv1.lock().await)().await } => { value }
+                        value = async { (recv2.lock().await)().await } => { value }
+                    }
+                })
+            })
+        }
+    }
+}
+
+
+pub struct WatchedSubscription<T> {
+    recv: Box<dyn FnMut() -> Pin<Box<dyn Future<Output=T>>> + Send + Sync>
+}
+
+
+static_assertions::assert_impl_all!(WatchedSubscription<()>: Send, Sync);
+
+
+impl<T: 'static> WatchedSubscription<T> {
+    pub fn none() -> Self {
+        Self {
+            recv: Box::new(|| Box::pin(std::future::pending()))
+        }
+    }
+
+    pub async fn get(&mut self) -> T {
+        (self.recv)().await
+    }
+
+    pub fn map<V>(self, mapper: impl FnMut(T) -> V + 'static + Send) -> WatchedSubscription<V> {
+        let mapper = Arc::new(std::sync::Mutex::new(mapper));
+        let recv = Arc::new(std::sync::Mutex::new(self.recv));
+        
         WatchedSubscription {
-            recv: self.recv,
-            mapper: Box::new(move |x| mapper((self.mapper)(x)))
+            recv: Box::new(move || {
+                let mapper = mapper.clone();
+                let recv = recv.clone();
+
+                Box::pin(async move {
+                    let value = (recv.lock().unwrap())().await;
+                    (mapper.lock().unwrap())(value)
+                })
+            })
+        }
+    }
+}
+
+
+impl<T: 'static> Add for WatchedSubscription<T> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let recv1 = Arc::new(tokio::sync::Mutex::new(self.recv));
+        let recv2 = Arc::new(tokio::sync::Mutex::new(rhs.recv));
+
+        Self {
+            recv: Box::new(move || {
+                let recv1 = recv1.clone();
+                let recv2 = recv2.clone();
+
+                Box::pin(async move {
+                    tokio::select! {
+                        value = async { (recv1.lock().await)().await } => { value }
+                        value = async { (recv2.lock().await)().await } => { value }
+                    }
+                })
+            })
         }
     }
 }
@@ -324,41 +383,16 @@ pub struct Signal<T> {
 }
 
 
-impl<T: Clone + Send + 'static> Signal<T> {
-    pub fn subscribe_unbounded(&mut self) -> UnboundedSubscription<T> {
-        let (sender, recv) = mpsc::unbounded_channel();
-        let recv = Arc::new(tokio::sync::Mutex::new(recv));
-        self.unbounded_senders.push(sender);
-
-        UnboundedSubscription {
-            recv: Box::new(move || {
-                let recv = recv.clone();
-
-                Box::pin(async move {
-                    let Some(value) = recv.lock().await.recv().await else {
-                        std::future::pending::<()>().await;
-                        unreachable!();
-                    };
-                    value
-                })
-            })
-        }
+impl<T> Default for Signal<T> {
+    fn default() -> Self {
+        Self { unbounded_senders: Default::default(), bounded_senders: Default::default(), watch_sender: watch::channel(None).0 }
     }
+}
 
-    pub fn subscribe_bounded(&mut self, bound: NonZeroU32) -> BoundedSubscription<T> {
-        let recv = match self.bounded_senders.entry(bound) {
-            Entry::Occupied(x) => x.get().subscribe(),
-            Entry::Vacant(x) => {
-                let (sender, recv) = broadcast::channel(bound.get() as usize);
-                x.insert(sender);
-                recv
-            }
-        };
-        BoundedSubscription { recv, mapper: Box::new(|x| x) }
-    }
 
-    pub fn watch(&self) -> WatchedSubscription<T> {
-        WatchedSubscription { recv: self.watch_sender.subscribe(), mapper: Box::new(|x| x) }
+impl<T: Clone> Signal<T> {
+    pub fn get_ref(&mut self) -> SignalRef<T> {
+        SignalRef(self)
     }
 
     /// Sets a value into this signal.
@@ -383,10 +417,81 @@ impl<T: Clone + Send + 'static> Signal<T> {
 }
 
 
-pub trait SignalProvider<T: Clone> {
-    fn subscribe_unbounded(&mut self) -> UnboundedSubscription<T>;
-    fn subscribe_bounded(&mut self, bound: NonZeroU32) -> BoundedSubscription<T>;
-    fn watch(&self) -> WatchedSubscription<T>;
+pub struct SignalRef<'a, T>(&'a mut Signal<T>);
+
+
+impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
+    pub fn subscribe_unbounded(&mut self) -> UnboundedSubscription<T> {
+        let (sender, recv) = mpsc::unbounded_channel();
+        let recv = Arc::new(tokio::sync::Mutex::new(recv));
+        self.0.unbounded_senders.push(sender);
+
+        UnboundedSubscription {
+            recv: Box::new(move || {
+                let recv = recv.clone();
+
+                Box::pin(async move {
+                    let Some(value) = recv.lock().await.recv().await else {
+                        std::future::pending::<()>().await;
+                        unreachable!();
+                    };
+                    value
+                })
+            })
+        }
+    }
+
+    pub fn subscribe_bounded(&mut self, bound: NonZeroU32) -> BoundedSubscription<T> {
+        let recv = match self.0.bounded_senders.entry(bound) {
+            Entry::Occupied(x) => x.get().subscribe(),
+            Entry::Vacant(x) => {
+                let (sender, recv) = broadcast::channel(bound.get() as usize);
+                x.insert(sender);
+                recv
+            }
+        };
+        let recv = Arc::new(tokio::sync::Mutex::new(recv));
+
+        BoundedSubscription {
+            recv: Box::new(move || {
+                let recv = recv.clone();
+
+                Box::pin(async move {
+                    let value = match recv.lock().await.recv().await {
+                        Ok(x) => x,
+                        Err(broadcast::error::RecvError::Closed) => {
+                            std::future::pending::<()>().await;
+                            unreachable!();
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => return Err(n)
+                    };
+                    Ok(value)
+                })
+            })
+        }
+    }
+
+    pub fn watch(&self) -> WatchedSubscription<T> {
+        let recv = Arc::new(tokio::sync::Mutex::new(self.0.watch_sender.subscribe()));
+
+        WatchedSubscription {
+            recv: Box::new(move || {
+                let recv = recv.clone();
+
+                Box::pin(async move {
+                    let mut recv =  recv.lock().await;
+                    loop {
+                        if let Some(value) = recv.borrow_and_update().deref() {
+                            break value.clone();
+                        }
+                        if recv.changed().await.is_err() {
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                })
+            })
+        }
+    }
 }
 
 
@@ -394,6 +499,33 @@ pub trait SignalProvider<T: Clone> {
 pub struct RunOptions {
     #[serde(default)]
     pub runtime_name: String,
+}
+
+#[macro_export]
+macro_rules! setup_logging {
+    ($context: ident) => {
+        setup_logging!($context $)
+    };
+    ($context: ident $dol:tt) => {
+        #[allow(unused_macros)]
+        macro_rules! info {
+            ($dol($dol arg:tt)+) => {
+                $crate::log::info!(target: $context.get_name(), $dol ($dol arg)+)
+            };
+        }
+        #[allow(unused_macros)]
+        macro_rules! warn {
+            ($dol ($dol arg:tt)+) => {
+                $crate::log::warn!(target: $context.get_name(), $dol ($dol arg)+)
+            };
+        }
+        #[allow(unused_macros)]
+        macro_rules! error {
+            ($dol ($dol arg:tt)+) => {
+                $crate::log::error!(target: $context.get_name(), $dol ($dol arg)+)
+            };
+        }
+    };
 }
 
 const LOGS_DIR: &str = "logs";
@@ -467,12 +599,10 @@ pub async fn async_run_all(
 ) -> anyhow::Result<()> {
     init_logger(&run_options)?;
 
-    let mut senders = Vec::new();
+    let abort_sender = broadcast::Sender::new(1);
     let mut tasks = JoinSet::new();
     for runnable in runnables {
-        let (sender, recv) = oneshot::channel();
-        senders.push(sender);
-        (runnable.run)(&mut tasks, recv);
+        tasks.spawn(runnable.run(abort_sender.subscribe()));
     }
     if tasks.is_empty() {
         warn!("No nodes to run. Exiting...");
@@ -493,17 +623,7 @@ pub async fn async_run_all(
                     info!("All Nodes terminated. Exiting...");
                     break;
                 };
-                let result = match result.unwrap() {
-                    Ok(x) => x,
-                    Err((name, _)) => {
-                        error!("{name} has panicked");
-                        continue;
-                    }
-                };
-                if let Err(RunError { err, name, critical }) = result {
-                    let mut err_string = format!("{err:?}");
-                    err_string = err_string.replace('\n', "\n\t");
-                    error!("{name} has faced the following error:\n\t{err_string}");
+                if let Err(RunError { critical }) = result.unwrap() {
                     if critical {
                         error!("Critical node has terminated! Exiting...");
                         break;
@@ -522,31 +642,7 @@ pub async fn async_run_all(
         }
     }
 
-    drop(senders);
-    while let Some(result) = tasks.join_next().await {
-        let result = match result.unwrap() {
-            Ok(x) => x,
-            Err((name, e)) => {
-                if !e.is_cancelled() {
-                    error!("{name} has panicked");
-                }
-                continue;
-            }
-        };
-        if let Err(RunError {
-            err,
-            name,
-            critical,
-        }) = result
-        {
-            let mut err_string = format!("{err:?}");
-            err_string = err_string.replace('\n', "\n\t");
-            error!("{name} has faced the following error:\n\t{err_string}");
-            if critical {
-                error!("Critical node has terminated! Exiting...");
-                break;
-            }
-        }
-    }
+    drop(abort_sender);
+    while let Some(_) = tasks.join_next().await {}
     Ok(())
 }

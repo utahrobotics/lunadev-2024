@@ -14,11 +14,8 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use unros_core::{
     anyhow, async_trait,
-    log::error,
-    node_error, node_info, node_warn,
-    tokio::runtime::Handle,
     tokio_rayon::{self},
-    Node, OwnedSignal, Signal,
+    Node, Signal, RuntimeContext, setup_logging, log, SignalRef,
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -40,46 +37,39 @@ enum ImportantMessage {
 }
 
 pub struct Telemetry {
-    name: String,
     pub bandwidth_limit: u32,
     pub server_addr: Address,
-    steering_signal: OwnedSignal<Steering>,
-    image_queue: Arc<SegQueue<Arc<DynamicImage>>>,
+    steering_signal: Signal<Steering>,
+    // image_subscriptions
+    // image_queue: Arc<SegQueue<Arc<DynamicImage>>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
 }
 
 impl Telemetry {
     pub fn new(server_addr: impl Into<Address>) -> Self {
         Self {
-            name: "telemetry".into(),
             bandwidth_limit: 0,
             server_addr: server_addr.into(),
             steering_signal: Default::default(),
-            image_queue: Arc::new(SegQueue::new()),
+            // image_queue: Arc::new(SegQueue::new()),
             packet_queue: SegQueue::new(),
         }
     }
 
-    pub fn subscribe_to_image(&self, signal: &mut impl Signal<Arc<DynamicImage>>) {
-        let queue = self.image_queue.clone();
-        signal.connect_to(move |img| {
-            queue.push(img);
-        });
+    pub fn get_steering_signal(&mut self) -> SignalRef<Steering> {
+        self.steering_signal.get_ref()
     }
 
-    pub fn get_steering_signal(&mut self) -> &mut OwnedSignal<Steering> {
-        &mut self.steering_signal
-    }
-
-    async fn receive_packet(&self, channel: u8, packet: Box<[u8]>) {
+    fn receive_packet(&self, channel: u8, packet: Box<[u8]>, context: &RuntimeContext) {
+        setup_logging!(context);
         let Ok(channel) = Channels::try_from(channel) else {
-            node_error!(self, "Received invalid channel: {channel}");
+            error!("Received invalid channel: {channel}");
             return;
         };
         match channel {
             Channels::Important => {
                 let Ok(msg) = ImportantMessage::try_from(packet[0]) else {
-                    node_error!(self, "Received invalid ImportantMessage: {}", packet[0]);
+                    error!("Received invalid ImportantMessage: {}", packet[0]);
                     return;
                 };
                 match msg {
@@ -99,11 +89,10 @@ impl Telemetry {
                 let steering = i8::from_le_bytes([packet[1]]) as f32;
 
                 self.steering_signal
-                    .emit(Steering {
+                    .set(Steering {
                         drive: NotNan::new(drive / 127.0).unwrap(),
                         steering: NotNan::new(steering / 127.0).unwrap(),
-                    })
-                    .await;
+                    });
 
                 self.packet_queue.push((
                     packet,
@@ -111,7 +100,7 @@ impl Telemetry {
                     Channels::Controls,
                 ));
             }
-            Channels::Max => node_error!(self, "Received invalid channel: {}", channel as u8),
+            Channels::Max => error!("Received invalid channel: {}", channel as u8),
         }
     }
 }
@@ -144,7 +133,7 @@ impl Drop for HostWrapper {
                 Ok(Some(event)) => event,
                 Ok(None) => continue,
                 Err(e) => {
-                    error!("Faced the following error while safely dropping ENet host: {e}");
+                    log::error!("Faced the following error while safely dropping ENet host: {e}");
                     break;
                 }
             };
@@ -171,15 +160,11 @@ impl Drop for DropCheck {
 
 #[async_trait]
 impl Node for Telemetry {
-    fn set_name(&mut self, name: String) {
-        self.name = name;
-    }
+    const DEFAULT_NAME: &'static str = "telemetry";
 
-    fn get_name(&self) -> &str {
-        &self.name
-    }
+    async fn run(self, context: RuntimeContext) -> anyhow::Result<()> {
+        setup_logging!(context);
 
-    async fn run(self) -> anyhow::Result<()> {
         let self = Arc::new(self);
         let enet = Enet::new()?;
         let outgoing_limit = if self.bandwidth_limit == 0 {
@@ -187,7 +172,6 @@ impl Node for Telemetry {
         } else {
             BandwidthLimit::Limited(self.bandwidth_limit)
         };
-        let handle = Handle::current();
 
         let drop_check_bool = Arc::new(AtomicBool::new(false));
         let (sender, receiver) = std::sync::mpsc::sync_channel(0);
@@ -206,7 +190,7 @@ impl Node for Telemetry {
             host.connect(&self.server_addr, Channels::Max as usize, 0)?;
 
             loop {
-                node_info!(self, "Connecting to lunabase...");
+                info!("Connecting to lunabase...");
                 loop {
                     let Some(event) = host.service(300)? else {
                         continue;
@@ -214,13 +198,13 @@ impl Node for Telemetry {
                     match event {
                         Event::Connect(_) => break,
                         Event::Disconnect(_, _) => {
-                            node_warn!(self, "Somehow disconnected to a peer!")
+                            warn!("Somehow disconnected to a peer!")
                         }
                         Event::Receive { .. } => todo!(),
                     }
                 }
                 while let Some(_) = self.image_queue.pop() {}
-                node_info!(self, "Connected to lunabase!");
+                info!("Connected to lunabase!");
                 loop {
                     {
                         let option = host.service(50)?;
@@ -229,10 +213,10 @@ impl Node for Telemetry {
                         }
                         match option {
                             Some(Event::Connect(_)) => {
-                                node_error!(self, "Somehow connected to another peer, ignoring...");
+                                error!("Somehow connected to another peer, ignoring...");
                             }
                             Some(Event::Disconnect(_, _)) => {
-                                node_error!(self, "Disconnected from lunabase!");
+                                error!("Disconnected from lunabase!");
                                 break;
                             }
                             Some(Event::Receive {
@@ -242,9 +226,7 @@ impl Node for Telemetry {
                             }) => {
                                 let self = self.clone();
                                 let packet = packet.data().to_vec().into_boxed_slice();
-                                handle.spawn(async move {
-                                    self.receive_packet(channel_id, packet).await;
-                                });
+                                self.receive_packet(channel_id, packet, &context);
                             }
                             None => {}
                         }
