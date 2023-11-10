@@ -6,20 +6,20 @@ use std::{
         atomic::{self, AtomicBool},
         Arc, Once,
     },
-    time::Instant,
+    time::Instant, num::NonZeroU32, collections::hash_map::Entry, ops::Deref,
 };
 
 pub use anyhow;
 use anyhow::Context;
 pub use async_trait::async_trait;
 pub use bytes;
+use fxhash::FxHashMap;
 pub use log;
 use log::{error, info, warn};
 use serde::Deserialize;
-use static_assertions::assert_impl_all;
 pub use tokio;
 use tokio::{
-    sync::{oneshot, watch},
+    sync::{oneshot, watch, broadcast, mpsc},
     task::{JoinError, JoinSet},
 };
 pub use tokio_rayon::{self, rayon};
@@ -133,7 +133,7 @@ struct RunError {
     critical: bool,
 }
 
-pub struct Runnable {
+pub struct FinalizedNode {
     critical: Arc<AtomicBool>,
     run: Box<
         dyn FnOnce(
@@ -143,13 +143,13 @@ pub struct Runnable {
     >,
 }
 
-impl<N: Node> From<N> for Runnable {
+impl<N: Node> From<N> for FinalizedNode {
     fn from(value: N) -> Self {
         Self::new(value)
     }
 }
 
-impl Runnable {
+impl FinalizedNode {
     pub fn new<N: Node>(node: N) -> Self {
         let critical = Arc::new(AtomicBool::new(false));
         Self {
@@ -190,280 +190,205 @@ impl Runnable {
     }
 }
 
-pub trait Signal<T> {
-    // async fn emit(&self, msg: T);
 
-    fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static);
-
-    fn connect_to_async<F>(&mut self, receiver: impl Fn(T) -> F + Send + Sync + 'static)
-    where
-        F: Future<Output = ()> + Send + Unpin + 'static;
-
-    fn connect_to_non_blocking(&mut self, receiver: impl Fn(T) + Send + Sync + 'static)
-    where
-        T: Send + 'static;
-
-    fn connect_to_async_non_blocking<F>(
-        &mut self,
-        receiver: impl Fn(T) -> F + Send + Sync + 'static,
-    ) where
-        F: Future<Output = ()> + Send + Unpin + 'static,
-        T: Send + 'static;
-
-    // fn map<V: Clone + Send + Sync + 'static>(&mut self, f: impl Fn(T) -> V + Send + Sync) -> MappedSignal<V, T>
-    // where T: Clone + Send + Sync + 'static;
+pub struct UnboundedSubscription<T> {
+    recv: Box<dyn FnMut() -> Pin<Box<dyn Future<Output=T>>> + Send + Sync>
 }
 
-pub struct OwnedSignal<T: Clone + Send + Sync> {
-    async_fns: Vec<Box<dyn Fn(T) -> Box<dyn Future<Output = ()> + Send + Unpin> + Send + Sync>>,
-    fns: Vec<Box<dyn Fn(T) + Send + Sync>>,
-}
 
-impl<T: Clone + Send + Sync> Default for OwnedSignal<T> {
-    fn default() -> Self {
-        Self {
-            async_fns: Default::default(),
-            fns: Default::default(),
+static_assertions::assert_impl_all!(UnboundedSubscription<()>: Send, Sync);
+
+
+impl<T: 'static> UnboundedSubscription<T> {
+    pub async fn recv(&mut self) -> T {
+        (self.recv)().await
+    }
+
+    /// Changes the generic type of the signal that this subscription is for.
+    /// 
+    /// This is done by applying a mapping function after a message is received.
+    /// This mapping function is ran in an asynchronous context, so it should be
+    /// non-blocking. Do note that the mapping function itself is not asynchronous
+    /// and is multi-thread safe.
+    /// 
+    /// There is also a non-zero cost to mapping on top of the mapping functions,
+    /// so avoid having deeply mapped subscriptions. This is due to the lack of
+    /// `AsyncFn` traits and/or lending functions.
+    pub fn map<V>(self, mapper: impl FnMut(T) -> V + 'static + Send + Sync) -> UnboundedSubscription<V> {
+        let mapper = Arc::new(std::sync::Mutex::new(mapper));
+        let recv = Arc::new(std::sync::Mutex::new(self.recv));
+        
+        UnboundedSubscription {
+            recv: Box::new(move || {
+                let mapper = mapper.clone();
+                let recv = recv.clone();
+
+                Box::pin(async move {
+                    let value = (recv.lock().unwrap())().await;
+                    (mapper.lock().unwrap())(value)
+                })
+            })
         }
     }
 }
 
-impl<T: Clone + Send + Sync> OwnedSignal<T> {
-    pub async fn emit(&self, msg: T) {
-        for async_fn in &self.async_fns {
-            async_fn(msg.clone()).await;
+
+pub struct BoundedSubscription<T, S=T> {
+    recv: broadcast::Receiver<S>,
+    mapper: Box<dyn FnMut(S) -> T>
+}
+
+
+impl<T: 'static, S: Clone + 'static> BoundedSubscription<T, S> {
+    pub async fn recv(&mut self) -> Result<T, u64> {
+        let value = match self.recv.recv().await {
+            Ok(x) => x,
+            Err(broadcast::error::RecvError::Closed) => {
+                std::future::pending::<()>().await;
+                unreachable!();
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => return Err(n)
+        };
+        Ok((self.mapper)(value))
+    }
+
+    pub fn map<V>(mut self, mut mapper: impl FnMut(T) -> V + 'static) -> BoundedSubscription<V, S> {
+        BoundedSubscription {
+            recv: self.recv,
+            mapper: Box::new(move |x| mapper((self.mapper)(x)))
         }
-        self.fns.iter().for_each(|x| x(msg.clone()));
     }
 }
 
-impl<T: Clone + Send + Sync> Signal<T> for OwnedSignal<T> {
-    fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static) {
-        self.fns.push(Box::new(receiver));
-    }
 
-    fn connect_to_async<F>(&mut self, receiver: impl Fn(T) -> F + Send + Sync + 'static)
-    where
-        F: Future<Output = ()> + Send + Unpin + 'static,
-    {
-        self.async_fns
-            .push(Box::new(move |x| Box::new(receiver(x))));
-    }
-
-    fn connect_to_non_blocking(&mut self, receiver: impl Fn(T) + Send + Sync + 'static)
-    where
-        T: Send + 'static,
-    {
-        let receiver = Arc::new(receiver);
-        self.fns.push(Box::new(move |x| {
-            let receiver = receiver.clone();
-            rayon::spawn(move || receiver(x))
-        }));
-    }
-
-    fn connect_to_async_non_blocking<F>(
-        &mut self,
-        receiver: impl Fn(T) -> F + Send + Sync + 'static,
-    ) where
-        F: Future<Output = ()> + Send + Unpin + 'static,
-        T: Send + 'static,
-    {
-        let receiver = Arc::new(receiver);
-        self.fns.push(Box::new(move |x| {
-            let receiver = receiver.clone();
-            tokio::spawn(async move {
-                receiver(x).await;
-            });
-        }));
-    }
-
-    // fn map<V: Clone + Send + Sync + 'static>(&mut self, f: impl Fn(T) -> V + Send + Sync) -> MappedSignal<V, T>
-    // where T: Clone + Send + Sync + 'static {
-    //     let mapper: Box<dyn Fn(T) -> V + Send + Sync> = Box::new(f);
-    //     MappedSignal { signal: SignalVariant::Owned(self), mapper: mapper.into() }
-    // }
+pub struct WatchedSubscription<T, S=T> {
+    recv: watch::Receiver<Option<S>>,
+    mapper: Box<dyn FnMut(S) -> T>
 }
 
-assert_impl_all!(OwnedSignal<()>: Send, Sync);
 
-// enum SignalVariant<'a, T: Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static=()> {
-//     Owned(&'a mut OwnedSignal<T>),
-//     Mapped(&'a mut MappedSignal<'a, T, V>)
-// }
-
-// impl<'a, T: Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static> Signal<T> for SignalVariant<'a, T, V> {
-//     fn connect_to(&mut self, receiver: impl Fn(T) + Send + Sync + 'static) {
-//         match self {
-//             Self::Owned(x) => x.connect_to(receiver),
-//             Self::Mapped(x) => x.connect_to(receiver),
-//         }
-//     }
-
-//     fn connect_to_async<F>(&mut self, receiver: impl Fn(T) -> F + Send + Sync + 'static)
-//     where
-//         F: Future<Output = ()> + Send + Unpin + 'static {
-//             match self {
-//                 Self::Owned(x) => x.connect_to_async(receiver),
-//                 Self::Mapped(x) => x.connect_to_async(receiver),
-//             }
-//     }
-
-//     fn connect_to_non_blocking(&mut self, receiver: impl Fn(T) + Send + Sync + 'static)
-//     where
-//         T: Send + 'static {
-//             match self {
-//                 Self::Owned(x) => x.connect_to_non_blocking(receiver),
-//                 Self::Mapped(x) => x.connect_to_non_blocking(receiver),
-//             }
-//     }
-
-//     fn connect_to_async_non_blocking<F>(
-//         &mut self,
-//         receiver: impl Fn(T) -> F + Send + Sync + 'static,
-//     ) where
-//         F: Future<Output = ()> + Send + Unpin + 'static,
-//         T: Send + 'static {
-//             match self {
-//                 Self::Owned(x) => x.connect_to_async_non_blocking(receiver),
-//                 Self::Mapped(x) => x.connect_to_async_non_blocking(receiver),
-//             }
-//     }
-// }
-
-pub struct MappedSignal<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> {
-    signal: &'a mut OwnedSignal<T>,
-    mapper: Arc<dyn Fn(T) -> V + Send + Sync>,
-}
-
-impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> Signal<V>
-    for MappedSignal<'a, V, T>
-{
-    fn connect_to(&mut self, receiver: impl Fn(V) + Send + Sync + 'static) {
-        let mapper = self.mapper.clone();
-        self.signal.connect_to(move |x| receiver(mapper(x)));
+impl<T: 'static, S: Clone + 'static> WatchedSubscription<T, S> {
+    pub async fn get(&mut self) -> T {
+        let value = loop {
+            if let Some(value) = self.recv.borrow_and_update().deref() {
+                break value.clone();
+            }
+            if self.recv.changed().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        };
+        (self.mapper)(value)
     }
 
-    fn connect_to_async<F>(&mut self, receiver: impl Fn(V) -> F + Send + Sync + 'static)
-    where
-        F: Future<Output = ()> + Send + Unpin + 'static,
-    {
-        let mapper = self.mapper.clone();
-        self.signal.connect_to_async(move |x| receiver(mapper(x)));
-    }
-
-    fn connect_to_non_blocking(&mut self, receiver: impl Fn(V) + Send + Sync + 'static)
-    where
-        V: Send + 'static,
-    {
-        let mapper = self.mapper.clone();
-        self.signal
-            .connect_to_non_blocking(move |x| receiver(mapper(x)));
-    }
-
-    fn connect_to_async_non_blocking<F>(
-        &mut self,
-        receiver: impl Fn(V) -> F + Send + Sync + 'static,
-    ) where
-        F: Future<Output = ()> + Send + Unpin + 'static,
-        V: Send + 'static,
-    {
-        let mapper = self.mapper.clone();
-        self.signal
-            .connect_to_async_non_blocking(move |x| receiver(mapper(x)));
+    pub fn map<V>(mut self, mut mapper: impl FnMut(T) -> V + 'static) -> WatchedSubscription<V, S> {
+        WatchedSubscription {
+            recv: self.recv,
+            mapper: Box::new(move |x| mapper((self.mapper)(x)))
+        }
     }
 }
 
-// impl<'a, V: Clone + Send + Sync + 'static, T: Clone + Send + Sync + 'static> MappedSignal<'a, V, T> {
-//     pub fn map<X: Clone + Send + Sync + 'static>(&mut self, f: impl Fn(V) -> X + Send + Sync) -> MappedSignal<X, V>
-//     where V: Clone + Send + Sync + 'static {
-//         let mapper: Box<dyn Fn(V) -> X + Send + Sync> = Box::new(f);
-//         MappedSignal { signal: SignalVariant::Mapped(self), mapper: mapper.into() }
-//     }
-// }
 
-pub struct PublicValue<T: Clone + Send + Sync>(Arc<watch::Sender<T>>);
-
-impl<T: Clone + Send + Sync + Default> Default for PublicValue<T> {
-    fn default() -> Self {
-        Self::new(Default::default())
-    }
+/// An essential component that promotes separation of concerns, and is 
+/// an intrinsic element of the ROS framework.
+/// 
+/// Signals provide a simple way to send a message to receivers, much
+/// like Rust's channels. However, signals provide 3 different forms
+/// of subscriptions:
+/// 
+/// 1. **Unbounded**<br>
+///    The subscription will contain all sent messages forever and ever
+///    if it is never read from. If the receiving code can handle the same
+///    throughput that this signal produces, but the buffer size needed is
+///    unknown or highly variable, use this subscription.
+/// 
+/// 2. **Bounded**<br>
+///    The subscription will hold a limited number of messages before
+///    ignoring future messages until the current ones are read. If the
+///    receiving code may not be able to handle the same throughput that
+///    this signal produces, and can tolerate lost messages, use this
+///    subscription.
+/// 
+/// 3. **Watched**<br>
+///    The subscription will only keep track of the latest message. If you
+///    only need the latest value, use this subscription.
+/// 
+/// Signals make numerous clones of the values it will send, so you should
+/// use a type `T` that is cheap to clone with this signal. A good default is
+/// `Arc`. Since Nodes will often be used from different threads, the type `T`
+/// should also be `Send + Sync`, but this is not a requirement.
+pub struct Signal<T> {
+    unbounded_senders: Vec<mpsc::UnboundedSender<T>>,
+    bounded_senders: FxHashMap<NonZeroU32, broadcast::Sender<T>>,
+    watch_sender: watch::Sender<Option<T>>
 }
 
-impl<T: Clone + Send + Sync> PublicValue<T> {
-    pub fn new(value: T) -> Self {
-        Self(Arc::new(watch::channel(value).0))
-    }
 
-    pub fn watch(&self) -> OwnedWatchedPublicValue<T> {
-        OwnedWatchedPublicValue {
-            _sender: self.0.clone(),
-            recv: self.0.subscribe(),
+impl<T: Clone + Send + 'static> Signal<T> {
+    pub fn subscribe_unbounded(&mut self) -> UnboundedSubscription<T> {
+        let (sender, recv) = mpsc::unbounded_channel();
+        let recv = Arc::new(tokio::sync::Mutex::new(recv));
+        self.unbounded_senders.push(sender);
+
+        UnboundedSubscription {
+            recv: Box::new(move || {
+                let recv = recv.clone();
+
+                Box::pin(async move {
+                    let Some(value) = recv.lock().await.recv().await else {
+                        std::future::pending::<()>().await;
+                        unreachable!();
+                    };
+                    value
+                })
+            })
         }
     }
 
-    pub fn replace(&self, value: T) -> T {
-        self.0.send_replace(value)
+    pub fn subscribe_bounded(&mut self, bound: NonZeroU32) -> BoundedSubscription<T> {
+        let recv = match self.bounded_senders.entry(bound) {
+            Entry::Occupied(x) => x.get().subscribe(),
+            Entry::Vacant(x) => {
+                let (sender, recv) = broadcast::channel(bound.get() as usize);
+                x.insert(sender);
+                recv
+            }
+        };
+        BoundedSubscription { recv, mapper: Box::new(|x| x) }
     }
 
-    pub fn get(&self) -> T {
-        self.0.borrow().clone()
+    pub fn watch(&self) -> WatchedSubscription<T> {
+        WatchedSubscription { recv: self.watch_sender.subscribe(), mapper: Box::new(|x| x) }
+    }
+
+    /// Sets a value into this signal.
+    /// 
+    /// Unbounded and Bounded Subscriptions will receive this value, and
+    /// Watched Subscriptions will replace their current values with this.
+    /// 
+    /// This method takes an immutable reference as a convenience, but this
+    /// can be abused by nodes that do not own this signal. As a user of this
+    /// signal, ie. you are accessing this signal just to subscribe to it,
+    /// do not call this method ever. This will lead to spaghetti code. Only
+    /// the node that owns this signal should call this method.
+    pub fn set(&self, value: T) {
+        for sender in &self.unbounded_senders {
+            let _ = sender.send(value.clone());
+        }
+        for sender in self.bounded_senders.values() {
+            let _ = sender.send(value.clone());
+        }
+        self.watch_sender.send_replace(Some(value));
     }
 }
 
-#[async_trait]
-pub trait WatchedPublicValue<T: Clone + Send + Sync> {
-    async fn wait_for_change(&mut self) -> T;
 
-    fn get(&mut self) -> T;
+pub trait SignalProvider<T: Clone> {
+    fn subscribe_unbounded(&mut self) -> UnboundedSubscription<T>;
+    fn subscribe_bounded(&mut self, bound: NonZeroU32) -> BoundedSubscription<T>;
+    fn watch(&self) -> WatchedSubscription<T>;
 }
 
-#[derive(Clone)]
-pub struct OwnedWatchedPublicValue<T: Clone + Send + Sync> {
-    _sender: Arc<watch::Sender<T>>,
-    recv: watch::Receiver<T>,
-}
-
-#[async_trait]
-impl<T: Clone + Send + Sync> WatchedPublicValue<T> for OwnedWatchedPublicValue<T> {
-    async fn wait_for_change(&mut self) -> T {
-        self.recv.wait_for(|_| true).await.unwrap().clone()
-    }
-
-    fn get(&mut self) -> T {
-        self.recv.borrow_and_update().clone()
-    }
-}
-
-// pub struct ByteSignal {
-//     stream: DuplexStream
-// }
-
-// impl Signal<Arc<[u8]>> for ByteSignal {
-//     fn connect_to(&mut self, receiver: impl Fn(Arc<[u8]>) + Send + Sync + 'static) {
-//         self.stream.read
-//     }
-
-//     fn connect_to_async<F>(&mut self, receiver: impl Fn(Arc<[u8]>) -> F + Send + Sync + 'static)
-//     where
-//         F: Future<Output = ()> + Send + Unpin + 'static {
-//         todo!()
-//     }
-
-//     fn connect_to_non_blocking(&mut self, receiver: impl Fn(Arc<[u8]>) + Send + Sync + 'static)
-//     where
-//         Arc<[u8]>: Send + 'static {
-//         todo!()
-//     }
-
-//     fn connect_to_async_non_blocking<F>(
-//         &mut self,
-//         receiver: impl Fn(Arc<[u8]>) -> F + Send + Sync + 'static,
-//     ) where
-//         F: Future<Output = ()> + Send + Unpin + 'static,
-//         Arc<[u8]>: Send + 'static {
-//         todo!()
-//     }
-// }
 
 #[derive(Deserialize, Default)]
 pub struct RunOptions {
@@ -530,14 +455,14 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
 
 #[tokio::main]
 pub async fn run_all(
-    runnables: impl IntoIterator<Item = Runnable>,
+    runnables: impl IntoIterator<Item = FinalizedNode>,
     run_options: RunOptions,
 ) -> anyhow::Result<()> {
     async_run_all(runnables, run_options).await
 }
 
 pub async fn async_run_all(
-    runnables: impl IntoIterator<Item = Runnable>,
+    runnables: impl IntoIterator<Item = FinalizedNode>,
     run_options: RunOptions,
 ) -> anyhow::Result<()> {
     init_logger(&run_options)?;

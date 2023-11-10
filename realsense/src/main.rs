@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use realsense::discover_all_realsense;
-use unros_core::{anyhow, log::info, run_all, RunOptions, Runnable, Signal};
+use unros_core::{anyhow, log::info, run_all, RunOptions, FinalizedNode, Signal};
 
 fn main() -> anyhow::Result<()> {
     let cameras = discover_all_realsense()?;
@@ -20,7 +20,7 @@ fn main() -> anyhow::Result<()> {
                     info!("{frame_count}");
                 }
             });
-            Runnable::from(x)
+            FinalizedNode::from(x)
         }),
         // [camera.into()],
         run_options,
