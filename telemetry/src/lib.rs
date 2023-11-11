@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossbeam::queue::SegQueue;
-use enet::{Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode};
+use enet::{Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, PeerState};
 use global_msgs::Steering;
 use image::{DynamicImage, EncodableLayout};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -15,7 +15,7 @@ use ordered_float::NotNan;
 use unros_core::{
     anyhow, async_trait, log, setup_logging,
     tokio_rayon::{self},
-    BoundedSubscription, Node, RuntimeContext, Signal, SignalRef,
+    Node, RuntimeContext, signal::{Signal, bounded::BoundedSubscription, SignalRef},
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -125,8 +125,10 @@ impl Drop for HostWrapper {
     fn drop(&mut self) {
         let mut peer_count = 0;
         for mut peer in self.0.peers() {
-            peer.disconnect(0);
-            peer_count += 1;
+            if peer.state() == PeerState::Connected {
+                peer.disconnect(0);
+                peer_count += 1;
+            }
         }
         while peer_count > 0 {
             let mut event = match self.0.service(1000) {
@@ -191,7 +193,10 @@ impl Node for Telemetry {
             loop {
                 info!("Connecting to lunabase...");
                 loop {
-                    let Some(event) = host.service(300)? else {
+                    if drop_check_bool.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
+                    let Some(event) = host.service(50)? else {
                         continue;
                     };
                     match event {

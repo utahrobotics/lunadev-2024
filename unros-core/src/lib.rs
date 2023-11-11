@@ -252,10 +252,26 @@ pub async fn run_all(
     async_run_all(runnables, run_options).await
 }
 
+#[derive(Default)]
+struct LastDrop {
+    force_exit: bool
+}
+
+
+impl Drop for LastDrop {
+    fn drop(&mut self) {
+        if self.force_exit {
+            std::process::exit(1);
+        }
+    }
+}
+
 pub async fn async_run_all(
     runnables: impl IntoIterator<Item = FinalizedNode>,
     run_options: RunOptions,
 ) -> anyhow::Result<()> {
+    let mut last_drop = LastDrop::default();
+
     init_logger(&run_options)?;
 
     let abort_sender = broadcast::Sender::new(1);
@@ -302,6 +318,18 @@ pub async fn async_run_all(
     }
 
     drop(abort_sender);
-    while let Some(_) = tasks.join_next().await {}
+    tokio::select! {
+        () = async {
+            while let Some(_) = tasks.join_next().await {}
+        } => {}
+        () = async {
+            if tokio::signal::ctrl_c().await.is_err() {
+                std::future::pending().await
+            }
+            warn!("Force exiting...");
+            last_drop.force_exit = true;
+        } => {}
+    }
+    
     Ok(())
 }
