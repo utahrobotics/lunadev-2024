@@ -110,15 +110,15 @@ impl<T: Send + 'static> ChannelTrait<Result<T, u64>> for BoundedSubscription<T> 
 impl<T: Send + 'static> Add for BoundedSubscription<T> {
     type Output = Self;
 
-    fn add(mut self, rhs: Self) -> Self::Output {
-        self.receivers.push(Box::new(rhs));
+    fn add(mut self, mut rhs: Self) -> Self::Output {
+        self.receivers.append(&mut rhs.receivers);
         self
     }
 }
 
 impl<T: Send + 'static> AddAssign for BoundedSubscription<T> {
-    fn add_assign(&mut self, rhs: Self) {
-        self.receivers.push(Box::new(rhs));
+    fn add_assign(&mut self, mut rhs: Self) {
+        self.receivers.append(&mut rhs.receivers);
     }
 }
 

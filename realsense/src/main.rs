@@ -1,9 +1,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use realsense::discover_all_realsense;
-use unros_core::{anyhow, log::info, run_all, FinalizedNode, RunOptions, Signal};
+use unros_core::{anyhow, log::info, async_run_all, FinalizedNode, RunOptions, tokio};
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let cameras = discover_all_realsense()?;
 
     let frame_count = AtomicUsize::new(0);
@@ -11,18 +12,21 @@ fn main() -> anyhow::Result<()> {
     let run_options = RunOptions {
         ..Default::default()
     };
-    run_all(
+    async_run_all(
         cameras.map(|mut x| {
-            x.image_received_signal().connect_to(|img| {
-                let frame_count = frame_count.fetch_add(1, Ordering::Relaxed) + 1;
-                if frame_count % 20 == 0 {
-                    img.save(format!("{frame_count}.png")).unwrap();
-                    info!("{frame_count}");
+            let mut sub = x.image_received_signal().subscribe_unbounded();
+            tokio::spawn(async move {
+                loop {
+                    let img = sub.recv().await;
+                    let frame_count = frame_count.fetch_add(1, Ordering::Relaxed) + 1;
+                    if frame_count % 20 == 0 {
+                        img.save(format!("{frame_count}.png")).unwrap();
+                        info!("{frame_count}");
+                    }
                 }
             });
             FinalizedNode::from(x)
         }),
-        // [camera.into()],
         run_options,
-    )
+    ).await
 }

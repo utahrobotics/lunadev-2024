@@ -1,121 +1,146 @@
-use std::time::{Duration, Instant};
+use std::{time::{Duration, Instant}, num::NonZeroU32};
 
 use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3};
 use unros_core::{
-    anyhow, async_trait, node_warn,
-    tokio::{
-        self,
-        sync::mpsc::{channel, Receiver, Sender},
-    },
-    Node, OwnedWatchedPublicValue, PublicValue, Signal,
+    anyhow, async_trait,
+    tokio,
+    Node, signal::{Signal, bounded::BoundedSubscription, SignalRef}, RuntimeContext, setup_logging,
 };
 
+#[derive(Clone, Copy)]
 pub struct PositionFrame {
     position: Point3<f32>,
     variance: Matrix3<f32>,
 }
 
+#[derive(Clone, Copy)]
+pub struct OrientationFrame {
+    orientation: UnitQuaternion<f32>,
+    variance: Matrix3<f32>,
+}
+
+#[derive(Clone, Copy)]
 pub struct IMUFrame {
     acceleration: Vector3<f32>,
     rotation: Vector3<f32>,
 }
 
 pub struct Positioner {
-    name: String,
     pub builder: eskf::Builder,
-    imu_frame_sender: Sender<IMUFrame>,
-    imu_frame_receiver: Receiver<IMUFrame>,
-    position_frame_sender: Sender<PositionFrame>,
-    position_frame_receiver: Receiver<PositionFrame>,
+    imu_sub: BoundedSubscription<IMUFrame>,
+    position_sub: BoundedSubscription<PositionFrame>,
+    orientation_sub: BoundedSubscription<OrientationFrame>,
 
-    position: PublicValue<Point3<f32>>,
-    velocity: PublicValue<Vector3<f32>>,
-    orientation: PublicValue<UnitQuaternion<f32>>,
+    position: Signal<Point3<f32>>,
+    velocity: Signal<Vector3<f32>>,
+    orientation: Signal<UnitQuaternion<f32>>,
 }
 
 impl Default for Positioner {
     fn default() -> Self {
-        let (imu_frame_sender, imu_frame_receiver) = channel(256);
-        let (position_frame_sender, position_frame_receiver) = channel(256);
-
         Self {
-            name: Default::default(),
             builder: Default::default(),
-            imu_frame_sender,
-            imu_frame_receiver,
-            position_frame_sender,
-            position_frame_receiver,
-            position: PublicValue::new(Point3::new(0.0, 0.0, 0.0)),
-            velocity: PublicValue::new(Vector3::new(0.0, 0.0, 0.0)),
+            imu_sub: BoundedSubscription::none(),
+            position_sub: BoundedSubscription::none(),
+            orientation_sub: BoundedSubscription::none(),
+
+            position: Default::default(),
+            velocity: Default::default(),
             orientation: Default::default(),
         }
     }
 }
 
 impl Positioner {
-    pub fn connect_imu_from(&self, signal: &mut impl Signal<IMUFrame>) {
-        let imu_frame_sender = self.imu_frame_sender.clone();
-        signal.connect_to(move |x| {
-            let _ = imu_frame_sender.try_send(x);
-        });
+    pub fn add_imu_sub(&mut self, signal: &mut SignalRef<IMUFrame>) {
+        self.imu_sub += signal.subscribe_bounded(NonZeroU32::new(8).unwrap());
     }
 
-    pub fn connect_position_from(&self, signal: &mut impl Signal<PositionFrame>) {
-        let position_frame_sender = self.position_frame_sender.clone();
-        signal.connect_to(move |x| {
-            let _ = position_frame_sender.try_send(x);
-        });
+    pub fn add_position_sub(&mut self, signal: &mut SignalRef<PositionFrame>) {
+        self.position_sub += signal.subscribe_bounded(NonZeroU32::new(8).unwrap());
     }
 
-    pub fn watch_position(&self) -> OwnedWatchedPublicValue<Point3<f32>> {
-        self.position.watch()
+    pub fn add_orientation_sub(&mut self, signal: &mut SignalRef<OrientationFrame>) {
+        self.orientation_sub += signal.subscribe_bounded(NonZeroU32::new(8).unwrap());
     }
 
-    pub fn watch_velocity(&self) -> OwnedWatchedPublicValue<Vector3<f32>> {
-        self.velocity.watch()
+    pub fn get_position_signal(&mut self) -> SignalRef<Point3<f32>> {
+        self.position.get_ref()
     }
 
-    pub fn watch_orientation(&self) -> OwnedWatchedPublicValue<UnitQuaternion<f32>> {
-        self.orientation.watch()
+    pub fn get_velocity_signal(&mut self) -> SignalRef<Vector3<f32>> {
+        self.velocity.get_ref()
+    }
+
+    pub fn get_orientation_signal(&mut self) -> SignalRef<UnitQuaternion<f32>> {
+        self.orientation.get_ref()
     }
 }
 
 #[async_trait]
 impl Node for Positioner {
-    fn set_name(&mut self, name: String) {
-        self.name = name;
-    }
-    fn get_name(&self) -> &str {
-        &self.name
-    }
-    async fn run(mut self) -> anyhow::Result<()> {
+    const DEFAULT_NAME: &'static str = "realsense";
+
+    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+        setup_logging!(context);
+
         let mut eskf = self.builder.build();
         let start = Instant::now();
         let mut last_elapsed = Duration::ZERO;
 
         loop {
             tokio::select! {
-                frame = self.imu_frame_receiver.recv() => {
-                    let frame = frame.unwrap();
+                result = self.imu_sub.recv() => {
+                    let frame = match result {
+                        Ok(x) => x,
+                        Err(n) => {
+                            warn!("Lagged behind by {n} frames");
+                            continue;
+                        }
+                    };
                     let now = start.elapsed();
                     eskf.predict(frame.acceleration, frame.rotation, now - last_elapsed);
                     last_elapsed = now;
 
-                    self.position.replace(eskf.position);
-                    self.velocity.replace(eskf.velocity);
-                    self.orientation.replace(eskf.orientation);
+                    self.position.set(eskf.position);
+                    self.velocity.set(eskf.velocity);
+                    self.orientation.set(eskf.orientation);
                 }
-                frame = self.position_frame_receiver.recv() => {
-                    let frame = frame.unwrap();
+                result = self.position_sub.recv() => {
+                    let frame = match result {
+                        Ok(x) => x,
+                        Err(n) => {
+                            warn!("Lagged behind by {n} frames");
+                            continue;
+                        }
+                    };
 
                     if let Err(e) = eskf.observe_position(frame.position, frame.variance) {
-                        node_warn!(self, "Failed to observe position: {e:#?}");
+                        error!("Failed to observe position: {e:#?}");
                         continue;
                     }
 
-                    self.position.replace(eskf.position);
-                    self.velocity.replace(eskf.velocity);
-                    self.orientation.replace(eskf.orientation);
+                    self.position.set(eskf.position);
+                    self.velocity.set(eskf.velocity);
+                    self.orientation.set(eskf.orientation);
+                }
+                result = self.orientation_sub.recv() => {
+                    let frame = match result {
+                        Ok(x) => x,
+                        Err(n) => {
+                            warn!("Lagged behind by {n} frames");
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = eskf.observe_orientation(frame.orientation, frame.variance) {
+                        error!("Failed to observe orientation: {e:#?}");
+                        continue;
+                    }
+
+                    self.position.set(eskf.position);
+                    self.velocity.set(eskf.velocity);
+                    self.orientation.set(eskf.orientation);
                 }
             }
         }

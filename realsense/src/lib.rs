@@ -6,23 +6,31 @@ use std::{
 };
 
 use image::{DynamicImage, ImageBuffer, Rgb};
+use nalgebra::Vector3;
+use quaternion_core::{to_euler_angles, RotationType, RotationSequence};
 use realsense_rust::{
     config::Config,
     context::Context,
     device::Device,
-    frame::{ColorFrame, GyroFrame},
-    kind::{Rs2CameraInfo, Rs2Format, Rs2ProductLine, Rs2StreamKind},
+    frame::{ColorFrame, PoseFrame},
+    kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind},
     pipeline::InactivePipeline,
 };
 use unros_core::{
-    anyhow, async_trait, node_warn, tokio::runtime::Handle, tokio_rayon, Node, OwnedSignal,
+    anyhow, async_trait, tokio_rayon, Node, signal::{Signal, SignalRef}, RuntimeContext, setup_logging,
 };
 
+#[derive(Clone, Copy)]
+pub struct IMUFrame {
+    pub acceleration: Vector3<f32>,
+    pub rotation: Vector3<f32>,
+}
+
 pub struct RealSenseCamera {
-    name: String,
     device: Device,
     context: Arc<Mutex<Context>>,
-    image_received: OwnedSignal<Arc<DynamicImage>>,
+    image_received: Signal<Arc<DynamicImage>>,
+    imu_received: Signal<IMUFrame>
 }
 
 impl RealSenseCamera {
@@ -30,26 +38,23 @@ impl RealSenseCamera {
         let mut context = Context::new()?;
         let device = context.add_device(path)?;
         Ok(Self {
-            name: "realsense".into(),
             device,
             context: Arc::new(Mutex::new(context)),
             image_received: Default::default(),
+            imu_received: Default::default(),
         })
     }
-    pub fn image_received_signal(&mut self) -> &mut OwnedSignal<Arc<DynamicImage>> {
-        &mut self.image_received
+    pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
+        self.image_received.get_ref()
     }
 }
 
 #[async_trait]
 impl Node for RealSenseCamera {
-    fn set_name(&mut self, name: String) {
-        self.name = name;
-    }
-    fn get_name(&self) -> &str {
-        &self.name
-    }
-    async fn run(self) -> anyhow::Result<()> {
+    const DEFAULT_NAME: &'static str = "realsense";
+
+    async fn run(self, context: RuntimeContext) -> anyhow::Result<()> {
+        setup_logging!(context);
         let pipeline = InactivePipeline::try_from(self.context.lock().unwrap().deref())?;
         let mut config = Config::new();
 
@@ -63,7 +68,7 @@ impl Node for RealSenseCamera {
                 .enable_stream(Rs2StreamKind::Color, None, 640, 0, Rs2Format::Rgb8, 30)?
                 .enable_stream(Rs2StreamKind::Gyro, None, 0, 0, Rs2Format::Any, 0)?;
         } else {
-            node_warn!(self, "A Realsense camera is not attached to a USB 3.0 port");
+            warn!("A Realsense camera is not attached to a USB 3.0 port");
             config
                 .enable_device_from_serial(self.device.info(Rs2CameraInfo::SerialNumber).unwrap())?
                 .disable_all_streams()?
@@ -73,10 +78,8 @@ impl Node for RealSenseCamera {
 
         // Change pipeline's type from InactivePipeline -> ActivePipeline
         let mut pipeline = pipeline.start(Some(config))?;
-        let handle = Handle::current();
 
         tokio_rayon::spawn(move || {
-            let image_received = Arc::new(self.image_received);
             loop {
                 let frames = pipeline.wait(None)?;
 
@@ -107,16 +110,17 @@ impl Node for RealSenseCamera {
                             anyhow::anyhow!("Failed to convert RealSense color frame into image")
                         })?;
                         let img = DynamicImage::from(img);
-
-                        let image_received = image_received.clone();
-                        handle.spawn(async move {
-                            image_received.emit(Arc::new(img)).await;
-                        });
+                        self.image_received.set(Arc::new(img));
                     }
                 }
 
-                // Get gyro
-                let motion_frames = frames.frames_of_type::<GyroFrame>();
+                for frame in frames.frames_of_type::<PoseFrame>() {
+                    let quat = frame.rotation();
+                    self.imu_received.set(IMUFrame {
+                        acceleration: frame.acceleration().into(),
+                        rotation: to_euler_angles(RotationType::Intrinsic, RotationSequence::YXZ, (quat[0], [quat[1], quat[2], quat[3]])).into()
+                    });
+                }
             }
         })
         .await
@@ -131,7 +135,7 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
     Ok(devices.into_iter().map(move |device| RealSenseCamera {
         device,
         context: context.clone(),
-        name: "realsense".into(),
         image_received: Default::default(),
+        imu_received: Default::default(),
     }))
 }
