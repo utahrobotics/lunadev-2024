@@ -13,9 +13,9 @@ use image::{DynamicImage, EncodableLayout};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use unros_core::{
-    anyhow, async_trait,
+    anyhow, async_trait, log, setup_logging,
     tokio_rayon::{self},
-    Node, Signal, RuntimeContext, setup_logging, log, SignalRef,
+    BoundedSubscription, Node, RuntimeContext, Signal, SignalRef,
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -40,7 +40,7 @@ pub struct Telemetry {
     pub bandwidth_limit: u32,
     pub server_addr: Address,
     steering_signal: Signal<Steering>,
-    // image_subscriptions
+    image_subscriptions: BoundedSubscription<Arc<DynamicImage>>,
     // image_queue: Arc<SegQueue<Arc<DynamicImage>>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
 }
@@ -51,6 +51,7 @@ impl Telemetry {
             bandwidth_limit: 0,
             server_addr: server_addr.into(),
             steering_signal: Default::default(),
+            image_subscriptions: BoundedSubscription::none(),
             // image_queue: Arc::new(SegQueue::new()),
             packet_queue: SegQueue::new(),
         }
@@ -88,11 +89,10 @@ impl Telemetry {
                 let drive = i8::from_le_bytes([packet[0]]) as f32;
                 let steering = i8::from_le_bytes([packet[1]]) as f32;
 
-                self.steering_signal
-                    .set(Steering {
-                        drive: NotNan::new(drive / 127.0).unwrap(),
-                        steering: NotNan::new(steering / 127.0).unwrap(),
-                    });
+                self.steering_signal.set(Steering {
+                    drive: NotNan::new(drive / 127.0).unwrap(),
+                    steering: NotNan::new(steering / 127.0).unwrap(),
+                });
 
                 self.packet_queue.push((
                     packet,
@@ -162,10 +162,9 @@ impl Drop for DropCheck {
 impl Node for Telemetry {
     const DEFAULT_NAME: &'static str = "telemetry";
 
-    async fn run(self, context: RuntimeContext) -> anyhow::Result<()> {
+    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
-        let self = Arc::new(self);
         let enet = Enet::new()?;
         let outgoing_limit = if self.bandwidth_limit == 0 {
             BandwidthLimit::Unlimited
@@ -203,7 +202,7 @@ impl Node for Telemetry {
                         Event::Receive { .. } => todo!(),
                     }
                 }
-                while let Some(_) = self.image_queue.pop() {}
+                while let Some(_) = self.image_subscriptions.try_recv() {}
                 info!("Connected to lunabase!");
                 loop {
                     {
@@ -224,7 +223,6 @@ impl Node for Telemetry {
                                 ref packet,
                                 ..
                             }) => {
-                                let self = self.clone();
                                 let packet = packet.data().to_vec().into_boxed_slice();
                                 self.receive_packet(channel_id, packet, &context);
                             }
@@ -235,7 +233,8 @@ impl Node for Telemetry {
                     while let Some((body, mode, channel)) = self.packet_queue.pop() {
                         peer.send_packet(Packet::new(&body, mode)?, channel as u8)?;
                     }
-                    while let Some(img) = self.image_queue.pop() {
+                    while let Some(result) = self.image_subscriptions.try_recv() {
+                        let Ok(img) = result else { continue };
                         let img = webp::Encoder::from_image(&img)
                             .map_err(|e| {
                                 anyhow::anyhow!("Failed to encode image frame to webp: {e}")

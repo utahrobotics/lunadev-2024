@@ -22,9 +22,7 @@ async fn main() -> anyhow::Result<()> {
         stdout
             .write_all(&x)
             .expect("Stdout should have been writable");
-        stdout
-            .flush()
-            .expect("Stdout should have been flushable");
+        stdout.flush().expect("Stdout should have been flushable");
     });
     let mut write_signal: OwnedSignal<_> = Default::default();
     serial.connect_from(&mut write_signal);

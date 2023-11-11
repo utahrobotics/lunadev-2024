@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use realsense::discover_all_realsense;
-use unros_core::{anyhow, log::info, run_all, RunOptions, FinalizedNode, Signal};
+use unros_core::{anyhow, log::info, run_all, FinalizedNode, RunOptions, Signal};
 
 fn main() -> anyhow::Result<()> {
     let cameras = discover_all_realsense()?;

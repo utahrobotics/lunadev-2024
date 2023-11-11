@@ -51,7 +51,7 @@ impl Node for Camera {
     async fn run(mut self) -> anyhow::Result<()> {
         let image_received = self.image_received.take().unwrap();
         let index = CameraIndex::Index(self.camera_index);
-        
+
         let requested =
             RequestedFormat::new::<RgbFormat>(RequestedFormatType::HighestFrameRate(self.fps));
 

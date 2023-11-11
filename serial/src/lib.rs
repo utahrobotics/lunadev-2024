@@ -1,12 +1,13 @@
 use std::{
     collections::VecDeque,
     future::Future,
+    io,
     ops::Deref,
     sync::{
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
-    time::Duration, io,
+    time::Duration,
 };
 
 // use crossbeam::queue::SegQueue;
@@ -18,17 +19,20 @@ use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 // use tokio_util::codec::{BytesCodec, Decoder, Framed, Encoder};
 use unros_core::{
     anyhow, async_trait,
-    bytes::{Bytes, BytesMut, BufMut},
+    bytes::{BufMut, Bytes, BytesMut},
     log::info,
-    node_error, node_info, tokio::{
+    node_error, node_info, rayon,
+    tokio::{
         self,
+        io::{AsyncReadExt, AsyncWriteExt},
         runtime::Handle,
         sync::{
             mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
             Mutex,
-        }, task::JoinSet, io::{AsyncReadExt, AsyncWriteExt},
+        },
+        task::JoinSet,
     },
-    Node, OwnedSignal, Signal, rayon,
+    Node, OwnedSignal, Signal,
 };
 
 pub struct SerialConnection {
@@ -144,7 +148,6 @@ impl SerialConnection {
 //     }
 // }
 
-
 #[async_trait]
 impl Node for SerialConnection {
     fn set_name(&mut self, name: String) {
@@ -188,8 +191,13 @@ impl Node for SerialConnection {
                 }
             });
 
-            let e = tasks.join_next().await.unwrap().expect("I/O should not have panicked").unwrap_err();
-            
+            let e = tasks
+                .join_next()
+                .await
+                .unwrap()
+                .expect("I/O should not have panicked")
+                .unwrap_err();
+
             if self.tolerate_error {
                 node_error!(
                     self,
@@ -207,7 +215,11 @@ impl Drop for SerialConnection {
     fn drop(&mut self) {
         if let Some(stream) = &mut self.stream {
             if let Err(e) = stream.clear(tokio_serial::ClearBuffer::All) {
-                node_error!(self, "Failed to clear buffer of serial device at: {}: {e}", self.path);
+                node_error!(
+                    self,
+                    "Failed to clear buffer of serial device at: {}: {e}",
+                    self.path
+                );
             }
         }
     }
