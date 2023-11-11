@@ -20,7 +20,7 @@ use unros_core::{
         sync::Mutex,
         task::JoinSet,
     },
-    Node, signal::{Signal, SignalRef, bounded::BoundedSubscription, watched::WatchedSubscription}, RuntimeContext, setup_logging, log, rayon
+    Node, signal::{Signal, SignalRef, bounded::BoundedSubscription, watched::WatchedSubscription}, RuntimeContext, setup_logging, log
 };
 
 pub struct SerialConnection {
