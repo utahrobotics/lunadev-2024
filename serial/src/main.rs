@@ -6,8 +6,8 @@ use std::{
 use serial::SerialConnection;
 use unros_core::{
     anyhow, async_run_all, init_logger,
-    tokio::{self, runtime::Handle},
-    tokio_rayon, FnNode, OwnedSignal, Signal,
+    tokio,
+    tokio_rayon, FnNode, signal::Signal, RuntimeContext,
 };
 
 #[tokio::main]
@@ -16,21 +16,23 @@ async fn main() -> anyhow::Result<()> {
     init_logger(&run_options)?;
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
     let mut serial = SerialConnection::new("/dev/ttyACM7".into(), 115200, true).await?;
-    serial.get_msg_received_signal().connect_to(|x| {
-        let stdout = stdout();
-        let mut stdout = stdout.lock();
-        stdout
-            .write_all(&x)
-            .expect("Stdout should have been writable");
-        stdout.flush().expect("Stdout should have been flushable");
+    let mut sub = serial.get_msg_received_signal().subscribe_unbounded();
+    tokio::spawn(async move {
+        loop {
+            let x = sub.recv().await;
+            let stdout = stdout();
+            let mut stdout = stdout.lock();
+            stdout
+                .write_all(&x)
+                .expect("Stdout should have been writable");
+            stdout.flush().expect("Stdout should have been flushable");
+        }
     });
-    let mut write_signal: OwnedSignal<_> = Default::default();
-    serial.connect_from(&mut write_signal);
+    let mut write_signal: Signal<_> = Default::default();
+    serial.message_to_send_subscription(&mut write_signal.get_ref());
     let write_signal = Arc::new(write_signal);
 
-    let fn_node = FnNode::new(move || async {
-        let handle = Handle::current();
-
+    let fn_node = FnNode::new(move |_context: RuntimeContext| async {
         tokio_rayon::spawn(move || {
             let stdin = stdin();
             let mut stdin = stdin.lock();
@@ -42,9 +44,7 @@ async fn main() -> anyhow::Result<()> {
                 line += "\r";
                 let line = line.clone().into_bytes();
                 let write_signal = write_signal.clone();
-                handle.spawn(async move {
-                    write_signal.emit(line.into()).await;
-                });
+                write_signal.set(line.into());
             }
         })
         .await

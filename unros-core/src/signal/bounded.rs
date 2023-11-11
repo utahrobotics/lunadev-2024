@@ -1,4 +1,4 @@
-use std::ops::Add;
+use std::ops::{Add, AddAssign};
 
 use async_trait::async_trait;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -88,6 +88,12 @@ impl<T: 'static> Add for BoundedSubscription<T> {
     fn add(mut self, rhs: Self) -> Self::Output {
         self.receivers.push(Box::new(rhs));
         self
+    }
+}
+
+impl<T: 'static> AddAssign for BoundedSubscription<T> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.receivers.push(Box::new(rhs));
     }
 }
 
