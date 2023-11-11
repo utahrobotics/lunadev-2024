@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use futures::{stream::FuturesUnordered, StreamExt};
 use rand::{seq::SliceRandom, rngs::SmallRng, SeedableRng};
 use tokio::sync::mpsc;
+use tokio_rayon::rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
 use super::{ChannelTrait, MappedChannel};
 
@@ -14,7 +15,7 @@ pub struct UnboundedSubscription<T> {
 
 static_assertions::assert_impl_all!(UnboundedSubscription<()>: Send, Sync);
 
-impl<T: 'static> UnboundedSubscription<T> {
+impl<T: Send + 'static> UnboundedSubscription<T> {
     pub fn none() -> Self {
         Self {
             receivers: vec![],
@@ -32,6 +33,17 @@ impl<T: 'static> UnboundedSubscription<T> {
         x
     }
 
+    pub fn blocking_recv(&mut self) -> T {
+        let mut out: Vec<_> = self.receivers.par_iter_mut().map(|x| x.blocking_recv()).take_any(1).collect();
+        if let Some(x) = out.pop() {
+            x
+        } else {
+            loop {
+                std::thread::park();
+            }
+        }
+    }
+
     pub fn try_recv(&mut self) -> Option<T> {
         self.receivers.shuffle(&mut self.rng);
         self
@@ -39,6 +51,11 @@ impl<T: 'static> UnboundedSubscription<T> {
             .iter_mut()
             .filter_map(|x| x.try_recv())
             .next()
+    }
+
+    pub fn try_blocking_recv(&mut self) -> Option<T> {
+        let mut out: Vec<_> = self.receivers.par_iter_mut().filter_map(|x| x.try_blocking_recv()).take_any(1).collect();
+        out.pop()
     }
 
     /// Changes the generic type of the signal that this subscription is for.
@@ -82,11 +99,26 @@ impl<T: Send + 'static> ChannelTrait<T> for mpsc::UnboundedReceiver<T> {
     fn try_recv(&mut self) -> Option<T>  {
         mpsc::UnboundedReceiver::try_recv(self).ok()
     }
+
+    fn blocking_recv(&mut self) -> T  {
+        match mpsc::UnboundedReceiver::blocking_recv(self) {
+            Some(x) => x,
+            None => {
+                loop {
+                    std::thread::park();
+                }
+            }
+        }
+    }
+
+    fn try_blocking_recv(&mut self) -> Option<T> {
+        mpsc::UnboundedReceiver::blocking_recv(self)
+    }
 }
 
 
 #[async_trait]
-impl<T: 'static> ChannelTrait<T> for UnboundedSubscription<T> {
+impl<T: Send + 'static> ChannelTrait<T> for UnboundedSubscription<T> {
     fn source_count(&self) -> usize {
         self.receivers
             .iter()
@@ -95,16 +127,24 @@ impl<T: 'static> ChannelTrait<T> for UnboundedSubscription<T> {
     }
 
     async fn recv(&mut self) -> T {
-        self.recv().await
+        UnboundedSubscription::recv(self).await
     }
 
     fn try_recv(&mut self) -> Option<T>  {
-        self.try_recv()
+        UnboundedSubscription::try_recv(self)
+    }
+
+    fn blocking_recv(&mut self) -> T {
+        UnboundedSubscription::blocking_recv(self)
+    }
+
+    fn try_blocking_recv(&mut self) -> Option<T> {
+        UnboundedSubscription::try_blocking_recv(self)
     }
 }
 
 
-impl<T: 'static> Add for UnboundedSubscription<T> {
+impl<T: Send + 'static> Add for UnboundedSubscription<T> {
     type Output = Self;
 
     fn add(mut self, rhs: Self) -> Self::Output {
@@ -113,7 +153,7 @@ impl<T: 'static> Add for UnboundedSubscription<T> {
     }
 }
 
-impl<T: 'static> AddAssign for UnboundedSubscription<T> {
+impl<T: Send + 'static> AddAssign for UnboundedSubscription<T> {
     fn add_assign(&mut self, rhs: Self) {
         self.receivers.push(Box::new(rhs));
     }

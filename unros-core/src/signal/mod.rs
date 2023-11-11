@@ -17,6 +17,8 @@ trait ChannelTrait<T>: Send + Sync + 'static {
     fn source_count(&self) -> usize;
 
     async fn recv(&mut self) -> T;
+    fn blocking_recv(&mut self) -> T;
+    fn try_blocking_recv(&mut self) -> Option<T>;
 
     fn try_recv(&mut self) -> Option<T>;
 
@@ -38,6 +40,14 @@ impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
 
     async fn recv(&mut self) -> T {
         (self.mapper)(self.source.recv().await)
+    }
+
+    fn blocking_recv(&mut self) -> T  {
+        (self.mapper)(self.source.blocking_recv())
+    }
+
+    fn try_blocking_recv(&mut self) -> Option<T> {
+        self.source.try_blocking_recv().map(|x| (self.mapper)(x))
     }
 
     fn try_recv(&mut self) -> Option<T>  {
