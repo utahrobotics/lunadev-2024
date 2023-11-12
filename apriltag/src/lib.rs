@@ -119,6 +119,9 @@ impl Node for AprilTagDetector {
                 let img = Image::from_image_buffer(&img);
 
                 for detection in detector.detect(&img) {
+                    if detection.decision_margin() < 130.0 {
+                        continue;
+                    }
                     let Some(known) = self.known_tags.get(&detection.id()) else {
                         continue;
                     };
@@ -128,9 +131,19 @@ impl Node for AprilTagDetector {
                     };
                     let tag_pose = tag_pose.to_na();
 
+                    let mut tag_orientation_euler = tag_pose.rotation.euler_angles();
+                    std::mem::swap(&mut tag_orientation_euler.2, &mut tag_orientation_euler.0);
+                    std::mem::swap(&mut tag_orientation_euler.2, &mut tag_orientation_euler.1);
+                    tag_orientation_euler.2 = PI - tag_orientation_euler.2;
+
+                    let mut tag_quaternion = UnitQuaternion::default();
+                    tag_quaternion = UnitQuaternion::from_euler_angles(0.0, 0.0, tag_orientation_euler.2) * tag_quaternion;
+                    tag_quaternion = UnitQuaternion::from_euler_angles(0.0, tag_orientation_euler.1, 0.0) * tag_quaternion;
+                    tag_quaternion = UnitQuaternion::from_euler_angles(tag_orientation_euler.0, 0.0, 0.0) * tag_quaternion;
+
                     self.tag_detected.set(PoseObservation {
                         position: (known.position.coords + tag_pose.translation.vector).into(),
-                        orientation: tag_pose.rotation * known.orientation,
+                        orientation: known.orientation * tag_quaternion,
                         decision_margin: detection.decision_margin()
                     });
                 }
