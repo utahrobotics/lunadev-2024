@@ -66,7 +66,7 @@ impl<T: 'static> WatchedSubscription<T> {
 
     pub async fn wait_for_change(&mut self) -> T {
         if let Some(recv) = &mut self.recv {
-            recv.get().await
+            recv.wait_for_change().await
         } else {
             std::future::pending::<()>().await;
             unreachable!()
@@ -96,12 +96,7 @@ impl<T: Clone + Send + Sync + 'static> WatchTrait<T> for watch::Receiver<Option<
         if let Some(x) = self.borrow_and_update().deref() {
             return x.clone();
         }
-        if self.changed().await.is_err() {
-            std::future::pending::<()>().await;
-            unreachable!()
-        } else {
-            self.borrow().as_ref().unwrap().clone()
-        }
+        self.wait_for_change().await
     }
 
     async fn wait_for_change(&mut self) -> T {

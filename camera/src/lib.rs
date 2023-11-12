@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use image::{imageops::FilterType, DynamicImage};
+use image::DynamicImage;
 use nokhwa::{
     pixel_format::RgbFormat,
-    utils::{CameraIndex, RequestedFormat, RequestedFormatType},
+    utils::{CameraIndex, RequestedFormat, RequestedFormatType}, query,
 };
 use unros_core::{
     anyhow::{self, Context},
@@ -13,18 +13,14 @@ use unros_core::{
 };
 
 pub struct Camera {
-    pub res_x: u32,
-    pub res_y: u32,
     pub fps: u32,
     pub camera_index: u32,
     image_received: Signal<Arc<DynamicImage>>,
 }
 
 impl Camera {
-    pub fn new(res_x: u32, res_y: u32, fps: u32, camera_index: u32) -> Self {
+    pub fn new(fps: u32, camera_index: u32) -> Self {
         Self {
-            res_x,
-            res_y,
             fps,
             camera_index,
             image_received: Default::default(),
@@ -45,11 +41,14 @@ impl Node for Camera {
 
         let index = CameraIndex::Index(self.camera_index);
 
-        let requested =
-            RequestedFormat::new::<RgbFormat>(RequestedFormatType::HighestFrameRate(self.fps));
+        let requested = if self.fps > 0 {
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::HighestFrameRate(self.fps))
+        } else {
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate)
+        };
 
-        let res_x = self.res_x;
-        let res_y = self.res_y;
+        // let res_x = self.res_x;
+        // let res_y = self.res_y;
 
         tokio_rayon::spawn(move || {
             let mut camera =
@@ -58,10 +57,23 @@ impl Node for Camera {
                 let frame = camera.frame()?;
                 let decoded = frame.decode_image::<RgbFormat>().unwrap();
                 let img = DynamicImage::from(decoded);
-                let img = Arc::new(img.resize(res_x, res_y, FilterType::CatmullRom));
-                self.image_received.set(img);
+                // let img = img.resize(res_x, res_y, FilterType::CatmullRom);
+                self.image_received.set(Arc::new(img));
             }
         })
         .await
     }
+}
+
+
+pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
+    Ok(query(nokhwa::utils::ApiBackend::Auto)?
+            .into_iter()
+            .filter_map(|info| {
+                if let CameraIndex::Index(n) = info.index() {
+                    Some(Camera::new(0, *n))
+                } else {
+                    None
+                }
+            }))
 }

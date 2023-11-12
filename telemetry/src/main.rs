@@ -9,7 +9,8 @@ async fn main() -> anyhow::Result<()> {
     let mut watch = telemetry.get_steering_signal().watch();
     tokio::spawn(async move {
         loop {
-            info!("{:?}", watch.get().await);
+            let msg = watch.wait_for_change().await;
+            info!("{msg:?}");
         }
     });
     let run_options = RunOptions {

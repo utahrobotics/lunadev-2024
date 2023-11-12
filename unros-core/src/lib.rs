@@ -12,6 +12,7 @@ pub use anyhow;
 use anyhow::Context;
 pub use async_trait::async_trait;
 pub use bytes;
+use chrono::{Datelike, Timelike};
 pub use log;
 use log::{error, info, warn};
 use serde::Deserialize;
@@ -123,6 +124,7 @@ impl FinalizedNode {
 
     async fn run(self, mut abort: broadcast::Receiver<()>, node_sender: mpsc::UnboundedSender<FinalizedNode>) -> Result<(), RunError> {
         let name: Arc<str> = Arc::from(self.name.into_boxed_str());
+        info!("Running {name}");
         let handle = tokio::spawn((self.run)(name.clone(), node_sender));
         let abort_handle = handle.abort_handle();
 
@@ -192,12 +194,11 @@ const LOGS_DIR: &str = "logs";
 
 pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     static LOGGER_INITED: Once = Once::new();
-    
+
     if LOGGER_INITED.is_completed() {
         return Ok(());
     }
     LOGGER_INITED.call_once(|| {});
-    console_subscriber::init();
 
     if !AsRef::<Path>::as_ref(LOGS_DIR)
         .try_exists()
@@ -209,16 +210,24 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     }
     let mut runtime_name = run_options.runtime_name.clone();
     if !runtime_name.is_empty() {
-        runtime_name += "_";
+        runtime_name = "--".to_string() + &runtime_name;
     }
+
+    let datetime = chrono::Local::now();
     let log_file_name = format!(
-        "{}{}.log",
+        "{}-{}-{}--{}-{}-{}{}.log",
         runtime_name,
-        humantime::format_rfc3339(std::time::SystemTime::now())
+        datetime.year(),
+        datetime.month(),
+        datetime.day(),
+        datetime.hour(),
+        datetime.minute(),
+        datetime.second(),
     );
+    
     let start_time = Instant::now();
 
-    let _ = fern::Dispatch::new()
+    fern::Dispatch::new()
         .format(move |out, message, record| {
             let secs = start_time.elapsed().as_secs_f32();
             out.finish(format_args!(
@@ -235,7 +244,7 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
         // Output to stdout, files, and other Dispatch configurations
         .chain(
             fern::Dispatch::new()
-                .chain(fern::log_file(PathBuf::from(LOGS_DIR).join(log_file_name))?),
+                .chain(fern::log_file(PathBuf::from(LOGS_DIR).join(log_file_name)).context("Failed to create log file")?),
         )
         .chain(
             fern::Dispatch::new()
@@ -243,7 +252,10 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                 .chain(std::io::stdout()),
         )
         // Apply globally
-        .apply();
+        .apply()
+        .expect("Logger should have initialized correctly");
+
+    console_subscriber::init();
     Ok(())
 }
 
@@ -272,9 +284,9 @@ pub async fn async_run_all(
     runnables: impl IntoIterator<Item = FinalizedNode>,
     run_options: RunOptions,
 ) -> anyhow::Result<()> {
-    let mut last_drop = LastDrop::default();
-
     init_logger(&run_options)?;
+
+    let mut last_drop = LastDrop::default();
 
     let abort_sender = broadcast::Sender::new(1);
     let (node_sender, mut node_receiver) = mpsc::unbounded_channel();

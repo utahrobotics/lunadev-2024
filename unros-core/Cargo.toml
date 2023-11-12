@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 fern = "0.6"
 clap = { version = "4", features = ["derive"] }
-humantime = "2"
+chrono = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "tracing", "parking_lot", "signal", "io-util", "time"] }
 anyhow = { workspace = true }
 serde = { workspace = true }

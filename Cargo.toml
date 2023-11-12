@@ -7,7 +7,7 @@ members = [
     "drive",
     "camera",
     "apriltag",
-    "realsense",
+    # "realsense",
     "positioning",
     "serial",
 ]

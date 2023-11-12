@@ -56,7 +56,9 @@ impl SerialConnection {
         let path = self.path.clone();
         let baud_rate = self.baud_rate;
         let result: tokio_serial::Result<_> = (|| {
+            #[allow(unused_mut)]
             let mut stream = tokio_serial::new(path.deref(), baud_rate).open_native_async()?;
+            #[cfg(unix)]
             stream.set_exclusive(true)?;
             stream.clear(tokio_serial::ClearBuffer::All)?;
             stream.set_break()?;
