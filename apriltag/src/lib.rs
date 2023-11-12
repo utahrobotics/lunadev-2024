@@ -6,7 +6,7 @@ use apriltag_image::{
     ImageExt,
 };
 use unros_core::{
-    anyhow, async_trait, node_info, tokio::runtime::Handle, tokio_rayon, Node, OwnedSignal, Signal,
+    anyhow, async_trait, tokio::runtime::Handle, tokio_rayon, Node
 };
 
 #[derive(Clone, Copy)]
@@ -44,14 +44,6 @@ impl AprilTagDetector {
 
 #[async_trait]
 impl Node for AprilTagDetector {
-    fn set_name(&mut self, name: String) {
-        self.name = name
-    }
-
-    fn get_name(&self) -> &str {
-        &self.name
-    }
-
     async fn run(mut self) -> anyhow::Result<()> {
         let handle = Handle::current();
 

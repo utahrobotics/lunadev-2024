@@ -166,6 +166,7 @@ macro_rules! setup_logging {
         setup_logging!($context $)
     };
     ($context: ident $dol:tt) => {
+        let _context = &$context;
         #[allow(unused_macros)]
         macro_rules! info {
             ($dol($dol arg:tt)+) => {
