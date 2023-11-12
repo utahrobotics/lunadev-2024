@@ -1,22 +1,34 @@
-use std::{num::NonZeroU32, sync::Arc};
+use std::{sync::{Arc, mpsc::sync_channel}, fmt::Display, f64::consts::PI};
 
-pub use apriltag::TagParams;
-use apriltag::{families::Tag16h5, DetectorBuilder, Image};
+use apriltag::{families::Tag16h5, DetectorBuilder, Image, TagParams};
 use apriltag_image::{image::DynamicImage, ImageExt};
 use apriltag_nalgebra::PoseExt;
 use fxhash::FxHashMap;
 use nalgebra::{Point3, UnitQuaternion};
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{bounded::BoundedSubscription, Signal, SignalRef},
-    tokio_rayon, Node, RuntimeContext,
+    signal::{Signal, SignalRef, watched::WatchedSubscription},
+    tokio_rayon, Node, RuntimeContext, tokio::{sync::mpsc::channel, self},
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct PoseObservation {
     pub position: Point3<f64>,
     pub orientation: UnitQuaternion<f64>,
+    pub decision_margin: f32
 }
+
+
+impl Display for PoseObservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (mut r, mut p, mut y) = self.orientation.euler_angles();
+        r *= 180.0 / PI;
+        p *= 180.0 / PI;
+        y *= 180.0 / PI;
+        write!(f, "Observer pos: ({:.2}, {:.2}, {:.2}), roll: {r:.0}, pitch: {p:.0}, yaw: {y:.0}, margin: {:.0}", self.position.x, self.position.y, self.position.z, self.decision_margin)
+    }
+}
+
 
 struct KnownTag {
     position: Point3<f64>,
@@ -25,17 +37,23 @@ struct KnownTag {
 }
 
 pub struct AprilTagDetector {
-    image_sub: BoundedSubscription<Arc<DynamicImage>>,
+    image_sub: WatchedSubscription<Arc<DynamicImage>>,
     tag_detected: Signal<PoseObservation>,
     known_tags: FxHashMap<usize, KnownTag>,
+    focal_length_px: f64,
+    image_width: u32,
+    image_height: u32,
 }
 
 impl AprilTagDetector {
-    pub fn new() -> Self {
+    pub fn new(focal_length_px: f64, image_width: u32, image_height: u32, image_sub: WatchedSubscription<Arc<DynamicImage>>) -> Self {
         Self {
-            image_sub: BoundedSubscription::none(),
+            image_sub,
             tag_detected: Default::default(),
             known_tags: Default::default(),
+            focal_length_px,
+            image_width,
+            image_height
         }
     }
 
@@ -43,7 +61,7 @@ impl AprilTagDetector {
         &mut self,
         tag_position: Point3<f64>,
         tag_orientation: UnitQuaternion<f64>,
-        tag_params: TagParams,
+        tag_width: f64,
         tag_id: usize,
     ) {
         self.known_tags.insert(
@@ -51,13 +69,13 @@ impl AprilTagDetector {
             KnownTag {
                 position: tag_position,
                 orientation: tag_orientation,
-                tag_params,
+                tag_params: TagParams { tagsize: tag_width, fx: self.focal_length_px, fy: self.focal_length_px, cx: self.image_width as f64 / 2.0, cy: self.image_height as f64 / 2.0 },
             },
         );
     }
 
-    pub fn subscribe_to_image(&mut self, signal: &mut SignalRef<Arc<DynamicImage>>) {
-        self.image_sub += signal.subscribe_bounded(NonZeroU32::new(8).unwrap());
+    pub fn tag_detected_signal(&mut self) -> SignalRef<PoseObservation> {
+        self.tag_detected.get_ref()
     }
 }
 
@@ -66,23 +84,39 @@ impl Node for AprilTagDetector {
     const DEFAULT_NAME: &'static str = "apriltag";
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
-        setup_logging!(context);
+        let (err_sender, mut err_receiver) = channel(1);
+        let (img_sender, img_receiver) = sync_channel::<Arc<DynamicImage>>(0);
 
-        tokio_rayon::spawn(move || {
-            let mut detector = DetectorBuilder::new()
+        let _ = tokio_rayon::spawn(move || {
+            setup_logging!(context);
+
+            macro_rules! unwrap {
+                ($result: expr) => {
+                    match $result {
+                        Ok(x) => x,
+                        Err(e) => {
+                            let _ = err_sender.blocking_send(e.into());
+                            return;
+                        }
+                    }
+                };
+            }
+            let mut detector = unwrap!(DetectorBuilder::new()
                 .add_family_bits(Tag16h5::default(), 1)
-                .build()?;
+                .build());
 
             loop {
-                let img = match self.image_sub.blocking_recv() {
-                    Some(Ok(x)) => x,
-                    Some(Err(n)) => {
-                        warn!("Lagged behind by {n} frames");
-                        continue;
-                    }
-                    None => break,
+                let img = match img_receiver.recv() {
+                    Ok(x) => x,
+                    Err(_) => break,
                 };
-                let img = Image::from_image_buffer(&img.to_luma8());
+
+                let img = img.to_luma8();
+                if img.width() != self.image_width || img.height() != self.image_height {
+                    error!("Received incorrectly sized image: {}x{}", img.width(), img.height());
+                    continue;
+                }
+                let img = Image::from_image_buffer(&img);
 
                 for detection in detector.detect(&img) {
                     let Some(known) = self.known_tags.get(&detection.id()) else {
@@ -95,15 +129,24 @@ impl Node for AprilTagDetector {
                     let tag_pose = tag_pose.to_na();
 
                     self.tag_detected.set(PoseObservation {
-                        position: (known.position.coords - tag_pose.translation.vector).into(),
+                        position: (known.position.coords + tag_pose.translation.vector).into(),
                         orientation: tag_pose.rotation * known.orientation,
+                        decision_margin: detection.decision_margin()
                     });
                 }
             }
+        });
 
-            warn!("No more image senders! Exiting...");
-            Ok(())
-        })
-        .await
+        loop {
+            tokio::select! {
+                img = self.image_sub.wait_for_change() => {
+                    let _ = img_sender.try_send(img);
+                }
+                result = err_receiver.recv() => {
+                    let e = result.unwrap();
+                    break Err(e);
+                }
+            }
+        }
     }
 }

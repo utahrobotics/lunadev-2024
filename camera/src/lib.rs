@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use image::DynamicImage;
+use image::{DynamicImage, imageops::FilterType};
 use nokhwa::{
     pixel_format::RgbFormat,
     utils::{CameraIndex, RequestedFormat, RequestedFormatType}, query,
@@ -15,13 +15,17 @@ use unros_core::{
 pub struct Camera {
     pub fps: u32,
     pub camera_index: u32,
+    pub res_x: u32,
+    pub res_y: u32,
     image_received: Signal<Arc<DynamicImage>>,
 }
 
 impl Camera {
-    pub fn new(fps: u32, camera_index: u32) -> Self {
+    pub fn new(camera_index: u32) -> Self {
         Self {
-            fps,
+            fps: 0,
+            res_x: 0,
+            res_y: 0,
             camera_index,
             image_received: Default::default(),
         }
@@ -47,8 +51,8 @@ impl Node for Camera {
             RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate)
         };
 
-        // let res_x = self.res_x;
-        // let res_y = self.res_y;
+        let res_x = self.res_x;
+        let res_y = self.res_y;
 
         tokio_rayon::spawn(move || {
             let mut camera =
@@ -56,8 +60,10 @@ impl Node for Camera {
             loop {
                 let frame = camera.frame()?;
                 let decoded = frame.decode_image::<RgbFormat>().unwrap();
-                let img = DynamicImage::from(decoded);
-                // let img = img.resize(res_x, res_y, FilterType::CatmullRom);
+                let mut img = DynamicImage::from(decoded);
+                if res_x != 0 && res_y != 0 {
+                    img = img.resize(res_x, res_y, FilterType::CatmullRom);
+                }
                 self.image_received.set(Arc::new(img));
             }
         })
@@ -71,7 +77,7 @@ pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
             .into_iter()
             .filter_map(|info| {
                 if let CameraIndex::Index(n) = info.index() {
-                    Some(Camera::new(0, *n))
+                    Some(Camera::new(*n))
                 } else {
                     None
                 }

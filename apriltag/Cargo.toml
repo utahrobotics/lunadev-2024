@@ -12,3 +12,4 @@ apriltag-nalgebra = "0.1"
 unros-core = { path = "../unros-core" }
 nalgebra = "0.32"
 fxhash = { workspace = true }
+# crossbeam = "0.8"
