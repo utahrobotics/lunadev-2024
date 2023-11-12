@@ -1,7 +1,4 @@
-use std::{
-    num::NonZeroU32,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3};
 use unros_core::{
@@ -12,27 +9,27 @@ use unros_core::{
 
 #[derive(Clone, Copy)]
 pub struct PositionFrame {
-    position: Point3<f32>,
-    variance: Matrix3<f32>,
+    pub position: Point3<f32>,
+    pub variance: Matrix3<f32>,
 }
 
 #[derive(Clone, Copy)]
 pub struct OrientationFrame {
-    orientation: UnitQuaternion<f32>,
-    variance: Matrix3<f32>,
+    pub orientation: UnitQuaternion<f32>,
+    pub variance: Matrix3<f32>,
 }
 
 #[derive(Clone, Copy)]
 pub struct IMUFrame {
-    acceleration: Vector3<f32>,
-    rotation: Vector3<f32>,
+    pub acceleration: Vector3<f32>,
+    pub rotation: Vector3<f32>,
 }
 
 pub struct Positioner {
     pub builder: eskf::Builder,
-    imu_sub: BoundedSubscription<IMUFrame>,
-    position_sub: BoundedSubscription<PositionFrame>,
-    orientation_sub: BoundedSubscription<OrientationFrame>,
+    imu_sub: BoundedSubscription<IMUFrame, 8>,
+    position_sub: BoundedSubscription<PositionFrame, 8>,
+    orientation_sub: BoundedSubscription<OrientationFrame, 8>,
 
     position: Signal<Point3<f32>>,
     velocity: Signal<Vector3<f32>>,
@@ -55,16 +52,16 @@ impl Default for Positioner {
 }
 
 impl Positioner {
-    pub fn add_imu_sub(&mut self, signal: &mut SignalRef<IMUFrame>) {
-        self.imu_sub += signal.subscribe_bounded(NonZeroU32::new(8).unwrap());
+    pub fn add_imu_sub(&mut self, sub: BoundedSubscription<IMUFrame, 8>) {
+        self.imu_sub += sub;
     }
 
-    pub fn add_position_sub(&mut self, signal: &mut SignalRef<PositionFrame>) {
-        self.position_sub += signal.subscribe_bounded(NonZeroU32::new(8).unwrap());
+    pub fn add_position_sub(&mut self, sub: BoundedSubscription<PositionFrame, 8>) {
+        self.position_sub += sub;
     }
 
-    pub fn add_orientation_sub(&mut self, signal: &mut SignalRef<OrientationFrame>) {
-        self.orientation_sub += signal.subscribe_bounded(NonZeroU32::new(8).unwrap());
+    pub fn add_orientation_sub(&mut self, sub: BoundedSubscription<OrientationFrame, 8>) {
+        self.orientation_sub += sub;
     }
 
     pub fn get_position_signal(&mut self) -> SignalRef<Point3<f32>> {
@@ -82,7 +79,7 @@ impl Positioner {
 
 #[async_trait]
 impl Node for Positioner {
-    const DEFAULT_NAME: &'static str = "realsense";
+    const DEFAULT_NAME: &'static str = "positioning";
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);

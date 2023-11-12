@@ -9,3 +9,5 @@ edition = "2021"
 camera = { path = "../camera" }
 apriltag = { path = "../apriltag" }
 unros-core = { path = "../unros-core" }
+positioning = { path = "../positioning" }
+nalgebra = "0.32"

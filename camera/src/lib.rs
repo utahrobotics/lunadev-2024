@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use image::{DynamicImage, imageops::FilterType};
+use image::{imageops::FilterType, DynamicImage};
 use nokhwa::{
     pixel_format::RgbFormat,
-    utils::{CameraIndex, RequestedFormat, RequestedFormatType}, query,
+    query,
+    utils::{CameraIndex, RequestedFormat, RequestedFormatType},
 };
 use unros_core::{
     anyhow::{self, Context},
@@ -71,15 +72,14 @@ impl Node for Camera {
     }
 }
 
-
 pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
     Ok(query(nokhwa::utils::ApiBackend::Auto)?
-            .into_iter()
-            .filter_map(|info| {
-                if let CameraIndex::Index(n) = info.index() {
-                    Some(Camera::new(*n))
-                } else {
-                    None
-                }
-            }))
+        .into_iter()
+        .filter_map(|info| {
+            if let CameraIndex::Index(n) = info.index() {
+                Some(Camera::new(*n))
+            } else {
+                None
+            }
+        }))
 }

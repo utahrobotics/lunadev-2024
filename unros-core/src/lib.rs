@@ -17,7 +17,10 @@ pub use log;
 use log::{error, info, warn};
 use serde::Deserialize;
 pub use tokio;
-use tokio::{sync::{broadcast, mpsc}, task::JoinSet};
+use tokio::{
+    sync::{broadcast, mpsc},
+    task::JoinSet,
+};
 pub use tokio_rayon::{self, rayon};
 
 #[async_trait]
@@ -61,7 +64,7 @@ where
 #[derive(Clone)]
 pub struct RuntimeContext {
     name: Arc<str>,
-    node_sender: mpsc::UnboundedSender<FinalizedNode>
+    node_sender: mpsc::UnboundedSender<FinalizedNode>,
 }
 
 impl RuntimeContext {
@@ -82,7 +85,11 @@ pub struct FinalizedNode {
     critical: bool,
     name: String,
     run: Box<
-        dyn FnOnce(Arc<str>, mpsc::UnboundedSender<FinalizedNode>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> + Send,
+        dyn FnOnce(
+                Arc<str>,
+                mpsc::UnboundedSender<FinalizedNode>,
+            ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+            + Send,
     >,
 }
 
@@ -122,7 +129,11 @@ impl FinalizedNode {
         self.critical
     }
 
-    async fn run(self, mut abort: broadcast::Receiver<()>, node_sender: mpsc::UnboundedSender<FinalizedNode>) -> Result<(), RunError> {
+    async fn run(
+        self,
+        mut abort: broadcast::Receiver<()>,
+        node_sender: mpsc::UnboundedSender<FinalizedNode>,
+    ) -> Result<(), RunError> {
         let name: Arc<str> = Arc::from(self.name.into_boxed_str());
         info!("Running {name}");
         let handle = tokio::spawn((self.run)(name.clone(), node_sender));
@@ -224,7 +235,7 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
         datetime.minute(),
         datetime.second(),
     );
-    
+
     let start_time = Instant::now();
 
     fern::Dispatch::new()
@@ -243,8 +254,10 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
         .level(log::LevelFilter::Debug)
         // Output to stdout, files, and other Dispatch configurations
         .chain(
-            fern::Dispatch::new()
-                .chain(fern::log_file(PathBuf::from(LOGS_DIR).join(log_file_name)).context("Failed to create log file")?),
+            fern::Dispatch::new().chain(
+                fern::log_file(PathBuf::from(LOGS_DIR).join(log_file_name))
+                    .context("Failed to create log file")?,
+            ),
         )
         .chain(
             fern::Dispatch::new()

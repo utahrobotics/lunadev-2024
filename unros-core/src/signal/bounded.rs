@@ -8,14 +8,14 @@ use tokio_rayon::rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
 use super::{ChannelTrait, MappedChannel};
 
-pub struct BoundedSubscription<T> {
+pub struct BoundedSubscription<T, const SIZE: u32> {
     pub(super) receivers: Vec<Box<dyn ChannelTrait<Result<T, u64>>>>,
     pub(super) rng: SmallRng,
 }
 
-static_assertions::assert_impl_all!(BoundedSubscription<()>: Send, Sync);
+static_assertions::assert_impl_all!(BoundedSubscription<(), 1>: Send, Sync);
 
-impl<T: Send + 'static> BoundedSubscription<T> {
+impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
     pub fn none() -> Self {
         Self {
             receivers: vec![],
@@ -65,7 +65,7 @@ impl<T: Send + 'static> BoundedSubscription<T> {
     pub fn map<V: 'static>(
         mut self,
         mut mapper: impl FnMut(T) -> V + 'static + Send + Sync,
-    ) -> BoundedSubscription<V> {
+    ) -> BoundedSubscription<V, SIZE> {
         BoundedSubscription {
             rng: SmallRng::from_rng(&mut self.rng).unwrap(),
             receivers: vec![Box::new(MappedChannel {
@@ -77,7 +77,9 @@ impl<T: Send + 'static> BoundedSubscription<T> {
 }
 
 #[async_trait]
-impl<T: Send + 'static> ChannelTrait<Result<T, u64>> for BoundedSubscription<T> {
+impl<T: Send + 'static, const SIZE: u32> ChannelTrait<Result<T, u64>>
+    for BoundedSubscription<T, SIZE>
+{
     fn source_count(&self) -> usize {
         self.receivers.iter().map(|x| x.source_count()).sum()
     }
@@ -95,7 +97,7 @@ impl<T: Send + 'static> ChannelTrait<Result<T, u64>> for BoundedSubscription<T> 
     }
 }
 
-impl<T: Send + 'static> Add for BoundedSubscription<T> {
+impl<T: Send + 'static, const SIZE: u32> Add for BoundedSubscription<T, SIZE> {
     type Output = Self;
 
     fn add(mut self, mut rhs: Self) -> Self::Output {
@@ -104,7 +106,7 @@ impl<T: Send + 'static> Add for BoundedSubscription<T> {
     }
 }
 
-impl<T: Send + 'static> AddAssign for BoundedSubscription<T> {
+impl<T: Send + 'static, const SIZE: u32> AddAssign for BoundedSubscription<T, SIZE> {
     fn add_assign(&mut self, mut rhs: Self) {
         self.receivers.append(&mut rhs.receivers);
     }

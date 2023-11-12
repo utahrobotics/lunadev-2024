@@ -1,4 +1,8 @@
-use std::{sync::{Arc, mpsc::sync_channel}, fmt::Display, f64::consts::PI};
+use std::{
+    f64::consts::PI,
+    fmt::Display,
+    sync::{mpsc::sync_channel, Arc},
+};
 
 use apriltag::{families::Tag16h5, DetectorBuilder, Image, TagParams};
 use apriltag_image::{image::DynamicImage, ImageExt};
@@ -7,17 +11,17 @@ use fxhash::FxHashMap;
 use nalgebra::{Point3, UnitQuaternion};
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{Signal, SignalRef, watched::WatchedSubscription},
-    tokio_rayon, Node, RuntimeContext, tokio::{sync::mpsc::channel, self},
+    signal::{watched::WatchedSubscription, Signal, SignalRef},
+    tokio::{self, sync::mpsc::channel},
+    tokio_rayon, Node, RuntimeContext,
 };
 
 #[derive(Clone, Copy, Debug)]
 pub struct PoseObservation {
     pub position: Point3<f64>,
     pub orientation: UnitQuaternion<f64>,
-    pub decision_margin: f32
+    pub decision_margin: f32,
 }
-
 
 impl Display for PoseObservation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -28,7 +32,6 @@ impl Display for PoseObservation {
         write!(f, "Observer pos: ({:.2}, {:.2}, {:.2}), roll: {r:.0}, pitch: {p:.0}, yaw: {y:.0}, margin: {:.0}", self.position.x, self.position.y, self.position.z, self.decision_margin)
     }
 }
-
 
 struct KnownTag {
     position: Point3<f64>,
@@ -46,14 +49,19 @@ pub struct AprilTagDetector {
 }
 
 impl AprilTagDetector {
-    pub fn new(focal_length_px: f64, image_width: u32, image_height: u32, image_sub: WatchedSubscription<Arc<DynamicImage>>) -> Self {
+    pub fn new(
+        focal_length_px: f64,
+        image_width: u32,
+        image_height: u32,
+        image_sub: WatchedSubscription<Arc<DynamicImage>>,
+    ) -> Self {
         Self {
             image_sub,
             tag_detected: Default::default(),
             known_tags: Default::default(),
             focal_length_px,
             image_width,
-            image_height
+            image_height,
         }
     }
 
@@ -69,7 +77,13 @@ impl AprilTagDetector {
             KnownTag {
                 position: tag_position,
                 orientation: tag_orientation,
-                tag_params: TagParams { tagsize: tag_width, fx: self.focal_length_px, fy: self.focal_length_px, cx: self.image_width as f64 / 2.0, cy: self.image_height as f64 / 2.0 },
+                tag_params: TagParams {
+                    tagsize: tag_width,
+                    fx: self.focal_length_px,
+                    fy: self.focal_length_px,
+                    cx: self.image_width as f64 / 2.0,
+                    cy: self.image_height as f64 / 2.0,
+                },
             },
         );
     }
@@ -113,7 +127,11 @@ impl Node for AprilTagDetector {
 
                 let img = img.to_luma8();
                 if img.width() != self.image_width || img.height() != self.image_height {
-                    error!("Received incorrectly sized image: {}x{}", img.width(), img.height());
+                    error!(
+                        "Received incorrectly sized image: {}x{}",
+                        img.width(),
+                        img.height()
+                    );
                     continue;
                 }
                 let img = Image::from_image_buffer(&img);
@@ -137,14 +155,20 @@ impl Node for AprilTagDetector {
                     tag_orientation_euler.2 = PI - tag_orientation_euler.2;
 
                     let mut tag_quaternion = UnitQuaternion::default();
-                    tag_quaternion = UnitQuaternion::from_euler_angles(0.0, 0.0, tag_orientation_euler.2) * tag_quaternion;
-                    tag_quaternion = UnitQuaternion::from_euler_angles(0.0, tag_orientation_euler.1, 0.0) * tag_quaternion;
-                    tag_quaternion = UnitQuaternion::from_euler_angles(tag_orientation_euler.0, 0.0, 0.0) * tag_quaternion;
+                    tag_quaternion =
+                        UnitQuaternion::from_euler_angles(0.0, 0.0, tag_orientation_euler.2)
+                            * tag_quaternion;
+                    tag_quaternion =
+                        UnitQuaternion::from_euler_angles(0.0, tag_orientation_euler.1, 0.0)
+                            * tag_quaternion;
+                    tag_quaternion =
+                        UnitQuaternion::from_euler_angles(tag_orientation_euler.0, 0.0, 0.0)
+                            * tag_quaternion;
 
                     self.tag_detected.set(PoseObservation {
                         position: (known.position.coords + tag_pose.translation.vector).into(),
                         orientation: known.orientation * tag_quaternion,
-                        decision_margin: detection.decision_margin()
+                        decision_margin: detection.decision_margin(),
                     });
                 }
             }

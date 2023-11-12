@@ -1,12 +1,18 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use camera::discover_all_cameras;
-use unros_core::{anyhow::{self, Context}, async_run_all, log::info, tokio, RunOptions};
+use unros_core::{
+    anyhow::{self, Context},
+    async_run_all,
+    log::info,
+    tokio, RunOptions,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let fps = 20;
-    let cameras = discover_all_cameras().context("Failed to discover cameras")?
+    let cameras = discover_all_cameras()
+        .context("Failed to discover cameras")?
         .map(|mut camera| {
             let mut sub = camera.image_received_signal().subscribe_unbounded();
             let frame_count = AtomicUsize::new(0);
@@ -22,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
             });
             camera.into()
         });
-    
+
     let run_options = RunOptions {
         ..Default::default()
     };

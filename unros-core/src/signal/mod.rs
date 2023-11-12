@@ -132,11 +132,13 @@ impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
         }
     }
 
-    pub fn subscribe_bounded(&mut self, bound: NonZeroU32) -> BoundedSubscription<T> {
-        let recv = match self.0.bounded_senders.entry(bound) {
+    pub fn subscribe_bounded<const SIZE: u32>(&mut self) -> BoundedSubscription<T, SIZE> {
+        let recv = match self.0.bounded_senders.entry(
+            NonZeroU32::new(SIZE).expect("Size of BoundedSubscription should be greater than 0"),
+        ) {
             Entry::Occupied(x) => x.get().subscribe(),
             Entry::Vacant(x) => {
-                let (sender, recv) = broadcast::channel(bound.get() as usize);
+                let (sender, recv) = broadcast::channel(SIZE as usize);
                 x.insert(sender);
                 recv
             }
