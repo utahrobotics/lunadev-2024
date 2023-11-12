@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use realsense::discover_all_realsense;
-use unros_core::{anyhow, log::info, async_run_all, FinalizedNode, RunOptions, tokio};
+use unros_core::{anyhow, async_run_all, log::info, tokio, FinalizedNode, RunOptions};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,5 +28,6 @@ async fn main() -> anyhow::Result<()> {
             FinalizedNode::from(x)
         }),
         run_options,
-    ).await
+    )
+    .await
 }

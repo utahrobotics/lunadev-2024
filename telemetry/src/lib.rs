@@ -7,15 +7,18 @@ use std::{
 };
 
 use crossbeam::queue::SegQueue;
-use enet::{Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, PeerState};
+use enet::{
+    Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, PeerState,
+};
 use global_msgs::Steering;
 use image::{DynamicImage, EncodableLayout};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use unros_core::{
     anyhow, async_trait, log, setup_logging,
+    signal::{bounded::BoundedSubscription, Signal, SignalRef},
     tokio_rayon::{self},
-    Node, RuntimeContext, signal::{Signal, bounded::BoundedSubscription, SignalRef},
+    Node, RuntimeContext,
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]

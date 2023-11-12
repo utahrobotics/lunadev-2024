@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use camera::Camera;
-use unros_core::{anyhow, log::info, async_run_all, RunOptions, tokio};
+use unros_core::{anyhow, async_run_all, log::info, tokio, RunOptions};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

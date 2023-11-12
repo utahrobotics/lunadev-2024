@@ -16,10 +16,7 @@ pub use log;
 use log::{error, info, warn};
 use serde::Deserialize;
 pub use tokio;
-use tokio::{
-    sync::broadcast,
-    task::JoinSet,
-};
+use tokio::{sync::broadcast, task::JoinSet};
 pub use tokio_rayon::{self, rayon};
 
 #[async_trait]
@@ -152,8 +149,6 @@ impl FinalizedNode {
     }
 }
 
-
-
 #[derive(Deserialize, Default)]
 pub struct RunOptions {
     #[serde(default)]
@@ -255,9 +250,8 @@ pub async fn run_all(
 
 #[derive(Default)]
 struct LastDrop {
-    force_exit: bool
+    force_exit: bool,
 }
-
 
 impl Drop for LastDrop {
     fn drop(&mut self) {
@@ -331,6 +325,6 @@ pub async fn async_run_all(
             last_drop.force_exit = true;
         } => {}
     }
-    
+
     Ok(())
 }

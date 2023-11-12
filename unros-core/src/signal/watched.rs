@@ -11,12 +11,10 @@ pub trait WatchTrait<T>: Send + Sync + 'static {
     fn try_get(&mut self) -> Option<T>;
 }
 
-
 struct MappedWatched<T, S> {
     recv: Option<Box<dyn WatchTrait<S>>>,
-    mapper: Box<dyn FnMut(S) -> T + Send + Sync>
+    mapper: Box<dyn FnMut(S) -> T + Send + Sync>,
 }
-
 
 #[async_trait]
 impl<T: 'static, S: 'static> WatchTrait<T> for MappedWatched<T, S> {
@@ -39,22 +37,22 @@ impl<T: 'static, S: 'static> WatchTrait<T> for MappedWatched<T, S> {
     }
 
     fn try_get(&mut self) -> Option<T> {
-        self.recv.as_mut().and_then(|x| x.try_get()).map(|x| (self.mapper)(x))
+        self.recv
+            .as_mut()
+            .and_then(|x| x.try_get())
+            .map(|x| (self.mapper)(x))
     }
 }
 
-
 pub struct WatchedSubscription<T> {
-    pub(super) recv: Option<Box<dyn WatchTrait<T>>>
+    pub(super) recv: Option<Box<dyn WatchTrait<T>>>,
 }
 
 static_assertions::assert_impl_all!(WatchedSubscription<()>: Send, Sync);
 
 impl<T: 'static> WatchedSubscription<T> {
     pub fn none() -> Self {
-        Self {
-            recv: None
-        }
+        Self { recv: None }
     }
 
     pub async fn get(&mut self) -> T {
@@ -79,16 +77,18 @@ impl<T: 'static> WatchedSubscription<T> {
         self.recv.as_mut().and_then(|x| x.try_get())
     }
 
-    pub fn map<V: 'static>(self, mapper: impl FnMut(T) -> V + 'static + Send + Sync) -> WatchedSubscription<V> {
+    pub fn map<V: 'static>(
+        self,
+        mapper: impl FnMut(T) -> V + 'static + Send + Sync,
+    ) -> WatchedSubscription<V> {
         WatchedSubscription {
             recv: Some(Box::new(MappedWatched {
-                            recv: self.recv,
-                            mapper: Box::new(mapper)
-                        }))
+                recv: self.recv,
+                mapper: Box::new(mapper),
+            })),
         }
     }
 }
-
 
 #[async_trait]
 impl<T: Clone + Send + Sync + 'static> WatchTrait<T> for watch::Receiver<Option<T>> {

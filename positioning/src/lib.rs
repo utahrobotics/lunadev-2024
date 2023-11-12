@@ -1,10 +1,13 @@
-use std::{time::{Duration, Instant}, num::NonZeroU32};
+use std::{
+    num::NonZeroU32,
+    time::{Duration, Instant},
+};
 
 use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3};
 use unros_core::{
-    anyhow, async_trait,
-    tokio,
-    Node, signal::{Signal, bounded::BoundedSubscription, SignalRef}, RuntimeContext, setup_logging,
+    anyhow, async_trait, setup_logging,
+    signal::{bounded::BoundedSubscription, Signal, SignalRef},
+    tokio, Node, RuntimeContext,
 };
 
 #[derive(Clone, Copy)]

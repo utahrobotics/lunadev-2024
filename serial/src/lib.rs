@@ -1,8 +1,4 @@
-use std::{
-    ops::Deref,
-    sync::Arc,
-    time::Duration, num::NonZeroU32, collections::VecDeque,
-};
+use std::{collections::VecDeque, num::NonZeroU32, ops::Deref, sync::Arc, time::Duration};
 
 // use crossbeam::queue::SegQueue;
 // use futures::{
@@ -14,13 +10,15 @@ use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros_core::{
     anyhow, async_trait,
     bytes::Bytes,
+    log, setup_logging,
+    signal::{bounded::BoundedSubscription, watched::WatchedSubscription, Signal, SignalRef},
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
         sync::Mutex,
         task::JoinSet,
     },
-    Node, signal::{Signal, SignalRef, bounded::BoundedSubscription, watched::WatchedSubscription}, RuntimeContext, setup_logging, log
+    Node, RuntimeContext,
 };
 
 pub struct SerialConnection {
@@ -89,10 +87,10 @@ impl SerialConnection {
     }
 
     pub fn message_to_send_subscription(&mut self, sub: &mut SignalRef<Bytes>) {
-        *Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut() += sub.subscribe_bounded(NonZeroU32::new(64).unwrap());
+        *Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut() +=
+            sub.subscribe_bounded(NonZeroU32::new(64).unwrap());
     }
 }
-
 
 #[async_trait]
 impl Node for SerialConnection {
@@ -163,7 +161,7 @@ impl embedded_hal::serial::Read<u8> for VescReader {
         if let Some(result) = self.recv.try_recv() {
             match result {
                 Ok(msg) => self.buffer.extend(msg.into_iter()),
-                Err(n) => log::warn!("Lagged by {n} messages")
+                Err(n) => log::warn!("Lagged by {n} messages"),
             }
         }
         self.buffer.pop_back().ok_or(nb::Error::WouldBlock)
@@ -191,11 +189,10 @@ impl embedded_hal::serial::Write<u8> for VescWriter {
     }
 }
 
-
 pub struct VescConnection {
     serial: SerialConnection,
     current: WatchedSubscription<u32>,
-    duty: WatchedSubscription<u32>
+    duty: WatchedSubscription<u32>,
 }
 
 impl VescConnection {
@@ -203,7 +200,7 @@ impl VescConnection {
         Self {
             serial,
             current: WatchedSubscription::none(),
-            duty: WatchedSubscription::none()
+            duty: WatchedSubscription::none(),
         }
     }
 
@@ -222,9 +219,13 @@ impl Node for VescConnection {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         let mut writer = VescWriter::default();
-        self.serial.message_to_send_subscription(&mut writer.signal.get_ref());
+        self.serial
+            .message_to_send_subscription(&mut writer.signal.get_ref());
         let vesc_reader = VescReader {
-            recv: self.serial.get_msg_received_signal().subscribe_bounded(NonZeroU32::new(32).unwrap()),
+            recv: self
+                .serial
+                .get_msg_received_signal()
+                .subscribe_bounded(NonZeroU32::new(32).unwrap()),
             buffer: Default::default(),
         };
         let mut vesc = vesc_comm::VescConnection::new(vesc_reader, writer);

@@ -10,7 +10,6 @@ members = [
     "realsense",
     "positioning",
     "serial",
-    "lunatick0"
 ]
 
 [workspace.dependencies]

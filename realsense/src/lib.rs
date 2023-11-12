@@ -7,7 +7,7 @@ use std::{
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 use nalgebra::Vector3;
-use quaternion_core::{to_euler_angles, RotationType, RotationSequence};
+use quaternion_core::{to_euler_angles, RotationSequence, RotationType};
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -17,7 +17,9 @@ use realsense_rust::{
     pipeline::InactivePipeline,
 };
 use unros_core::{
-    anyhow, async_trait, tokio_rayon, Node, signal::{Signal, SignalRef}, RuntimeContext, setup_logging,
+    anyhow, async_trait, setup_logging,
+    signal::{Signal, SignalRef},
+    tokio_rayon, Node, RuntimeContext,
 };
 
 #[derive(Clone, Copy)]
@@ -30,7 +32,7 @@ pub struct RealSenseCamera {
     device: Device,
     context: Arc<Mutex<Context>>,
     image_received: Signal<Arc<DynamicImage>>,
-    imu_received: Signal<IMUFrame>
+    imu_received: Signal<IMUFrame>,
 }
 
 impl RealSenseCamera {
@@ -118,7 +120,12 @@ impl Node for RealSenseCamera {
                     let quat = frame.rotation();
                     self.imu_received.set(IMUFrame {
                         acceleration: frame.acceleration().into(),
-                        rotation: to_euler_angles(RotationType::Intrinsic, RotationSequence::YXZ, (quat[0], [quat[1], quat[2], quat[3]])).into()
+                        rotation: to_euler_angles(
+                            RotationType::Intrinsic,
+                            RotationSequence::YXZ,
+                            (quat[0], [quat[1], quat[2], quat[3]]),
+                        )
+                        .into(),
                     });
                 }
             }

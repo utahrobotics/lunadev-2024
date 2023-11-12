@@ -8,4 +8,7 @@ edition = "2021"
 [dependencies]
 apriltag = "0.4"
 apriltag-image = "0.1"
+apriltag-nalgebra = "0.1"
 unros-core = { path = "../unros-core" }
+nalgebra = "0.32"
+fxhash = { workspace = true }

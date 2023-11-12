@@ -7,8 +7,9 @@ use nokhwa::{
 };
 use unros_core::{
     anyhow::{self, Context},
-    async_trait,
-    tokio_rayon, Node, signal::{Signal, SignalRef}, RuntimeContext, setup_logging,
+    async_trait, setup_logging,
+    signal::{Signal, SignalRef},
+    tokio_rayon, Node, RuntimeContext,
 };
 
 pub struct Camera {
@@ -41,7 +42,7 @@ impl Node for Camera {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
-        
+
         let index = CameraIndex::Index(self.camera_index);
 
         let requested =

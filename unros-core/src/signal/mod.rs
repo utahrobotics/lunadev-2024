@@ -1,36 +1,32 @@
-use std::{num::NonZeroU32, collections::hash_map::Entry};
+use std::{collections::hash_map::Entry, num::NonZeroU32};
 
 use async_trait::async_trait;
 use fxhash::FxHashMap;
 use rand::{rngs::SmallRng, SeedableRng};
-use tokio::sync::{mpsc, broadcast, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 
-use self::{unbounded::UnboundedSubscription, bounded::BoundedSubscription, watched::WatchedSubscription};
+use self::{
+    bounded::BoundedSubscription, unbounded::UnboundedSubscription, watched::WatchedSubscription,
+};
 
-pub mod unbounded;
 pub mod bounded;
+pub mod unbounded;
 pub mod watched;
-
 
 #[async_trait]
 trait ChannelTrait<T>: Send + Sync + 'static {
     fn source_count(&self) -> usize;
 
     async fn recv(&mut self) -> T;
-    fn blocking_recv(&mut self) -> T;
-    fn try_blocking_recv(&mut self) -> Option<T>;
+    fn blocking_recv(&mut self) -> Option<T>;
 
     fn try_recv(&mut self) -> Option<T>;
-
-    // fn merge(self, other: Box<dyn ChannelTrait<T>>) -> Box<dyn ChannelTrait<T>>;
 }
-
 
 struct MappedChannel<T, S> {
     source: Box<dyn ChannelTrait<S>>,
-    mapper: Box<dyn FnMut(S) -> T + Send + Sync>
+    mapper: Box<dyn FnMut(S) -> T + Send + Sync>,
 }
-
 
 #[async_trait]
 impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
@@ -42,15 +38,11 @@ impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
         (self.mapper)(self.source.recv().await)
     }
 
-    fn blocking_recv(&mut self) -> T  {
-        (self.mapper)(self.source.blocking_recv())
+    fn blocking_recv(&mut self) -> Option<T> {
+        self.source.blocking_recv().map(|x| (self.mapper)(x))
     }
 
-    fn try_blocking_recv(&mut self) -> Option<T> {
-        self.source.try_blocking_recv().map(|x| (self.mapper)(x))
-    }
-
-    fn try_recv(&mut self) -> Option<T>  {
+    fn try_recv(&mut self) -> Option<T> {
         self.source.try_recv().map(|x| (self.mapper)(x))
     }
 }
@@ -86,7 +78,7 @@ impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
 pub struct Signal<T> {
     unbounded_senders: Vec<mpsc::UnboundedSender<T>>,
     bounded_senders: FxHashMap<NonZeroU32, broadcast::Sender<T>>,
-    watch_sender: watch::Sender<Option<T>>,
+    watch_sender: Option<watch::Sender<Option<T>>>,
 }
 
 impl<T> Default for Signal<T> {
@@ -94,7 +86,7 @@ impl<T> Default for Signal<T> {
         Self {
             unbounded_senders: Default::default(),
             bounded_senders: Default::default(),
-            watch_sender: watch::channel(None).0,
+            watch_sender: None,
         }
     }
 }
@@ -121,7 +113,9 @@ impl<T: Clone> Signal<T> {
         for sender in self.bounded_senders.values() {
             let _ = sender.send(value.clone());
         }
-        self.watch_sender.send_replace(Some(value));
+        if let Some(watch_sender) = &self.watch_sender {
+            watch_sender.send_replace(Some(value));
+        }
     }
 }
 
@@ -134,7 +128,7 @@ impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
 
         UnboundedSubscription {
             receivers: vec![Box::new(recv)],
-            rng: SmallRng::from_entropy()
+            rng: SmallRng::from_entropy(),
         }
     }
 
@@ -149,13 +143,17 @@ impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
         };
         BoundedSubscription {
             receivers: vec![Box::new(recv)],
-            rng: SmallRng::from_entropy()
+            rng: SmallRng::from_entropy(),
         }
     }
 
-    pub fn watch(&self) -> WatchedSubscription<T> {
+    pub fn watch(&mut self) -> WatchedSubscription<T> {
+        let watch_sender = self
+            .0
+            .watch_sender
+            .get_or_insert_with(|| watch::channel(None).0);
         WatchedSubscription {
-            recv: Some(Box::new(self.0.watch_sender.subscribe()))
+            recv: Some(Box::new(watch_sender.subscribe())),
         }
     }
 }
