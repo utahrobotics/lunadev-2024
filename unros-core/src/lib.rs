@@ -16,7 +16,7 @@ pub use log;
 use log::{error, info, warn};
 use serde::Deserialize;
 pub use tokio;
-use tokio::{sync::broadcast, task::JoinSet};
+use tokio::{sync::{broadcast, mpsc}, task::JoinSet};
 pub use tokio_rayon::{self, rayon};
 
 #[async_trait]
@@ -60,11 +60,16 @@ where
 #[derive(Clone)]
 pub struct RuntimeContext {
     name: Arc<str>,
+    node_sender: mpsc::UnboundedSender<FinalizedNode>
 }
 
 impl RuntimeContext {
     pub fn get_name(&self) -> &Arc<str> {
         &self.name
+    }
+
+    pub fn spawn_node(&self, node: impl Into<FinalizedNode>) {
+        let _ = self.node_sender.send(node.into());
     }
 }
 
@@ -76,7 +81,7 @@ pub struct FinalizedNode {
     critical: bool,
     name: String,
     run: Box<
-        dyn FnOnce(Arc<str>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> + Send,
+        dyn FnOnce(Arc<str>, mpsc::UnboundedSender<FinalizedNode>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> + Send,
     >,
 }
 
@@ -91,9 +96,9 @@ impl FinalizedNode {
         Self {
             critical: false,
             name: N::DEFAULT_NAME.into(),
-            run: Box::new(|name| {
+            run: Box::new(|name, node_sender| {
                 Box::pin(async move {
-                    let context = RuntimeContext { name };
+                    let context = RuntimeContext { name, node_sender };
                     node.run(context).await
                 })
             }),
@@ -116,9 +121,9 @@ impl FinalizedNode {
         self.critical
     }
 
-    async fn run(self, mut abort: broadcast::Receiver<()>) -> Result<(), RunError> {
+    async fn run(self, mut abort: broadcast::Receiver<()>, node_sender: mpsc::UnboundedSender<FinalizedNode>) -> Result<(), RunError> {
         let name: Arc<str> = Arc::from(self.name.into_boxed_str());
-        let handle = tokio::spawn((self.run)(name.clone()));
+        let handle = tokio::spawn((self.run)(name.clone(), node_sender));
         let abort_handle = handle.abort_handle();
 
         tokio::spawn(async move {
@@ -184,13 +189,15 @@ macro_rules! setup_logging {
 }
 
 const LOGS_DIR: &str = "logs";
-static LOGGER_INITED: Once = Once::new();
 
 pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
+    static LOGGER_INITED: Once = Once::new();
+    
     if LOGGER_INITED.is_completed() {
         return Ok(());
     }
     LOGGER_INITED.call_once(|| {});
+    console_subscriber::init();
 
     if !AsRef::<Path>::as_ref(LOGS_DIR)
         .try_exists()
@@ -270,9 +277,10 @@ pub async fn async_run_all(
     init_logger(&run_options)?;
 
     let abort_sender = broadcast::Sender::new(1);
+    let (node_sender, mut node_receiver) = mpsc::unbounded_channel();
     let mut tasks = JoinSet::new();
     for runnable in runnables {
-        tasks.spawn(runnable.run(abort_sender.subscribe()));
+        tasks.spawn(runnable.run(abort_sender.subscribe(), node_sender.clone()));
     }
     if tasks.is_empty() {
         warn!("No nodes to run. Exiting...");
@@ -309,6 +317,15 @@ pub async fn async_run_all(
                     break;
                 }
             }
+            node = async {
+                let Some(node) = node_receiver.recv().await else {
+                    std::future::pending::<()>().await;
+                    unreachable!();
+                };
+                node
+            } => {
+                tasks.spawn(node.run(abort_sender.subscribe(), node_sender.clone()));
+            }
         }
     }
 
@@ -319,7 +336,7 @@ pub async fn async_run_all(
         } => {}
         () = async {
             if tokio::signal::ctrl_c().await.is_err() {
-                std::future::pending().await
+                std::future::pending::<()>().await;
             }
             warn!("Force exiting...");
             last_drop.force_exit = true;
