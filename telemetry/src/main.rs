@@ -1,7 +1,7 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use telemetry::Telemetry;
-use unros_core::{anyhow, async_run_all, log::info, tokio, default_run_options};
+use unros_core::{anyhow, async_run_all, default_run_options, log::info, tokio};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

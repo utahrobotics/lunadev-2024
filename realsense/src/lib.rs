@@ -11,7 +11,7 @@ use realsense_rust::{
     config::Config,
     context::Context,
     device::Device,
-    frame::{ColorFrame, GyroFrame, AccelFrame},
+    frame::{AccelFrame, ColorFrame, GyroFrame},
     kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind},
     pipeline::InactivePipeline,
 };
@@ -127,12 +127,17 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     let ang_vel = frame.rotational_velocity();
-                    self.angular_velocity_received.set(Vector3::new(ang_vel[0], -ang_vel[1], ang_vel[2]));
+                    self.angular_velocity_received.set(Vector3::new(
+                        ang_vel[0],
+                        -ang_vel[1],
+                        ang_vel[2],
+                    ));
                 }
 
                 for frame in frames.frames_of_type::<AccelFrame>() {
                     let accel = frame.acceleration();
-                    self.acceleration_received.set(Vector3::new(accel[0], -accel[1], accel[2]));
+                    self.acceleration_received
+                        .set(Vector3::new(accel[0], -accel[1], accel[2]));
                 }
             }
         })

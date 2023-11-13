@@ -37,7 +37,6 @@ impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
 
     async fn recv_ex(&mut self) -> Option<T> {
         self.source.recv_ex().await.map(|x| (self.mapper)(x))
-        
     }
 
     async fn recv(&mut self) -> T {

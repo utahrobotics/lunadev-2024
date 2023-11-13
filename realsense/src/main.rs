@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use realsense::discover_all_realsense;
-use unros_core::{anyhow, async_run_all, tokio, FinalizedNode, default_run_options};
+use unros_core::{anyhow, async_run_all, default_run_options, tokio, FinalizedNode};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

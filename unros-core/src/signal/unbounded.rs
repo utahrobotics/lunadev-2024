@@ -6,7 +6,7 @@ use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::mpsc;
 use tokio_rayon::rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-use super::{ChannelTrait, MappedChannel, watched::WatchedSubscription, Signal};
+use super::{watched::WatchedSubscription, ChannelTrait, MappedChannel, Signal};
 
 pub struct UnboundedSubscription<T> {
     pub(super) receivers: Vec<Box<dyn ChannelTrait<T>>>,
@@ -87,13 +87,16 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
     }
 
     pub async fn to_watched(mut self) -> WatchedSubscription<T>
-    where T: Clone + Sync
+    where
+        T: Clone + Sync,
     {
         let mut signal = Signal::default();
         let sub = signal.get_ref().watch();
         tokio::spawn(async move {
             loop {
-                let Some(msg) = self.recv_ex().await else { break; };
+                let Some(msg) = self.recv_ex().await else {
+                    break;
+                };
                 signal.set(msg);
             }
         });

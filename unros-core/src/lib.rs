@@ -1,9 +1,10 @@
 use std::{
     future::Future,
+    ops::{Add, AddAssign},
     path::{Path, PathBuf},
     pin::Pin,
     sync::{Arc, Once},
-    time::Instant, ops::{AddAssign, Add},
+    time::Instant,
 };
 
 pub mod signal;
@@ -84,12 +85,16 @@ struct RunError {
 
 pub struct FinalizedNode {
     critical: bool,
-    runs: Vec<(Arc<str>, Box<
-        dyn FnOnce(
-                mpsc::UnboundedSender<FinalizedNode>,
-            ) -> Pin<Box<dyn Future<Output = Result<(), (anyhow::Error, Arc<str>)>> + Send>>
-            + Send,
-    >)>,
+    runs: Vec<(
+        Arc<str>,
+        Box<
+            dyn FnOnce(
+                    mpsc::UnboundedSender<FinalizedNode>,
+                ) -> Pin<
+                    Box<dyn Future<Output = Result<(), (anyhow::Error, Arc<str>)>> + Send>,
+                > + Send,
+        >,
+    )>,
 }
 
 impl<N: Node> From<N> for FinalizedNode {
@@ -105,13 +110,19 @@ impl FinalizedNode {
 
         Self {
             critical: false,
-            runs: vec![(name.clone(), Box::new(move |node_sender| {
-                Box::pin(async move {
-                    info!("Running {name}");
-                    let context = RuntimeContext { name: name.clone(), node_sender };
-                    node.run(context).await.map_err(|e| (e, name))
-                })
-            }))],
+            runs: vec![(
+                name.clone(),
+                Box::new(move |node_sender| {
+                    Box::pin(async move {
+                        info!("Running {name}");
+                        let context = RuntimeContext {
+                            name: name.clone(),
+                            node_sender,
+                        };
+                        node.run(context).await.map_err(|e| (e, name))
+                    })
+                }),
+            )],
         }
     }
 
@@ -130,7 +141,7 @@ impl FinalizedNode {
     ) -> Result<(), RunError> {
         let mut tasks = JoinSet::new();
         let mut task_names = FxHashMap::default();
-        
+
         for (name, run) in self.runs {
             let id = tasks.spawn(run(node_sender.clone())).id();
             task_names.insert(id, name);
@@ -172,7 +183,7 @@ impl FinalizedNode {
                 Err(e) => error!("{} has panicked", task_names.get(&e.id()).unwrap()),
             }
         }
-        
+
         result.map_err(|(err, name)| {
             error!("{} has faced the following error: {err}", name);
             RunError {
@@ -182,14 +193,12 @@ impl FinalizedNode {
     }
 }
 
-
 impl AddAssign for FinalizedNode {
     fn add_assign(&mut self, mut rhs: Self) {
         self.critical = self.critical || rhs.critical;
         self.runs.append(&mut rhs.runs);
     }
 }
-
 
 impl Add for FinalizedNode {
     type Output = Self;
@@ -200,23 +209,20 @@ impl Add for FinalizedNode {
     }
 }
 
-
 #[derive(Deserialize)]
 pub struct RunOptions {
     #[serde(default)]
     pub runtime_name: String,
 }
 
-
 #[macro_export]
 macro_rules! default_run_options {
     () => {
         $crate::RunOptions {
-            runtime_name: env!("CARGO_PKG_NAME").into()
+            runtime_name: env!("CARGO_PKG_NAME").into(),
         }
     };
 }
-
 
 #[macro_export]
 macro_rules! setup_logging {

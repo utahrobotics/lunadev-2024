@@ -12,6 +12,7 @@ members = [
     "positioning",
     "serial",
 ]
+resolver = "2"
 
 [workspace.dependencies]
 toml = "0.8"

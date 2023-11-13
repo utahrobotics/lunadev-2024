@@ -5,7 +5,8 @@ use std::{
 
 use serial::SerialConnection;
 use unros_core::{
-    anyhow, async_run_all, init_logger, signal::Signal, tokio, tokio_rayon, FnNode, RuntimeContext, default_run_options
+    anyhow, async_run_all, default_run_options, init_logger, signal::Signal, tokio, tokio_rayon,
+    FnNode, RuntimeContext,
 };
 
 #[tokio::main]

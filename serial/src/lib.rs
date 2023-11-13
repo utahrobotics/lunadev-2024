@@ -83,8 +83,7 @@ impl SerialConnection {
     }
 
     pub fn message_to_send_subscription(&mut self, sub: &mut SignalRef<Bytes>) {
-        *Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut() +=
-            sub.subscribe_bounded();
+        *Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut() += sub.subscribe_bounded();
     }
 }
 
@@ -218,10 +217,7 @@ impl Node for VescConnection {
         self.serial
             .message_to_send_subscription(&mut writer.signal.get_ref());
         let vesc_reader = VescReader {
-            recv: self
-                .serial
-                .get_msg_received_signal()
-                .subscribe_bounded(),
+            recv: self.serial.get_msg_received_signal().subscribe_bounded(),
             buffer: Default::default(),
         };
         let mut vesc = vesc_comm::VescConnection::new(vesc_reader, writer);
