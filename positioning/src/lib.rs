@@ -108,7 +108,9 @@ impl Node for Positioner {
                     }
 
                     if let Some(angular_velocity_variance) = frame.angular_velocity_variance {
-                        eskf.set_rotational_variance(angular_velocity_variance);
+                        eskf.set_rotational_variance(eskf.orientation_uncertainty() + angular_velocity_variance * delta.as_secs_f32());
+                    } else {
+                        eskf.set_rotational_variance(eskf.orientation_uncertainty());
                     }
 
                     eskf.predict(
