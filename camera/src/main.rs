@@ -5,7 +5,7 @@ use unros_core::{
     anyhow::{self, Context},
     async_run_all,
     log::info,
-    tokio, RunOptions,
+    tokio, default_run_options,
 };
 
 #[tokio::main]
@@ -29,8 +29,5 @@ async fn main() -> anyhow::Result<()> {
             camera.into()
         });
 
-    let run_options = RunOptions {
-        ..Default::default()
-    };
-    async_run_all(cameras, run_options).await
+    async_run_all(cameras, default_run_options!()).await
 }

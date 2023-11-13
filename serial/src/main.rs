@@ -5,12 +5,12 @@ use std::{
 
 use serial::SerialConnection;
 use unros_core::{
-    anyhow, async_run_all, init_logger, signal::Signal, tokio, tokio_rayon, FnNode, RuntimeContext,
+    anyhow, async_run_all, init_logger, signal::Signal, tokio, tokio_rayon, FnNode, RuntimeContext, default_run_options
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let run_options = Default::default();
+    let run_options = default_run_options!();
     init_logger(&run_options)?;
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
     let mut serial = SerialConnection::new("/dev/ttyACM1".into(), 115200, true).await?;

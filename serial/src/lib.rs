@@ -1,12 +1,6 @@
-use std::{collections::VecDeque, num::NonZeroU32, ops::Deref, sync::Arc, time::Duration};
+use std::{collections::VecDeque, ops::Deref, sync::Arc, time::Duration};
 
-// use crossbeam::queue::SegQueue;
-// use futures::{
-//     stream::{SplitSink, SplitStream},
-//     SinkExt, StreamExt,
-// };
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
-// use tokio_util::codec::{BytesCodec, Decoder, Framed, Encoder};
 use unros_core::{
     anyhow, async_trait,
     bytes::Bytes,
@@ -26,7 +20,7 @@ pub struct SerialConnection {
     baud_rate: u32,
     // stream: Option<SerialStream>,
     msg_received: Option<Signal<Bytes>>,
-    messages_to_send: Arc<Mutex<BoundedSubscription<Bytes>>>,
+    messages_to_send: Arc<Mutex<BoundedSubscription<Bytes, 64>>>,
     tolerate_error: bool,
 }
 
@@ -90,7 +84,7 @@ impl SerialConnection {
 
     pub fn message_to_send_subscription(&mut self, sub: &mut SignalRef<Bytes>) {
         *Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut() +=
-            sub.subscribe_bounded(NonZeroU32::new(64).unwrap());
+            sub.subscribe_bounded();
     }
 }
 
@@ -152,7 +146,7 @@ impl Node for SerialConnection {
 }
 
 struct VescReader {
-    recv: BoundedSubscription<Bytes>,
+    recv: BoundedSubscription<Bytes, 32>,
     buffer: VecDeque<u8>,
 }
 
@@ -227,7 +221,7 @@ impl Node for VescConnection {
             recv: self
                 .serial
                 .get_msg_received_signal()
-                .subscribe_bounded(NonZeroU32::new(32).unwrap()),
+                .subscribe_bounded(),
             buffer: Default::default(),
         };
         let mut vesc = vesc_comm::VescConnection::new(vesc_reader, writer);

@@ -43,7 +43,7 @@ pub struct Telemetry {
     pub bandwidth_limit: u32,
     pub server_addr: Address,
     steering_signal: Signal<Steering>,
-    image_subscriptions: BoundedSubscription<Arc<DynamicImage>>,
+    image_subscriptions: BoundedSubscription<Arc<DynamicImage>, 8>,
     // image_queue: Arc<SegQueue<Arc<DynamicImage>>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
 }

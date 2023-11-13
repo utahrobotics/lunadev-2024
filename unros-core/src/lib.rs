@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::{Arc, Once},
-    time::Instant,
+    time::Instant, ops::{AddAssign, Add},
 };
 
 pub mod signal;
@@ -13,6 +13,7 @@ use anyhow::Context;
 pub use async_trait::async_trait;
 pub use bytes;
 use chrono::{Datelike, Timelike};
+use fxhash::FxHashMap;
 pub use log;
 use log::{error, info, warn};
 use serde::Deserialize;
@@ -83,42 +84,35 @@ struct RunError {
 
 pub struct FinalizedNode {
     critical: bool,
-    name: String,
-    run: Box<
+    runs: Vec<(Arc<str>, Box<
         dyn FnOnce(
-                Arc<str>,
                 mpsc::UnboundedSender<FinalizedNode>,
-            ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+            ) -> Pin<Box<dyn Future<Output = Result<(), (anyhow::Error, Arc<str>)>> + Send>>
             + Send,
-    >,
+    >)>,
 }
 
 impl<N: Node> From<N> for FinalizedNode {
     fn from(value: N) -> Self {
-        Self::new(value)
+        Self::new(value, None)
     }
 }
 
 impl FinalizedNode {
-    pub fn new<N: Node>(node: N) -> Self {
+    pub fn new<N: Node>(node: N, name: Option<String>) -> Self {
+        let name = name.unwrap_or_else(|| N::DEFAULT_NAME.into());
+        let name: Arc<str> = Arc::from(name.into_boxed_str());
+
         Self {
             critical: false,
-            name: N::DEFAULT_NAME.into(),
-            run: Box::new(|name, node_sender| {
+            runs: vec![(name.clone(), Box::new(move |node_sender| {
                 Box::pin(async move {
-                    let context = RuntimeContext { name, node_sender };
-                    node.run(context).await
+                    info!("Running {name}");
+                    let context = RuntimeContext { name: name.clone(), node_sender };
+                    node.run(context).await.map_err(|e| (e, name))
                 })
-            }),
+            }))],
         }
-    }
-
-    pub fn set_name(&mut self, name: impl Into<String>) {
-        self.name = name.into();
-    }
-
-    pub fn get_name(&self) -> &str {
-        &self.name
     }
 
     pub fn set_critical(&mut self, value: bool) {
@@ -134,31 +128,52 @@ impl FinalizedNode {
         mut abort: broadcast::Receiver<()>,
         node_sender: mpsc::UnboundedSender<FinalizedNode>,
     ) -> Result<(), RunError> {
-        let name: Arc<str> = Arc::from(self.name.into_boxed_str());
-        info!("Running {name}");
-        let handle = tokio::spawn((self.run)(name.clone(), node_sender));
-        let abort_handle = handle.abort_handle();
+        let mut tasks = JoinSet::new();
+        let mut task_names = FxHashMap::default();
+        
+        for (name, run) in self.runs {
+            let id = tasks.spawn(run(node_sender.clone())).id();
+            task_names.insert(id, name);
+        }
 
-        tokio::spawn(async move {
-            let _ = abort.recv().await;
-            abort_handle.abort();
-        });
-
-        let result = match handle.await {
-            Ok(x) => x,
-            Err(e) => {
-                if e.is_cancelled() {
-                    return Ok(());
-                } else {
-                    error!("{} has panicked", name);
-                    return Err(RunError {
-                        critical: self.critical,
-                    });
+        let result = tokio::select! {
+            _ = abort.recv() => {
+                tasks.abort_all();
+                while let Some(result) = tasks.join_next().await {
+                    match result {
+                        Ok(Ok(())) => continue,
+                        Ok(Err((err, name))) => error!("{} has faced the following error: {err}", name),
+                        Err(e) => if !e.is_cancelled() {
+                            error!("{} has panicked", task_names.get(&e.id()).unwrap());
+                        }
+                    }
+                }
+                return Ok(());
+            }
+            option = tasks.join_next() => {
+                match option.unwrap() {
+                    Ok(x) => x,
+                    Err(e) => {
+                        debug_assert!(!e.is_cancelled());
+                        error!("{} has panicked", task_names.get(&e.id()).unwrap());
+                        return Err(RunError {
+                            critical: self.critical,
+                        });
+                    }
                 }
             }
         };
 
-        result.map_err(|err| {
+        tasks.abort_all();
+        while let Some(result) = tasks.join_next().await {
+            match result {
+                Ok(Ok(())) => continue,
+                Ok(Err((err, name))) => error!("{} has faced the following error: {err}", name),
+                Err(e) => error!("{} has panicked", task_names.get(&e.id()).unwrap()),
+            }
+        }
+        
+        result.map_err(|(err, name)| {
             error!("{} has faced the following error: {err}", name);
             RunError {
                 critical: self.critical,
@@ -167,11 +182,41 @@ impl FinalizedNode {
     }
 }
 
-#[derive(Deserialize, Default)]
+
+impl AddAssign for FinalizedNode {
+    fn add_assign(&mut self, mut rhs: Self) {
+        self.critical = self.critical || rhs.critical;
+        self.runs.append(&mut rhs.runs);
+    }
+}
+
+
+impl Add for FinalizedNode {
+    type Output = Self;
+
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self += rhs;
+        self
+    }
+}
+
+
+#[derive(Deserialize)]
 pub struct RunOptions {
     #[serde(default)]
     pub runtime_name: String,
 }
+
+
+#[macro_export]
+macro_rules! default_run_options {
+    () => {
+        $crate::RunOptions {
+            runtime_name: env!("CARGO_PKG_NAME").into()
+        }
+    };
+}
+
 
 #[macro_export]
 macro_rules! setup_logging {
@@ -221,19 +266,19 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     }
     let mut runtime_name = run_options.runtime_name.clone();
     if !runtime_name.is_empty() {
-        runtime_name = "--".to_string() + &runtime_name;
+        runtime_name = "=".to_string() + &runtime_name;
     }
 
     let datetime = chrono::Local::now();
     let log_file_name = format!(
-        "{}-{}-{}--{}-{}-{}{}.log",
-        runtime_name,
+        "{}-{:0>2}-{:0>2}={:0>2}-{:0>2}-{:0>2}{}.log",
         datetime.year(),
         datetime.month(),
         datetime.day(),
         datetime.hour(),
         datetime.minute(),
         datetime.second(),
+        runtime_name,
     );
 
     let start_time = Instant::now();
@@ -256,7 +301,7 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
         .chain(
             fern::Dispatch::new().chain(
                 fern::log_file(PathBuf::from(LOGS_DIR).join(log_file_name))
-                    .context("Failed to create log file")?,
+                    .context("Failed to create log file. Do we have permissions?")?,
             ),
         )
         .chain(
