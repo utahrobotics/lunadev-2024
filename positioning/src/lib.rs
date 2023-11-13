@@ -24,6 +24,9 @@ pub struct IMUFrame {
     pub acceleration: Vector3<f32>,
     /// XYZ rotation order
     pub angular_velocity: Vector3<f32>,
+
+    pub acceleration_variance: Option<Vector3<f32>>,
+    pub angular_velocity_variance: Option<Vector3<f32>>,
 }
 
 pub struct Positioner {
@@ -99,6 +102,14 @@ impl Node for Positioner {
                     let now = start.elapsed();
                     let delta = now - last_elapsed;
                     frame.angular_velocity *= delta.as_secs_f32();
+
+                    if let Some(acceleration_variance) = frame.acceleration_variance {
+                        eskf.set_acceleration_variance(acceleration_variance);
+                    }
+
+                    if let Some(angular_velocity_variance) = frame.angular_velocity_variance {
+                        eskf.set_rotational_variance(angular_velocity_variance);
+                    }
 
                     eskf.predict(
                         frame.acceleration,
