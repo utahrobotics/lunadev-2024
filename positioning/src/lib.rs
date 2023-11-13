@@ -22,7 +22,8 @@ pub struct OrientationFrame {
 #[derive(Clone, Copy)]
 pub struct IMUFrame {
     pub acceleration: Vector3<f32>,
-    pub rotation: Vector3<f32>,
+    /// XYZ rotation order
+    pub angular_velocity: Vector3<f32>,
 }
 
 pub struct Positioner {
@@ -88,33 +89,32 @@ impl Node for Positioner {
         let start = Instant::now();
         let mut last_elapsed = Duration::ZERO;
 
+        let mut imu_sub = self.imu_sub.to_watched().await;
+        let mut position_sub = self.position_sub.to_watched().await;
+        let mut orientation_sub = self.orientation_sub.to_watched().await;
+
         loop {
             tokio::select! {
-                result = self.imu_sub.recv() => {
-                    let frame = match result {
-                        Ok(x) => x,
-                        Err(n) => {
-                            warn!("Lagged behind by {n} frames");
-                            continue;
-                        }
-                    };
+                mut frame = imu_sub.wait_for_change() => {
                     let now = start.elapsed();
-                    eskf.predict(frame.acceleration, frame.rotation, now - last_elapsed);
+                    let delta = now - last_elapsed;
+                    frame.angular_velocity *= delta.as_secs_f32();
+
+                    eskf.predict(
+                        frame.acceleration,
+                        (UnitQuaternion::from_axis_angle(&Vector3::x_axis(), frame.angular_velocity.x) * 
+                        UnitQuaternion::from_axis_angle(&Vector3::y_axis(), frame.angular_velocity.y) * 
+                        UnitQuaternion::from_axis_angle(&Vector3::z_axis(), frame.angular_velocity.z) *
+                        eskf.orientation).scaled_axis(),
+                        delta
+                    );
                     last_elapsed = now;
 
                     self.position.set(eskf.position);
                     self.velocity.set(eskf.velocity);
                     self.orientation.set(eskf.orientation);
                 }
-                result = self.position_sub.recv() => {
-                    let frame = match result {
-                        Ok(x) => x,
-                        Err(n) => {
-                            warn!("Lagged behind by {n} frames");
-                            continue;
-                        }
-                    };
-
+                frame = position_sub.wait_for_change() => {
                     if let Err(e) = eskf.observe_position(frame.position, frame.variance) {
                         error!("Failed to observe position: {e:#?}");
                         continue;
@@ -124,15 +124,7 @@ impl Node for Positioner {
                     self.velocity.set(eskf.velocity);
                     self.orientation.set(eskf.orientation);
                 }
-                result = self.orientation_sub.recv() => {
-                    let frame = match result {
-                        Ok(x) => x,
-                        Err(n) => {
-                            warn!("Lagged behind by {n} frames");
-                            continue;
-                        }
-                    };
-
+                frame = orientation_sub.wait_for_change() => {
                     if let Err(e) = eskf.observe_orientation(frame.orientation, frame.variance) {
                         error!("Failed to observe orientation: {e:#?}");
                         continue;

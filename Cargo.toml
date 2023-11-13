@@ -8,7 +8,7 @@ members = [
     "camera",
     "apriltag",
     "apriltag-test",
-    # "realsense",
+    "realsense",
     "positioning",
     "serial",
 ]

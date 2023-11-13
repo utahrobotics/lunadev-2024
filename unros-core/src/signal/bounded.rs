@@ -6,7 +6,7 @@ use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::broadcast;
 use tokio_rayon::rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-use super::{ChannelTrait, MappedChannel};
+use super::{ChannelTrait, MappedChannel, watched::WatchedSubscription, Signal};
 
 pub struct BoundedSubscription<T, const SIZE: u32> {
     pub(super) receivers: Vec<Box<dyn ChannelTrait<Result<T, u64>>>>,
@@ -21,6 +21,17 @@ impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
             receivers: vec![],
             rng: SmallRng::from_entropy(),
         }
+    }
+
+    pub async fn recv_ex(&mut self) -> Option<Result<T, u64>> {
+        let mut futures: FuturesUnordered<_> =
+            self.receivers.iter_mut().map(|x| x.recv_ex()).collect();
+
+        let Some(x) = futures.next().await else {
+            std::future::pending::<()>().await;
+            unreachable!()
+        };
+        x
     }
 
     pub async fn recv(&mut self) -> Result<T, u64> {
@@ -74,6 +85,21 @@ impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
             })],
         }
     }
+
+    pub async fn to_watched(mut self) -> WatchedSubscription<T>
+    where T: Clone + Sync
+    {
+        let mut signal = Signal::default();
+        let sub = signal.get_ref().watch();
+        tokio::spawn(async move {
+            loop {
+                let Some(msg) = self.recv_ex().await else { break; };
+                let Ok(msg) = msg else { continue; };
+                signal.set(msg);
+            }
+        });
+        sub
+    }
 }
 
 #[async_trait]
@@ -82,6 +108,10 @@ impl<T: Send + 'static, const SIZE: u32> ChannelTrait<Result<T, u64>>
 {
     fn source_count(&self) -> usize {
         self.receivers.iter().map(|x| x.source_count()).sum()
+    }
+
+    async fn recv_ex(&mut self) -> Option<Result<T, u64>> {
+        BoundedSubscription::recv_ex(self).await
     }
 
     async fn recv(&mut self) -> Result<T, u64> {
@@ -116,6 +146,14 @@ impl<T: Send + 'static, const SIZE: u32> AddAssign for BoundedSubscription<T, SI
 impl<T: Clone + Send + 'static> ChannelTrait<Result<T, u64>> for broadcast::Receiver<T> {
     fn source_count(&self) -> usize {
         1
+    }
+
+    async fn recv_ex(&mut self) -> Option<Result<T, u64>> {
+        match broadcast::Receiver::recv(self).await {
+            Ok(x) => Some(Ok(x)),
+            Err(broadcast::error::RecvError::Lagged(n)) => Some(Err(n)),
+            Err(broadcast::error::RecvError::Closed) => None
+        }
     }
 
     async fn recv(&mut self) -> Result<T, u64> {

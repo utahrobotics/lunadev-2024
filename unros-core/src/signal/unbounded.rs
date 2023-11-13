@@ -6,7 +6,7 @@ use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::mpsc;
 use tokio_rayon::rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-use super::{ChannelTrait, MappedChannel};
+use super::{ChannelTrait, MappedChannel, watched::WatchedSubscription, Signal};
 
 pub struct UnboundedSubscription<T> {
     pub(super) receivers: Vec<Box<dyn ChannelTrait<T>>>,
@@ -21,6 +21,17 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
             receivers: vec![],
             rng: SmallRng::from_entropy(),
         }
+    }
+
+    pub async fn recv_ex(&mut self) -> Option<T> {
+        let mut futures: FuturesUnordered<_> =
+            self.receivers.iter_mut().map(|x| x.recv_ex()).collect();
+
+        let Some(x) = futures.next().await else {
+            std::future::pending::<()>().await;
+            unreachable!()
+        };
+        x
     }
 
     pub async fn recv(&mut self) -> T {
@@ -74,12 +85,30 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
             })],
         }
     }
+
+    pub async fn to_watched(mut self) -> WatchedSubscription<T>
+    where T: Clone + Sync
+    {
+        let mut signal = Signal::default();
+        let sub = signal.get_ref().watch();
+        tokio::spawn(async move {
+            loop {
+                let Some(msg) = self.recv_ex().await else { break; };
+                signal.set(msg);
+            }
+        });
+        sub
+    }
 }
 
 #[async_trait]
 impl<T: Send + 'static> ChannelTrait<T> for mpsc::UnboundedReceiver<T> {
     fn source_count(&self) -> usize {
         1
+    }
+
+    async fn recv_ex(&mut self) -> Option<T> {
+        self.recv().await
     }
 
     async fn recv(&mut self) -> T {
@@ -105,6 +134,10 @@ impl<T: Send + 'static> ChannelTrait<T> for mpsc::UnboundedReceiver<T> {
 impl<T: Send + 'static> ChannelTrait<T> for UnboundedSubscription<T> {
     fn source_count(&self) -> usize {
         self.receivers.iter().map(|x| x.source_count()).sum()
+    }
+
+    async fn recv_ex(&mut self) -> Option<T> {
+        UnboundedSubscription::recv_ex(self).await
     }
 
     async fn recv(&mut self) -> T {

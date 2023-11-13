@@ -17,6 +17,7 @@ pub mod watched;
 trait ChannelTrait<T>: Send + Sync + 'static {
     fn source_count(&self) -> usize;
 
+    async fn recv_ex(&mut self) -> Option<T>;
     async fn recv(&mut self) -> T;
     fn blocking_recv(&mut self) -> Option<T>;
 
@@ -32,6 +33,11 @@ struct MappedChannel<T, S> {
 impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
     fn source_count(&self) -> usize {
         self.source.source_count()
+    }
+
+    async fn recv_ex(&mut self) -> Option<T> {
+        self.source.recv_ex().await.map(|x| (self.mapper)(x))
+        
     }
 
     async fn recv(&mut self) -> T {

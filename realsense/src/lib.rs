@@ -7,12 +7,11 @@ use std::{
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 use nalgebra::Vector3;
-use quaternion_core::{to_euler_angles, RotationSequence, RotationType};
 use realsense_rust::{
     config::Config,
     context::Context,
     device::Device,
-    frame::{ColorFrame, PoseFrame},
+    frame::{ColorFrame, GyroFrame, AccelFrame},
     kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind},
     pipeline::InactivePipeline,
 };
@@ -22,17 +21,18 @@ use unros_core::{
     tokio_rayon, Node, RuntimeContext,
 };
 
-#[derive(Clone, Copy)]
-pub struct IMUFrame {
-    pub acceleration: Vector3<f32>,
-    pub rotation: Vector3<f32>,
-}
+// #[derive(Clone, Copy)]
+// pub struct IMUFrame {
+//     pub acceleration: Vector3<f32>,
+//     pub angular_velocity: Vector3<f32>,
+// }
 
 pub struct RealSenseCamera {
     device: Device,
     context: Arc<Mutex<Context>>,
     image_received: Signal<Arc<DynamicImage>>,
-    imu_received: Signal<IMUFrame>,
+    acceleration_received: Signal<Vector3<f32>>,
+    angular_velocity_received: Signal<Vector3<f32>>,
 }
 
 impl RealSenseCamera {
@@ -43,11 +43,18 @@ impl RealSenseCamera {
             device,
             context: Arc::new(Mutex::new(context)),
             image_received: Default::default(),
-            imu_received: Default::default(),
+            acceleration_received: Default::default(),
+            angular_velocity_received: Default::default(),
         })
     }
     pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
         self.image_received.get_ref()
+    }
+    pub fn acceleration_received_signal(&mut self) -> SignalRef<Vector3<f32>> {
+        self.acceleration_received.get_ref()
+    }
+    pub fn angular_velocity_received_signal(&mut self) -> SignalRef<Vector3<f32>> {
+        self.angular_velocity_received.get_ref()
     }
 }
 
@@ -68,6 +75,7 @@ impl Node for RealSenseCamera {
                 .disable_all_streams()?
                 // .enable_stream(Rs2StreamKind::Depth, None, 640, 0, Rs2Format::Z16, 30)?
                 .enable_stream(Rs2StreamKind::Color, None, 640, 0, Rs2Format::Rgb8, 30)?
+                .enable_stream(Rs2StreamKind::Accel, None, 0, 0, Rs2Format::Any, 0)?
                 .enable_stream(Rs2StreamKind::Gyro, None, 0, 0, Rs2Format::Any, 0)?;
         } else {
             warn!("A Realsense camera is not attached to a USB 3.0 port");
@@ -75,6 +83,7 @@ impl Node for RealSenseCamera {
                 .enable_device_from_serial(self.device.info(Rs2CameraInfo::SerialNumber).unwrap())?
                 .disable_all_streams()?
                 // .enable_stream(Rs2StreamKind::Depth, None, 640, 0, Rs2Format::Z16, 30)?
+                .enable_stream(Rs2StreamKind::Accel, None, 0, 0, Rs2Format::Any, 0)?
                 .enable_stream(Rs2StreamKind::Gyro, None, 0, 0, Rs2Format::Any, 0)?;
         }
 
@@ -116,17 +125,14 @@ impl Node for RealSenseCamera {
                     }
                 }
 
-                for frame in frames.frames_of_type::<PoseFrame>() {
-                    let quat = frame.rotation();
-                    self.imu_received.set(IMUFrame {
-                        acceleration: frame.acceleration().into(),
-                        rotation: to_euler_angles(
-                            RotationType::Intrinsic,
-                            RotationSequence::YXZ,
-                            (quat[0], [quat[1], quat[2], quat[3]]),
-                        )
-                        .into(),
-                    });
+                for frame in frames.frames_of_type::<GyroFrame>() {
+                    let ang_vel = frame.rotational_velocity();
+                    self.angular_velocity_received.set(Vector3::new(ang_vel[0], -ang_vel[1], ang_vel[2]));
+                }
+
+                for frame in frames.frames_of_type::<AccelFrame>() {
+                    let accel = frame.acceleration();
+                    self.acceleration_received.set(Vector3::new(accel[0], -accel[1], accel[2]));
                 }
             }
         })
@@ -143,6 +149,7 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         device,
         context: context.clone(),
         image_received: Default::default(),
-        imu_received: Default::default(),
+        acceleration_received: Default::default(),
+        angular_velocity_received: Default::default(),
     }))
 }
