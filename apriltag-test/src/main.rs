@@ -2,7 +2,7 @@ use apriltag::AprilTagDetector;
 use camera::discover_all_cameras;
 use unros_core::{
     anyhow::{self, Context},
-    async_run_all, tokio, FinalizedNode, RunOptions, default_run_options,
+    async_run_all, tokio, FinalizedNode, default_run_options,
 };
 
 #[tokio::main]
