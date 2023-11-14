@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3};
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{bounded::BoundedSubscription, Signal, SignalRef},
+    signal::{unbounded::UnboundedSubscription, Signal, SignalRef},
     tokio, Node, RuntimeContext,
 };
 
@@ -31,9 +31,9 @@ pub struct IMUFrame {
 
 pub struct Positioner {
     pub builder: eskf::Builder,
-    imu_sub: BoundedSubscription<IMUFrame, 8>,
-    position_sub: BoundedSubscription<PositionFrame, 8>,
-    orientation_sub: BoundedSubscription<OrientationFrame, 8>,
+    imu_sub: UnboundedSubscription<IMUFrame>,
+    position_sub: UnboundedSubscription<PositionFrame>,
+    orientation_sub: UnboundedSubscription<OrientationFrame>,
 
     position: Signal<Point3<f32>>,
     velocity: Signal<Vector3<f32>>,
@@ -44,9 +44,9 @@ impl Default for Positioner {
     fn default() -> Self {
         Self {
             builder: Default::default(),
-            imu_sub: BoundedSubscription::none(),
-            position_sub: BoundedSubscription::none(),
-            orientation_sub: BoundedSubscription::none(),
+            imu_sub: UnboundedSubscription::none(),
+            position_sub: UnboundedSubscription::none(),
+            orientation_sub: UnboundedSubscription::none(),
 
             position: Default::default(),
             velocity: Default::default(),
@@ -56,15 +56,15 @@ impl Default for Positioner {
 }
 
 impl Positioner {
-    pub fn add_imu_sub(&mut self, sub: BoundedSubscription<IMUFrame, 8>) {
+    pub fn add_imu_sub(&mut self, sub: UnboundedSubscription<IMUFrame>) {
         self.imu_sub += sub;
     }
 
-    pub fn add_position_sub(&mut self, sub: BoundedSubscription<PositionFrame, 8>) {
+    pub fn add_position_sub(&mut self, sub: UnboundedSubscription<PositionFrame>) {
         self.position_sub += sub;
     }
 
-    pub fn add_orientation_sub(&mut self, sub: BoundedSubscription<OrientationFrame, 8>) {
+    pub fn add_orientation_sub(&mut self, sub: UnboundedSubscription<OrientationFrame>) {
         self.orientation_sub += sub;
     }
 

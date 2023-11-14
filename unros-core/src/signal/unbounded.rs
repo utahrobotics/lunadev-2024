@@ -27,11 +27,7 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
         let mut futures: FuturesUnordered<_> =
             self.receivers.iter_mut().map(|x| x.recv_ex()).collect();
 
-        let Some(x) = futures.next().await else {
-            std::future::pending::<()>().await;
-            unreachable!()
-        };
-        x
+        futures.next().await.unwrap_or_default()
     }
 
     pub async fn recv(&mut self) -> T {

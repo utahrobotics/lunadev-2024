@@ -8,7 +8,8 @@ pub trait WatchTrait<T>: Send + Sync + 'static {
     async fn get(&mut self) -> T;
     async fn wait_for_change(&mut self) -> T;
 
-    fn try_get(&mut self) -> Option<T>;
+    fn get_or_empty(&mut self) -> Option<T>;
+    async fn changed_or_closed(&mut self) -> Option<T>;
 }
 
 struct MappedWatched<T, S> {
@@ -36,11 +37,15 @@ impl<T: 'static, S: 'static> WatchTrait<T> for MappedWatched<T, S> {
         }
     }
 
-    fn try_get(&mut self) -> Option<T> {
+    fn get_or_empty(&mut self) -> Option<T> {
         self.recv
             .as_mut()
-            .and_then(|x| x.try_get())
+            .and_then(|x| x.get_or_empty())
             .map(|x| (self.mapper)(x))
+    }
+
+    async fn changed_or_closed(&mut self) -> Option<T> {
+        self.recv.as_mut()?.changed_or_closed().await.map(|x| (self.mapper)(x))
     }
 }
 
@@ -64,6 +69,10 @@ impl<T: 'static> WatchedSubscription<T> {
         }
     }
 
+    pub async fn changed_or_closed(&mut self) -> Option<T> {
+        self.recv.as_mut()?.changed_or_closed().await
+    }
+
     pub async fn wait_for_change(&mut self) -> T {
         if let Some(recv) = &mut self.recv {
             recv.wait_for_change().await
@@ -73,8 +82,8 @@ impl<T: 'static> WatchedSubscription<T> {
         }
     }
 
-    pub fn try_get(&mut self) -> Option<T> {
-        self.recv.as_mut().and_then(|x| x.try_get())
+    pub fn get_or_empty(&mut self) -> Option<T> {
+        self.recv.as_mut().and_then(|x| x.get_or_empty())
     }
 
     pub fn map<V: 'static>(
@@ -108,7 +117,15 @@ impl<T: Clone + Send + Sync + 'static> WatchTrait<T> for watch::Receiver<Option<
         }
     }
 
-    fn try_get(&mut self) -> Option<T> {
+    fn get_or_empty(&mut self) -> Option<T> {
         self.borrow_and_update().as_ref().map(Clone::clone)
+    }
+
+    async fn changed_or_closed(&mut self) -> Option<T> {
+        if self.changed().await.is_err() {
+            None
+        } else {
+            Some(__self.borrow().as_ref().unwrap().clone())
+        }
     }
 }

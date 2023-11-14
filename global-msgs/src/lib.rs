@@ -18,3 +18,18 @@ impl Debug for Steering {
             .finish()
     }
 }
+
+
+impl Steering {
+    pub fn to_left_right_drive(self) -> (f32, f32) {
+        let mut left_drive = self.drive.into_inner();
+        let mut right_drive = self.drive.into_inner();
+    
+        if self.steering.into_inner() > 0.0 {
+            right_drive *= (0.5 - self.steering.into_inner()) * 2.0;
+        } else {
+            left_drive *= (0.5 + self.steering.into_inner()) * 2.0;
+    }
+        (left_drive, right_drive)
+    }
+}

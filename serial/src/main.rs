@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     let mut write_signal: Signal<_> = Default::default();
-    serial.message_to_send_subscription(&mut write_signal.get_ref());
+    serial.message_to_send_subscription(write_signal.get_ref().subscribe_bounded());
     let write_signal = Arc::new(write_signal);
 
     let fn_node = FnNode::new(move |_context: RuntimeContext| async {
