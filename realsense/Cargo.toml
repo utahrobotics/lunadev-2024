@@ -9,4 +9,4 @@ edition = "2021"
 realsense-rust = { version = "1.2", features = ["buildtime-bindgen"] }
 unros-core = { path = "../unros-core" }
 image = { workspace = true }
-nalgebra = "0.32"
+nalgebra = { workspace = true }

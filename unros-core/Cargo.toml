@@ -10,15 +10,15 @@ fern = "0.6"
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "tracing", "parking_lot", "signal", "io-util", "time"] }
-anyhow = { workspace = true }
-serde = { workspace = true }
 log = "0.4"
 fxhash = { workspace = true }
-tokio-rayon = { workspace = true }
-async-trait = { workspace = true }
+async-trait = "0.1"
 static_assertions = { workspace = true }
 bytes = "1"
 rand = { version = "0.8", features = ["small_rng"] }
 futures = "0.3"
 console-subscriber = { version = "0.2", features = ["parking_lot"]}
+serde = { version = "1", features = ["derive"] }
+tokio-rayon = "2"
+anyhow = "1"
 # crossbeam = { workspace = true }

@@ -10,20 +10,16 @@ members = [
     "apriltag-test",
     "realsense",
     "positioning",
-    "serial",
+    "serial", "navigator",
 ]
 resolver = "2"
 
 [workspace.dependencies]
-toml = "0.8"
-serde = { version = "1", features = ["derive"] }
-tokio-rayon = "2"
-anyhow = "1"
-async-trait = "0.1"
 fxhash = "0.2"
 static_assertions = "1"
 image = "0.24"
 ordered-float = "4"
+nalgebra = "0.32"
 # crossbeam = "0.8"
 
 # realsense-rust = "1"
