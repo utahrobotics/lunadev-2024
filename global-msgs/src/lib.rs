@@ -7,7 +7,7 @@ use ordered_float::NotNan;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Steering {
     pub left: NotNan<f32>,
-    pub right: NotNan<f32>
+    pub right: NotNan<f32>,
 }
 
 impl Debug for Steering {
@@ -30,8 +30,6 @@ impl Steering {
             left *= (0.5 + steering.into_inner()) * 2.0;
         }
 
-        Self {
-            left, right
-        }
+        Self { left, right }
     }
 }

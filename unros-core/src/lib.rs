@@ -255,9 +255,8 @@ macro_rules! setup_logging {
     };
 }
 
-const LOGS_DIR: &str = "logs";
-
 pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
+    const LOGS_DIR: &str = "logs";
     static LOGGER_INITED: Once = Once::new();
 
     if LOGGER_INITED.is_completed() {
@@ -279,8 +278,8 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     }
 
     let datetime = chrono::Local::now();
-    let log_file_name = format!(
-        "{}-{:0>2}-{:0>2}={:0>2}-{:0>2}-{:0>2}{}.log",
+    let log_folder_name = format!(
+        "{}-{:0>2}-{:0>2}={:0>2}-{:0>2}-{:0>2}{}",
         datetime.year(),
         datetime.month(),
         datetime.day(),
@@ -289,6 +288,10 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
         datetime.second(),
         runtime_name,
     );
+
+    std::fs::DirBuilder::new()
+        .create(PathBuf::from(LOGS_DIR).join(&log_folder_name))
+        .context("Failed to create sub-logging directory. Do we have permissions?")?;
 
     let start_time = Instant::now();
 
@@ -309,7 +312,7 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
         // Output to stdout, files, and other Dispatch configurations
         .chain(
             fern::Dispatch::new().chain(
-                fern::log_file(PathBuf::from(LOGS_DIR).join(log_file_name))
+                fern::log_file(PathBuf::from(LOGS_DIR).join(&log_folder_name).join(".log"))
                     .context("Failed to create log file. Do we have permissions?")?,
             ),
         )
