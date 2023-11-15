@@ -1741,6 +1741,7 @@ version = "0.1.0"
 dependencies = [
  "global-msgs",
  "nalgebra",
+ "ordered-float",
  "pid",
  "unros-core",
 ]

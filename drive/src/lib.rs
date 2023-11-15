@@ -41,9 +41,8 @@ impl Node for Drive {
                 let Some(steering) = self.steering_sub.changed_or_closed().await else {
                     break Ok(());
                 };
-                let (left, right) = steering.to_left_right_drive();
                 write_signal.set(
-                    format!("setDrive({:.2},{:.2})", left, right)
+                    format!("setDrive({:.2},{:.2})", steering.left, steering.right)
                         .into_bytes()
                         .into(),
                 );

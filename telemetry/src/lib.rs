@@ -92,10 +92,7 @@ impl Telemetry {
                 let drive = i8::from_le_bytes([packet[0]]) as f32;
                 let steering = i8::from_le_bytes([packet[1]]) as f32;
 
-                self.steering_signal.set(Steering {
-                    drive: NotNan::new(drive / 127.0).unwrap(),
-                    steering: NotNan::new(steering / 127.0).unwrap(),
-                });
+                self.steering_signal.set(Steering::from_drive_and_steering(NotNan::new(drive / 127.0).unwrap(), NotNan::new(steering / 127.0).unwrap()));
 
                 self.packet_queue.push((
                     packet,

@@ -10,3 +10,4 @@ pid = "4"
 unros-core = { path = "../unros-core" }
 global-msgs = { path = "../global-msgs" }
 nalgebra = { workspace = true }
+ordered-float = { workspace = true }
