@@ -1,14 +1,15 @@
-#![feature(associated_type_defaults)]
+#![feature(associated_type_defaults, once_cell_try)]
 
 use std::{
     future::Future,
     ops::{Add, AddAssign},
     path::{Path, PathBuf},
     pin::Pin,
-    sync::{Arc, Once},
+    sync::{Arc, OnceLock},
     time::Instant,
 };
 
+pub mod dump;
 pub mod signal;
 pub mod task;
 
@@ -255,77 +256,77 @@ macro_rules! setup_logging {
     };
 }
 
+static SUB_LOGGING_DIR: OnceLock<String> = OnceLock::new();
+
 pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     const LOGS_DIR: &str = "logs";
-    static LOGGER_INITED: Once = Once::new();
 
-    if LOGGER_INITED.is_completed() {
-        return Ok(());
-    }
-    LOGGER_INITED.call_once(|| {});
+    SUB_LOGGING_DIR.get_or_try_init::<_, anyhow::Error>(|| {
+        if !AsRef::<Path>::as_ref(LOGS_DIR)
+            .try_exists()
+            .context("Failed to check if logging directory exists. Do we have permissions?")?
+        {
+            std::fs::DirBuilder::new()
+                .create(LOGS_DIR)
+                .context("Failed to create logging directory. Do we have permissions?")?;
+        }
+        let mut runtime_name = run_options.runtime_name.clone();
+        if !runtime_name.is_empty() {
+            runtime_name = "=".to_string() + &runtime_name;
+        }
 
-    if !AsRef::<Path>::as_ref(LOGS_DIR)
-        .try_exists()
-        .context("Failed to check if logging directory exists. Do we have permissions?")?
-    {
+        let datetime = chrono::Local::now();
+        let log_folder_name = format!(
+            "{}-{:0>2}-{:0>2}={:0>2}-{:0>2}-{:0>2}{}",
+            datetime.year(),
+            datetime.month(),
+            datetime.day(),
+            datetime.hour(),
+            datetime.minute(),
+            datetime.second(),
+            runtime_name,
+        );
+
         std::fs::DirBuilder::new()
-            .create(LOGS_DIR)
-            .context("Failed to create logging directory. Do we have permissions?")?;
-    }
-    let mut runtime_name = run_options.runtime_name.clone();
-    if !runtime_name.is_empty() {
-        runtime_name = "=".to_string() + &runtime_name;
-    }
+            .create(PathBuf::from(LOGS_DIR).join(&log_folder_name))
+            .context("Failed to create sub-logging directory. Do we have permissions?")?;
 
-    let datetime = chrono::Local::now();
-    let log_folder_name = format!(
-        "{}-{:0>2}-{:0>2}={:0>2}-{:0>2}-{:0>2}{}",
-        datetime.year(),
-        datetime.month(),
-        datetime.day(),
-        datetime.hour(),
-        datetime.minute(),
-        datetime.second(),
-        runtime_name,
-    );
+        let start_time = Instant::now();
 
-    std::fs::DirBuilder::new()
-        .create(PathBuf::from(LOGS_DIR).join(&log_folder_name))
-        .context("Failed to create sub-logging directory. Do we have permissions?")?;
+        fern::Dispatch::new()
+            .format(move |out, message, record| {
+                let secs = start_time.elapsed().as_secs_f32();
+                out.finish(format_args!(
+                    "[{:0>1}:{:.2} {} {}] {}",
+                    (secs / 60.0).floor(),
+                    secs % 60.0,
+                    record.level(),
+                    record.target(),
+                    message
+                ))
+            })
+            // Add blanket level filter -
+            .level(log::LevelFilter::Debug)
+            // Output to stdout, files, and other Dispatch configurations
+            .chain(
+                fern::Dispatch::new().chain(
+                    fern::log_file(PathBuf::from(LOGS_DIR).join(&log_folder_name).join(".log"))
+                        .context("Failed to create log file. Do we have permissions?")?,
+                ),
+            )
+            .chain(
+                fern::Dispatch::new()
+                    .level(log::LevelFilter::Info)
+                    .chain(std::io::stdout()),
+            )
+            // Apply globally
+            .apply()
+            .expect("Logger should have initialized correctly");
 
-    let start_time = Instant::now();
+        console_subscriber::init();
+        Ok(log_folder_name)
+    })?;
 
-    fern::Dispatch::new()
-        .format(move |out, message, record| {
-            let secs = start_time.elapsed().as_secs_f32();
-            out.finish(format_args!(
-                "[{:0>1}:{:.2} {} {}] {}",
-                (secs / 60.0).floor(),
-                secs % 60.0,
-                record.level(),
-                record.target(),
-                message
-            ))
-        })
-        // Add blanket level filter -
-        .level(log::LevelFilter::Debug)
-        // Output to stdout, files, and other Dispatch configurations
-        .chain(
-            fern::Dispatch::new().chain(
-                fern::log_file(PathBuf::from(LOGS_DIR).join(&log_folder_name).join(".log"))
-                    .context("Failed to create log file. Do we have permissions?")?,
-            ),
-        )
-        .chain(
-            fern::Dispatch::new()
-                .level(log::LevelFilter::Info)
-                .chain(std::io::stdout()),
-        )
-        // Apply globally
-        .apply()
-        .expect("Logger should have initialized correctly");
-
-    console_subscriber::init();
     Ok(())
 }
 

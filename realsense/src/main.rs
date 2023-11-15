@@ -15,6 +15,7 @@ async fn main() -> anyhow::Result<()> {
             let mut imu_sub = x.imu_frame_received().watch();
             tokio::spawn(async move {
                 loop {
+                    // println!("{:?}", img_sub.recv().await.dimensions());
                     let imu = imu_sub.wait_for_change().await;
                     println!(
                         "ang_vel: {} accel: {}",
