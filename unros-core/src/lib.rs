@@ -1,3 +1,5 @@
+#![feature(associated_type_defaults)]
+
 use std::{
     future::Future,
     ops::{Add, AddAssign},
@@ -8,6 +10,7 @@ use std::{
 };
 
 pub mod signal;
+pub mod task;
 
 pub use anyhow;
 use anyhow::Context;

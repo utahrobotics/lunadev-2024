@@ -45,7 +45,11 @@ impl<T: 'static, S: 'static> WatchTrait<T> for MappedWatched<T, S> {
     }
 
     async fn changed_or_closed(&mut self) -> Option<T> {
-        self.recv.as_mut()?.changed_or_closed().await.map(|x| (self.mapper)(x))
+        self.recv
+            .as_mut()?
+            .changed_or_closed()
+            .await
+            .map(|x| (self.mapper)(x))
     }
 }
 
