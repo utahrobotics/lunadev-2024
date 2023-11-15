@@ -21,18 +21,17 @@ use unros_core::{
     tokio_rayon, Node, RuntimeContext,
 };
 
-// #[derive(Clone, Copy)]
-// pub struct IMUFrame {
-//     pub acceleration: Vector3<f32>,
-//     pub angular_velocity: Vector3<f32>,
-// }
+#[derive(Clone, Copy)]
+pub struct IMUFrame {
+    pub acceleration: Vector3<f32>,
+    pub angular_velocity: Vector3<f32>,
+}
 
 pub struct RealSenseCamera {
     device: Device,
     context: Arc<Mutex<Context>>,
     image_received: Signal<Arc<DynamicImage>>,
-    acceleration_received: Signal<Vector3<f32>>,
-    angular_velocity_received: Signal<Vector3<f32>>,
+    imu_frame_received: Signal<IMUFrame>,
 }
 
 impl RealSenseCamera {
@@ -43,18 +42,14 @@ impl RealSenseCamera {
             device,
             context: Arc::new(Mutex::new(context)),
             image_received: Default::default(),
-            acceleration_received: Default::default(),
-            angular_velocity_received: Default::default(),
+            imu_frame_received: Default::default(),
         })
     }
     pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
         self.image_received.get_ref()
     }
-    pub fn acceleration_received_signal(&mut self) -> SignalRef<Vector3<f32>> {
-        self.acceleration_received.get_ref()
-    }
-    pub fn angular_velocity_received_signal(&mut self) -> SignalRef<Vector3<f32>> {
-        self.angular_velocity_received.get_ref()
+    pub fn imu_frame_received(&mut self) -> SignalRef<IMUFrame> {
+        self.imu_frame_received.get_ref()
     }
 }
 
@@ -91,6 +86,8 @@ impl Node for RealSenseCamera {
         let mut pipeline = pipeline.start(Some(config))?;
 
         tokio_rayon::spawn(move || {
+            let mut last_accel = Default::default();
+            let mut last_ang_vel = Default::default();
             loop {
                 let frames = pipeline.wait(None)?;
 
@@ -117,9 +114,7 @@ impl Node for RealSenseCamera {
                             frame.height() as u32,
                             buf,
                         )
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Failed to convert RealSense color frame into image")
-                        })?;
+                        .unwrap();
                         let img = DynamicImage::from(img);
                         self.image_received.set(Arc::new(img));
                     }
@@ -127,17 +122,20 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     let ang_vel = frame.rotational_velocity();
-                    self.angular_velocity_received.set(Vector3::new(
-                        ang_vel[0],
-                        -ang_vel[1],
-                        ang_vel[2],
-                    ));
+                    last_ang_vel = Vector3::new(ang_vel[0], -ang_vel[1], ang_vel[2]);
+                    self.imu_frame_received.set(IMUFrame {
+                        acceleration: last_accel,
+                        angular_velocity: last_ang_vel,
+                    });
                 }
 
                 for frame in frames.frames_of_type::<AccelFrame>() {
                     let accel = frame.acceleration();
-                    self.acceleration_received
-                        .set(Vector3::new(accel[0], -accel[1], accel[2]));
+                    last_accel = Vector3::new(accel[0], -accel[1], accel[2]);
+                    self.imu_frame_received.set(IMUFrame {
+                        acceleration: last_accel,
+                        angular_velocity: last_ang_vel,
+                    });
                 }
             }
         })
@@ -154,7 +152,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         device,
         context: context.clone(),
         image_received: Default::default(),
-        acceleration_received: Default::default(),
-        angular_velocity_received: Default::default(),
+        imu_frame_received: Default::default(),
     }))
 }

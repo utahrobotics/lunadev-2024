@@ -1,11 +1,9 @@
-use std::net::{Ipv4Addr, SocketAddrV4};
-
 use apriltag::AprilTagDetector;
-use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::Vector3;
 use navigator::{pid, WaypointDriver};
 use positioning::{eskf, OrientationFrame, PositionFrame, Positioner};
 use realsense::discover_all_realsense;
-use unros_core::{anyhow, async_run_all, default_run_options, log::info, tokio};
+use unros_core::{anyhow, async_run_all, default_run_options, tokio};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,26 +21,24 @@ async fn main() -> anyhow::Result<()> {
             .tag_detected_signal()
             .subscribe_unbounded()
             .map(|tag| PositionFrame {
-                position: Point3::new(
-                    tag.position.x as f32,
-                    tag.position.y as f32,
-                    tag.position.z as f32,
-                ),
+                position: tag.position,
                 variance: eskf::ESKF::variance_from_element(0.05),
             }),
     );
     positioning.add_orientation_sub(apriltag.tag_detected_signal().subscribe_unbounded().map(
         |tag| OrientationFrame {
-            orientation: UnitQuaternion::new_normalize(Quaternion::new(
-                tag.orientation.w as f32,
-                tag.orientation.i as f32,
-                tag.orientation.j as f32,
-                tag.orientation.k as f32,
-            )),
+            orientation: tag.orientation,
             variance: eskf::ESKF::variance_from_element(0.05),
         },
     ));
-    // positioning.add_imu_sub(camera.)
+    positioning.add_imu_sub(camera.imu_frame_received().subscribe_unbounded().map(|imu| {
+        positioning::IMUFrame {
+            acceleration: Vector3::new(imu.acceleration.x as f64, imu.acceleration.y as f64, imu.acceleration.z as f64),
+            angular_velocity: Vector3::new(imu.angular_velocity.x as f64, imu.angular_velocity.y as f64, imu.angular_velocity.z as f64),
+            acceleration_variance: Some(Vector3::new(0.01, 0.01, 0.01)),
+            angular_velocity_variance: Some(Vector3::new(0.01, 0.01, 0.01)),
+        }
+    }));
 
     let mut pid = pid::Pid::new(0.0, 100.0);
     pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);
@@ -56,9 +52,9 @@ async fn main() -> anyhow::Result<()> {
     async_run_all(
         [
             camera.into(),
+            apriltag.into(),
             positioning.into(),
             navigator.into(),
-            apriltag.into(),
         ],
         default_run_options!(),
     )

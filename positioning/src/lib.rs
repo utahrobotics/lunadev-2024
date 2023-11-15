@@ -10,24 +10,24 @@ use unros_core::{
 
 #[derive(Clone, Copy)]
 pub struct PositionFrame {
-    pub position: Point3<f32>,
-    pub variance: Matrix3<f32>,
+    pub position: Point3<f64>,
+    pub variance: Matrix3<f64>,
 }
 
 #[derive(Clone, Copy)]
 pub struct OrientationFrame {
-    pub orientation: UnitQuaternion<f32>,
-    pub variance: Matrix3<f32>,
+    pub orientation: UnitQuaternion<f64>,
+    pub variance: Matrix3<f64>,
 }
 
 #[derive(Clone, Copy)]
 pub struct IMUFrame {
-    pub acceleration: Vector3<f32>,
+    pub acceleration: Vector3<f64>,
     /// XYZ rotation order
-    pub angular_velocity: Vector3<f32>,
+    pub angular_velocity: Vector3<f64>,
 
-    pub acceleration_variance: Option<Vector3<f32>>,
-    pub angular_velocity_variance: Option<Vector3<f32>>,
+    pub acceleration_variance: Option<Vector3<f64>>,
+    pub angular_velocity_variance: Option<Vector3<f64>>,
 }
 
 pub struct Positioner {
@@ -36,9 +36,9 @@ pub struct Positioner {
     position_sub: UnboundedSubscription<PositionFrame>,
     orientation_sub: UnboundedSubscription<OrientationFrame>,
 
-    position: Signal<Point3<f32>>,
-    velocity: Signal<Vector3<f32>>,
-    orientation: Signal<UnitQuaternion<f32>>,
+    position: Signal<Point3<f64>>,
+    velocity: Signal<Vector3<f64>>,
+    orientation: Signal<UnitQuaternion<f64>>,
 }
 
 impl Default for Positioner {
@@ -69,15 +69,15 @@ impl Positioner {
         self.orientation_sub += sub;
     }
 
-    pub fn get_position_signal(&mut self) -> SignalRef<Point3<f32>> {
+    pub fn get_position_signal(&mut self) -> SignalRef<Point3<f64>> {
         self.position.get_ref()
     }
 
-    pub fn get_velocity_signal(&mut self) -> SignalRef<Vector3<f32>> {
+    pub fn get_velocity_signal(&mut self) -> SignalRef<Vector3<f64>> {
         self.velocity.get_ref()
     }
 
-    pub fn get_orientation_signal(&mut self) -> SignalRef<UnitQuaternion<f32>> {
+    pub fn get_orientation_signal(&mut self) -> SignalRef<UnitQuaternion<f64>> {
         self.orientation.get_ref()
     }
 }
@@ -134,12 +134,12 @@ impl Node for Positioner {
                     let delta = now - last_elapsed;
 
                     if let Some(angular_velocity_variance) = frame.angular_velocity_variance {
-                        eskf.set_rotational_variance(eskf.orientation_uncertainty() + angular_velocity_variance * delta.as_secs_f32());
+                        eskf.set_rotational_variance(eskf.orientation_uncertainty() + angular_velocity_variance * delta.as_secs_f64());
                     } else {
                         eskf.set_rotational_variance(eskf.orientation_uncertainty());
                     }
 
-                    frame.angular_velocity *= delta.as_secs_f32();
+                    frame.angular_velocity *= delta.as_secs_f64();
 
                     eskf.predict(
                         frame.acceleration,

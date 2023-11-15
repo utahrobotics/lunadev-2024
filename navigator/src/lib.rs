@@ -1,5 +1,5 @@
 use std::{
-    f32::consts::PI,
+    f64::consts::PI,
     fmt::{Debug, Display},
     sync::mpsc,
 };
@@ -48,7 +48,7 @@ impl std::error::Error for DrivingIsBusy {}
 
 pub struct DrivingTaskScheduleData {
     pub force: bool,
-    pub waypoints: Vec<Point2<f32>>,
+    pub waypoints: Vec<Point2<f64>>,
 }
 
 #[async_trait]
@@ -79,20 +79,20 @@ impl Task for DrivingTask {
 pub struct WaypointDriver {
     driving_task: DrivingTask,
     steering_signal: Signal<Steering>,
-    position: WatchedSubscription<Point3<f32>>,
-    velocity: WatchedSubscription<Vector3<f32>>,
-    orientation: WatchedSubscription<UnitQuaternion<f32>>,
+    position: WatchedSubscription<Point3<f64>>,
+    velocity: WatchedSubscription<Vector3<f64>>,
+    orientation: WatchedSubscription<UnitQuaternion<f64>>,
     task_receiver: mpsc::Receiver<DrivingTaskInit>,
     steering_pid: Pid<f64>,
-    pub completion_distance: f32,
-    pub wheel_separation: f32,
+    pub completion_distance: f64,
+    pub wheel_separation: f64,
 }
 
 impl WaypointDriver {
     pub fn new(
-        position: WatchedSubscription<Point3<f32>>,
-        velocity: WatchedSubscription<Vector3<f32>>,
-        orientation: WatchedSubscription<UnitQuaternion<f32>>,
+        position: WatchedSubscription<Point3<f64>>,
+        velocity: WatchedSubscription<Vector3<f64>>,
+        orientation: WatchedSubscription<UnitQuaternion<f64>>,
         steering_pid: Pid<f64>,
     ) -> Self {
         let (task_sender, task_receiver) = mpsc::sync_channel(0);
@@ -144,10 +144,10 @@ impl Node for WaypointDriver {
         let half_wheel_separation = self.wheel_separation / 2.0;
         'main: loop {
             let DrivingTaskInit { data, sender } = init;
-            let mut distance_travelled = 0.0f32;
+            let mut distance_travelled = 0.0f64;
             let mut position = self.position.get().await;
             let mut _velocity = self.velocity.get().await;
-            let mut yaw_travelled = 0.0f32;
+            let mut yaw_travelled = 0.0f64;
             let mut orientation = self.orientation.get().await;
 
             for waypoint in data.waypoints {
@@ -222,13 +222,13 @@ impl Node for WaypointDriver {
 
                         // Feed into PIDs to get control values for each side
                         let mut control = left_pid.next_control_output(left as f64);
-                        let left = (control.output / left_pid.output_limit) as f32;
+                        let left = (control.output / left_pid.output_limit) as f64;
                         control = right_pid.next_control_output(right as f64);
-                        let right = (control.output / left_pid.output_limit) as f32;
+                        let right = (control.output / left_pid.output_limit) as f64;
 
                         self.steering_signal.set(Steering {
-                            left: NotNan::new(left).unwrap(),
-                            right: NotNan::new(right).unwrap(),
+                            left: NotNan::new(left as f32).unwrap(),
+                            right: NotNan::new(right as f32).unwrap(),
                         })
                     }
 
