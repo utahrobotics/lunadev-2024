@@ -2095,6 +2095,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quaternion-core"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9ba57a7657aade0eb3771dcaee3dba22ea4b58f13bf9e710eb52ec817f2b909"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2165,7 +2174,9 @@ version = "0.1.0"
 dependencies = [
  "image",
  "nalgebra",
+ "quaternion-core",
  "realsense-rust",
+ "rig",
  "unros-core",
 ]
 

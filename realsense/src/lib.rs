@@ -6,7 +6,8 @@ use std::{
 };
 
 use image::{DynamicImage, ImageBuffer, Rgb};
-use nalgebra::Vector3;
+use nalgebra::{Vector3, UnitQuaternion};
+use quaternion_core::{to_euler_angles, RotationType, RotationSequence};
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -15,6 +16,7 @@ use realsense_rust::{
     kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind},
     pipeline::InactivePipeline,
 };
+use rig::{RigidBodyRef, StaticRigidBodyRef};
 use unros_core::{
     anyhow, async_trait, setup_logging,
     signal::{Signal, SignalRef},
@@ -32,6 +34,7 @@ pub struct RealSenseCamera {
     context: Arc<Mutex<Context>>,
     image_received: Signal<Arc<DynamicImage>>,
     imu_frame_received: Signal<IMUFrame>,
+    rigid_body_ref: RigidBodyRef,
 }
 
 impl RealSenseCamera {
@@ -43,13 +46,20 @@ impl RealSenseCamera {
             context: Arc::new(Mutex::new(context)),
             image_received: Default::default(),
             imu_frame_received: Default::default(),
+            rigid_body_ref: RigidBodyRef::Static(StaticRigidBodyRef::identity("realsense")),
         })
     }
+
     pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
         self.image_received.get_ref()
     }
+
     pub fn imu_frame_received(&mut self) -> SignalRef<IMUFrame> {
         self.imu_frame_received.get_ref()
+    }
+
+    pub fn set_rigid_body_ref(&mut self, rigid_body_ref: RigidBodyRef) {
+        self.rigid_body_ref = rigid_body_ref;
     }
 }
 
@@ -122,7 +132,13 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     let ang_vel = frame.rotational_velocity();
-                    last_ang_vel = Vector3::new(ang_vel[0], -ang_vel[1], ang_vel[2]);
+                    let mut ang_vel = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), ang_vel[0]) * UnitQuaternion::from_axis_angle(&Vector3::y_axis(), -ang_vel[1]) * UnitQuaternion::from_axis_angle(&Vector3::z_axis(), ang_vel[2]);
+                    ang_vel = self.rigid_body_ref.get_global_isometry_f32().rotation * ang_vel;
+
+                    let ang_vel = (ang_vel.w, [ang_vel.i, ang_vel.j, ang_vel.k]);
+
+                    last_ang_vel = to_euler_angles(RotationType::Intrinsic, RotationSequence::XYZ, ang_vel).into();
+
                     self.imu_frame_received.set(IMUFrame {
                         acceleration: last_accel,
                         angular_velocity: last_ang_vel,
@@ -131,7 +147,8 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<AccelFrame>() {
                     let accel = frame.acceleration();
-                    last_accel = Vector3::new(accel[0], -accel[1], accel[2]);
+                    last_accel = self.rigid_body_ref.get_global_isometry_f32().rotation
+                        * Vector3::new(accel[0], -accel[1], accel[2]);
                     self.imu_frame_received.set(IMUFrame {
                         acceleration: last_accel,
                         angular_velocity: last_ang_vel,
@@ -153,5 +170,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         context: context.clone(),
         image_received: Default::default(),
         imu_frame_received: Default::default(),
+        rigid_body_ref: RigidBodyRef::Static(StaticRigidBodyRef::identity("realsense")),
     }))
 }
