@@ -18,7 +18,6 @@ bytes = "1"
 rand = { version = "0.8", features = ["small_rng"] }
 futures = "0.3"
 console-subscriber = { version = "0.2", features = ["parking_lot"]}
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 tokio-rayon = "2"
-anyhow = "1"
-# crossbeam = { workspace = true }
+anyhow = { workspace = true }
