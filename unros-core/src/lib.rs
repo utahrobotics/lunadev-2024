@@ -20,12 +20,12 @@ pub use bytes;
 use chrono::{Datelike, Timelike};
 use fxhash::FxHashMap;
 pub use log;
-use log::{error, info, warn};
+use log::{error, info, warn, debug};
 use serde::Deserialize;
 pub use tokio;
 use tokio::{
     sync::{broadcast, mpsc},
-    task::JoinSet,
+    task::JoinSet, net::TcpListener, io::{AsyncReadExt, AsyncWriteExt},
 };
 pub use tokio_rayon::{self, rayon};
 
@@ -217,6 +217,13 @@ impl Add for FinalizedNode {
 pub struct RunOptions {
     #[serde(default)]
     pub runtime_name: String,
+    
+    #[serde(default = "default_auxilliary_control")]
+    pub auxilliary_control: bool
+}
+
+fn default_auxilliary_control() -> bool {
+    true
 }
 
 #[macro_export]
@@ -224,6 +231,7 @@ macro_rules! default_run_options {
     () => {
         $crate::RunOptions {
             runtime_name: env!("CARGO_PKG_NAME").into(),
+            auxilliary_control: true
         }
     };
 }
@@ -370,6 +378,81 @@ pub async fn async_run_all(
         return Ok(());
     }
 
+    let (auxilliary_interrupt_sender, mut auxilliary_interrupt_sender_recv) = mpsc::channel(1);
+
+    if run_options.auxilliary_control {
+        tokio::spawn(async move {
+            let tcp_listener = match TcpListener::bind("0.0.0.0:0").await {
+                Ok(x) => x,
+                Err(e) => {
+                    debug!(target: "auxilliary-control", "Failed to initialize auxilliary control port: {e}");
+                    std::mem::forget(auxilliary_interrupt_sender);
+                    return;
+                }
+            };
+            
+            match tcp_listener.local_addr() {
+                Ok(addr) => debug!(target: "auxilliary-control", "Successfully binded to: {addr}"),
+                Err(e) => {
+                    debug!(target: "auxilliary-control", "Failed to get local address of auxilliary control port: {e}");
+                    std::mem::forget(auxilliary_interrupt_sender);
+                    return;
+                }
+            }
+            
+            loop {
+                let mut stream = match tcp_listener.accept().await {
+                    Ok(x) => x.0,
+                    Err(e) => {
+                        debug!(target: "auxilliary-control", "Failed to accept auxilliary control stream: {e}");
+                        continue;
+                    }
+                };
+                let auxilliary_interrupt_sender = auxilliary_interrupt_sender.clone();
+                tokio::spawn(async move {
+                    let mut string_buf = Vec::with_capacity(1024);
+                    let mut buf = [0u8; 1024];
+                    loop {
+                        macro_rules! write_all {
+                            ($data: expr) => {
+                                if let Err(e) = stream.write_all($data).await {
+                                    debug!(target: "auxilliary-control", "Failed to write to auxilliary control stream: {e}");
+                                    break;
+                                }
+                            }
+                        }
+                        match stream.read(&mut buf).await {
+                            Ok(n) => {
+                                string_buf.extend_from_slice(buf.split_at(n).0);
+                            }
+                            Err(e) => {
+                                debug!(target: "auxilliary-control", "Failed to read from auxilliary control stream: {e}");
+                                break;
+                            }
+                        }
+
+                        let Ok(string) = std::str::from_utf8(&buf) else { continue; };
+                        let Some(newline_idx) = string.find('\n') else { continue; };
+
+                        let command = string.split_at(newline_idx).0;
+
+                        match command {
+                            "stop" => {
+                                let _ = auxilliary_interrupt_sender.send(()).await;
+                                write_all!(b"Stopping...\n");
+                            }
+                            _ => write_all!(b"Unrecognized command")
+                        }
+
+                        string_buf.drain(0..newline_idx);
+                    }
+                });
+            }
+        });
+    } else {
+        std::mem::forget(auxilliary_interrupt_sender);
+    }
+
     let mut ctrl_c_failed = false;
 
     loop {
@@ -400,6 +483,10 @@ pub async fn async_run_all(
                     break;
                 }
             }
+            _ = auxilliary_interrupt_sender_recv.recv() => {
+                info!("Auxilliary stop received. Exiting...");
+                break;
+            }
             node = async {
                 let Some(node) = node_receiver.recv().await else {
                     std::future::pending::<()>().await;
@@ -424,6 +511,10 @@ pub async fn async_run_all(
             warn!("Force exiting...");
             last_drop.force_exit = true;
         } => {}
+        _ = auxilliary_interrupt_sender_recv.recv() => {
+            warn!("Force exiting...");
+            last_drop.force_exit = true;
+        }
     }
 
     Ok(())

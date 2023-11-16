@@ -115,16 +115,17 @@ impl Node for RealSenseCamera {
                 // Get color
                 for frame in frames.frames_of_type::<ColorFrame>() {
                     unsafe {
-                        let image_size = frame.width() * frame.height() * 3;
                         let ptr: *const _ = frame.get_data();
                         let ptr: *const u8 = ptr.cast();
-                        let buf = std::slice::from_raw_parts(ptr, image_size).to_vec();
-                        let img = ImageBuffer::<Rgb<u8>, _>::from_raw(
+                        let buf = std::slice::from_raw_parts(ptr, frame.get_data_size()).to_vec();
+                        let Some(img) = ImageBuffer::<Rgb<u8>, _>::from_raw(
                             frame.width() as u32,
                             frame.height() as u32,
                             buf,
-                        )
-                        .unwrap();
+                        ) else {
+                            error!("Failed to copy realsense image");
+                            continue;
+                        };
                         let img = DynamicImage::from(img);
                         self.image_received.set(Arc::new(img));
                     }
