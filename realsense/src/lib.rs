@@ -116,8 +116,7 @@ impl Node for RealSenseCamera {
                 for frame in frames.frames_of_type::<ColorFrame>() {
                     unsafe {
                         let ptr: *const _ = frame.get_data();
-                        let ptr: *const u8 = ptr.cast();
-                        let buf = std::slice::from_raw_parts(ptr, frame.get_data_size()).to_vec();
+                        let buf = std::slice::from_raw_parts(ptr.cast::<u8>(), frame.get_data_size()).to_vec();
                         let Some(img) = ImageBuffer::<Rgb<u8>, _>::from_raw(
                             frame.width() as u32,
                             frame.height() as u32,
@@ -133,7 +132,7 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     let ang_vel = frame.rotational_velocity();
-                    let mut ang_vel = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), ang_vel[0]) * UnitQuaternion::from_axis_angle(&Vector3::y_axis(), -ang_vel[1]) * UnitQuaternion::from_axis_angle(&Vector3::z_axis(), ang_vel[2]);
+                    let mut ang_vel = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), ang_vel[0]) * UnitQuaternion::from_axis_angle(&Vector3::y_axis(), ang_vel[1]) * UnitQuaternion::from_axis_angle(&Vector3::z_axis(), ang_vel[2]);
                     ang_vel = self.rigid_body_ref.get_global_isometry_f32().rotation * ang_vel;
 
                     let ang_vel = (ang_vel.w, [ang_vel.i, ang_vel.j, ang_vel.k]);
@@ -149,7 +148,7 @@ impl Node for RealSenseCamera {
                 for frame in frames.frames_of_type::<AccelFrame>() {
                     let accel = frame.acceleration();
                     last_accel = self.rigid_body_ref.get_global_isometry_f32().rotation
-                        * Vector3::new(accel[0], -accel[1], accel[2]);
+                        * Vector3::new(accel[0], accel[1], accel[2]);
                     self.imu_frame_received.set(IMUFrame {
                         acceleration: last_accel,
                         angular_velocity: last_ang_vel,
