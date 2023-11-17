@@ -20,12 +20,14 @@ pub use bytes;
 use chrono::{Datelike, Timelike};
 use fxhash::FxHashMap;
 pub use log;
-use log::{error, info, warn, debug};
+use log::{debug, error, info, warn};
 use serde::Deserialize;
 pub use tokio;
 use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
     sync::{broadcast, mpsc},
-    task::JoinSet, net::TcpListener, io::{AsyncReadExt, AsyncWriteExt},
+    task::JoinSet,
 };
 pub use tokio_rayon::{self, rayon};
 
@@ -217,9 +219,9 @@ impl Add for FinalizedNode {
 pub struct RunOptions {
     #[serde(default)]
     pub runtime_name: String,
-    
+
     #[serde(default = "default_auxilliary_control")]
-    pub auxilliary_control: bool
+    pub auxilliary_control: bool,
 }
 
 fn default_auxilliary_control() -> bool {
@@ -231,7 +233,7 @@ macro_rules! default_run_options {
     () => {
         $crate::RunOptions {
             runtime_name: env!("CARGO_PKG_NAME").into(),
-            auxilliary_control: true
+            auxilliary_control: true,
         }
     };
 }
@@ -390,7 +392,7 @@ pub async fn async_run_all(
                     return;
                 }
             };
-            
+
             match tcp_listener.local_addr() {
                 Ok(addr) => debug!(target: "auxilliary-control", "Successfully binded to: {addr}"),
                 Err(e) => {
@@ -399,7 +401,7 @@ pub async fn async_run_all(
                     return;
                 }
             }
-            
+
             loop {
                 let mut stream = match tcp_listener.accept().await {
                     Ok(x) => x.0,
@@ -431,8 +433,12 @@ pub async fn async_run_all(
                             }
                         }
 
-                        let Ok(string) = std::str::from_utf8(&buf) else { continue; };
-                        let Some(newline_idx) = string.find('\n') else { continue; };
+                        let Ok(string) = std::str::from_utf8(&buf) else {
+                            continue;
+                        };
+                        let Some(newline_idx) = string.find('\n') else {
+                            continue;
+                        };
 
                         let command = string.split_at(newline_idx).0;
 
@@ -441,7 +447,7 @@ pub async fn async_run_all(
                                 let _ = auxilliary_interrupt_sender.send(()).await;
                                 write_all!(b"Stopping...\n");
                             }
-                            _ => write_all!(b"Unrecognized command")
+                            _ => write_all!(b"Unrecognized command"),
                         }
 
                         string_buf.drain(0..newline_idx);

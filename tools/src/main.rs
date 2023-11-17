@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use clap::{Parser, Subcommand};
-use tokio::{net::TcpStream, io::AsyncWriteExt};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -9,7 +9,6 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
-
 
 #[derive(Subcommand)]
 enum Commands {
@@ -20,7 +19,6 @@ enum Commands {
         addr: SocketAddr,
     },
 }
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
