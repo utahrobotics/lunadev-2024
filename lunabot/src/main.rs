@@ -1,23 +1,25 @@
+use std::{
+    io::Write,
+    time::{Duration, Instant},
+};
+
 use apriltag::AprilTagDetector;
 use nalgebra::Vector3;
 use navigator::{pid, WaypointDriver};
 use positioning::{eskf, OrientationFrame, PositionFrame, Positioner};
 use realsense::discover_all_realsense;
-use unros_core::{anyhow, async_run_all, default_run_options, tokio};
+use unros_core::{
+    anyhow, async_run_all, default_run_options, dump::DataDump, init_logger, tokio,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let run_options = default_run_options!();
+    init_logger(&run_options)?;
+
     let mut camera = discover_all_realsense()?
         .next()
         .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
-
-    let mut camera_imu = camera.imu_frame_received().watch();
-    tokio::spawn(async move {
-        loop {
-            let accel = camera_imu.wait_for_change().await;
-            println!("real {}", accel.acceleration);
-        }
-    });
 
     let mut apriltag =
         AprilTagDetector::new(640.0, 1280, 720, camera.image_received_signal().watch());
@@ -75,6 +77,44 @@ async fn main() -> anyhow::Result<()> {
         pid,
     );
 
+    let mut data_dump = DataDump::new_file("data.csv").await?;
+    writeln!(
+        data_dump,
+        "imu_ax,imu_ay,imu_az,imu_rvx,imu_rvy,imu_rvz,vx,vy,vz,x,y,z,roll,pitch,yaw,delta"
+    )
+    .unwrap();
+    let mut data_sub = camera
+        .imu_frame_received()
+        .watch()
+        .zip(positioning.get_velocity_signal().watch())
+        .zip(positioning.get_position_signal().watch())
+        .zip(positioning.get_orientation_signal().watch());
+    tokio::spawn(async move {
+        let start = Instant::now();
+        let mut elapsed = Duration::ZERO;
+
+        loop {
+            let (((imu, vel), pos), orientation) = data_sub.wait_for_change().await;
+            let (roll, pitch, yaw) = orientation.euler_angles();
+            let now = start.elapsed();
+            writeln!(
+                data_dump,
+                "{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
+                imu.acceleration.x,
+                imu.acceleration.y,
+                imu.acceleration.z,
+                imu.angular_velocity.x,
+                imu.angular_velocity.y,
+                imu.angular_velocity.z,
+                vel.x, vel.y, vel.z,
+                pos.x, pos.y, pos.z,
+                roll, pitch, yaw,
+                (now - elapsed).as_secs_f32()
+            ).unwrap();
+            elapsed = now;
+        }
+    });
+
     async_run_all(
         [
             camera.into(),
@@ -82,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
             positioning.into(),
             navigator.into(),
         ],
-        default_run_options!(),
+        run_options,
     )
     .await
 }

@@ -19,7 +19,7 @@ trait ChannelTrait<T>: Send + Sync + 'static {
 
     async fn recv_ex(&mut self) -> Option<T>;
     async fn recv(&mut self) -> T;
-    fn blocking_recv(&mut self) -> Option<T>;
+    // fn blocking_recv(&mut self) -> Option<T>;
 
     fn try_recv(&mut self) -> Option<T>;
 }
@@ -43,12 +43,83 @@ impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
         (self.mapper)(self.source.recv().await)
     }
 
-    fn blocking_recv(&mut self) -> Option<T> {
-        self.source.blocking_recv().map(|x| (self.mapper)(x))
-    }
+    // fn blocking_recv(&mut self) -> Option<T> {
+    //     self.source.blocking_recv().map(|x| (self.mapper)(x))
+    // }
 
     fn try_recv(&mut self) -> Option<T> {
         self.source.try_recv().map(|x| (self.mapper)(x))
+    }
+}
+
+struct ZippedChannel<A, B> {
+    source_a: Box<dyn ChannelTrait<A>>,
+    item_a: Option<A>,
+    source_b: Box<dyn ChannelTrait<B>>,
+    item_b: Option<B>,
+}
+
+#[async_trait]
+impl<A, B> ChannelTrait<(A, B)> for ZippedChannel<A, B>
+where
+    A: Clone + Send + Sync + 'static,
+    B: Clone + Send + Sync + 'static,
+{
+    fn source_count(&self) -> usize {
+        self.source_a.source_count() + self.source_b.source_count()
+    }
+
+    async fn recv_ex(&mut self) -> Option<(A, B)> {
+        loop {
+            tokio::select! {
+                new_item_a = self.source_a.recv_ex() => {
+                    let new_item_a = new_item_a?;
+                    self.item_a = Some(new_item_a);
+                }
+                new_item_b = self.source_b.recv_ex() => {
+                    let new_item_b = new_item_b?;
+                    self.item_b = Some(new_item_b);
+                }
+            }
+            if let Some(item_a) = &self.item_a {
+                if let Some(item_b) = &self.item_b {
+                    break Some((item_a.clone(), item_b.clone()));
+                }
+            }
+        }
+    }
+
+    async fn recv(&mut self) -> (A, B) {
+        loop {
+            tokio::select! {
+                new_item_a = self.source_a.recv() => {
+                    self.item_a = Some(new_item_a);
+                }
+                new_item_b = self.source_b.recv() => {
+                    self.item_b = Some(new_item_b);
+                }
+            }
+            if let Some(item_a) = &self.item_a {
+                if let Some(item_b) = &self.item_b {
+                    break (item_a.clone(), item_b.clone());
+                }
+            }
+        }
+    }
+
+    fn try_recv(&mut self) -> Option<(A, B)> {
+        if let Some(new_item_a) = self.source_a.try_recv() {
+            self.item_a = Some(new_item_a);
+        }
+        if let Some(new_item_b) = self.source_b.try_recv() {
+            self.item_b = Some(new_item_b);
+        }
+        if let Some(item_a) = &self.item_a {
+            if let Some(item_b) = &self.item_b {
+                return Some((item_a.clone(), item_b.clone()));
+            }
+        }
+        None
     }
 }
 

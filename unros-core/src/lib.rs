@@ -266,7 +266,7 @@ macro_rules! setup_logging {
     };
 }
 
-static SUB_LOGGING_DIR: OnceLock<String> = OnceLock::new();
+static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     const LOGS_DIR: &str = "logs";
@@ -297,8 +297,10 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             runtime_name,
         );
 
+        let log_folder_name = PathBuf::from(LOGS_DIR).join(&log_folder_name);
+
         std::fs::DirBuilder::new()
-            .create(PathBuf::from(LOGS_DIR).join(&log_folder_name))
+            .create(&log_folder_name)
             .context("Failed to create sub-logging directory. Do we have permissions?")?;
 
         let start_time = Instant::now();
@@ -320,7 +322,7 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             // Output to stdout, files, and other Dispatch configurations
             .chain(
                 fern::Dispatch::new().chain(
-                    fern::log_file(PathBuf::from(LOGS_DIR).join(&log_folder_name).join(".log"))
+                    fern::log_file(log_folder_name.join(".log"))
                         .context("Failed to create log file. Do we have permissions?")?,
                 ),
             )

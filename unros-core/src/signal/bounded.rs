@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use futures::{stream::FuturesUnordered, StreamExt};
 use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::broadcast;
-use tokio_rayon::rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
 use super::{watched::WatchedSubscription, ChannelTrait, MappedChannel, Signal};
 
@@ -53,15 +52,15 @@ impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
             .next()
     }
 
-    pub fn blocking_recv(&mut self) -> Option<Result<T, u64>> {
-        let mut out: Vec<_> = self
-            .receivers
-            .par_iter_mut()
-            .filter_map(|x| x.blocking_recv())
-            .take_any(1)
-            .collect();
-        out.pop()
-    }
+    // pub fn blocking_recv(&mut self) -> Option<Result<T, u64>> {
+    //     let mut out: Vec<_> = self
+    //         .receivers
+    //         .par_iter_mut()
+    //         .filter_map(|x| x.blocking_recv())
+    //         .take_any(1)
+    //         .collect();
+    //     out.pop()
+    // }
 
     /// Changes the generic type of the signal that this subscription is for.
     ///
@@ -123,9 +122,9 @@ impl<T: Send + 'static, const SIZE: u32> ChannelTrait<Result<T, u64>>
         BoundedSubscription::recv(self).await
     }
 
-    fn blocking_recv(&mut self) -> Option<Result<T, u64>> {
-        BoundedSubscription::blocking_recv(self)
-    }
+    // fn blocking_recv(&mut self) -> Option<Result<T, u64>> {
+    //     BoundedSubscription::blocking_recv(self)
+    // }
 
     fn try_recv(&mut self) -> Option<Result<T, u64>> {
         BoundedSubscription::try_recv(self)
@@ -180,11 +179,11 @@ impl<T: Clone + Send + 'static> ChannelTrait<Result<T, u64>> for broadcast::Rece
         }
     }
 
-    fn blocking_recv(&mut self) -> Option<Result<T, u64>> {
-        match broadcast::Receiver::blocking_recv(self) {
-            Ok(x) => Some(Ok(x)),
-            Err(broadcast::error::RecvError::Closed) => None,
-            Err(broadcast::error::RecvError::Lagged(n)) => Some(Err(n)),
-        }
-    }
+    // fn blocking_recv(&mut self) -> Option<Result<T, u64>> {
+    //     match broadcast::Receiver::blocking_recv(self) {
+    //         Ok(x) => Some(Ok(x)),
+    //         Err(broadcast::error::RecvError::Closed) => None,
+    //         Err(broadcast::error::RecvError::Lagged(n)) => Some(Err(n)),
+    //     }
+    // }
 }

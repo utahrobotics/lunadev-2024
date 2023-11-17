@@ -4,9 +4,8 @@ use async_trait::async_trait;
 use futures::{stream::FuturesUnordered, StreamExt};
 use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 use tokio::sync::mpsc;
-use tokio_rayon::rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-use super::{watched::WatchedSubscription, ChannelTrait, MappedChannel, Signal};
+use super::{watched::WatchedSubscription, ChannelTrait, MappedChannel, Signal, ZippedChannel};
 
 pub struct UnboundedSubscription<T> {
     pub(super) receivers: Vec<Box<dyn ChannelTrait<T>>>,
@@ -41,15 +40,15 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
         x
     }
 
-    pub fn blocking_recv(&mut self) -> Option<T> {
-        let mut out: Vec<_> = self
-            .receivers
-            .par_iter_mut()
-            .filter_map(|x| x.blocking_recv())
-            .take_any(1)
-            .collect();
-        out.pop()
-    }
+    // pub fn blocking_recv(&mut self) -> Option<T> {
+    //     let mut out: Vec<_> = self
+    //         .receivers
+    //         .par_iter_mut()
+    //         .filter_map(|x| x.blocking_recv())
+    //         .take_any(1)
+    //         .collect();
+    //     out.pop()
+    // }
 
     pub fn try_recv(&mut self) -> Option<T> {
         self.receivers.shuffle(&mut self.rng);
@@ -98,6 +97,22 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
         });
         sub
     }
+
+    pub fn zip<B>(mut self, other: UnboundedSubscription<B>) -> UnboundedSubscription<(T, B)>
+    where
+        T: Clone + Sync,
+        B: Clone + Send + Sync + 'static,
+    {
+        UnboundedSubscription {
+            rng: SmallRng::from_rng(&mut self.rng).unwrap(),
+            receivers: vec![Box::new(ZippedChannel {
+                source_a: Box::new(self),
+                source_b: Box::new(other),
+                item_a: None,
+                item_b: None,
+            })],
+        }
+    }
 }
 
 #[async_trait]
@@ -124,9 +139,9 @@ impl<T: Send + 'static> ChannelTrait<T> for mpsc::UnboundedReceiver<T> {
         mpsc::UnboundedReceiver::try_recv(self).ok()
     }
 
-    fn blocking_recv(&mut self) -> Option<T> {
-        mpsc::UnboundedReceiver::blocking_recv(self)
-    }
+    // fn blocking_recv(&mut self) -> Option<T> {
+    //     mpsc::UnboundedReceiver::blocking_recv(self)
+    // }
 }
 
 #[async_trait]
@@ -147,9 +162,9 @@ impl<T: Send + 'static> ChannelTrait<T> for UnboundedSubscription<T> {
         UnboundedSubscription::try_recv(self)
     }
 
-    fn blocking_recv(&mut self) -> Option<T> {
-        UnboundedSubscription::blocking_recv(self)
-    }
+    // fn blocking_recv(&mut self) -> Option<T> {
+    //     UnboundedSubscription::blocking_recv(self)
+    // }
 }
 
 impl<T: Send + 'static> Add for UnboundedSubscription<T> {

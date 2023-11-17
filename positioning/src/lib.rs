@@ -142,7 +142,6 @@ impl Node for Positioner {
                     frame.angular_velocity *= delta.as_secs_f64();
 
                     eskf.gravity = eskf.orientation * Vector3::y_axis().into_inner() * -9.81;
-                    println!("eskf {}", eskf.gravity);
 
                     eskf.predict(
                         frame.acceleration,
