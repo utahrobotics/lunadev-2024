@@ -1,3 +1,9 @@
+//! This crate provides a node that can connect to RealSense cameras and interpret
+//! depth and color images.
+//! 
+//! Unfortunately, this crate depends on the RealSense SDK. If you do not have this
+//! SDK, remove this crate from the workspace.
+
 use std::{
     collections::HashSet,
     ops::Deref,
@@ -23,22 +29,32 @@ use unros_core::{
     tokio_rayon, Node, RuntimeContext,
 };
 
+/// A single frame from an IMU
 #[derive(Clone, Copy)]
 pub struct IMUFrame {
     pub acceleration: Vector3<f32>,
     pub angular_velocity: Vector3<f32>,
 }
 
+/// A connection to a RealSense Camera.
 pub struct RealSenseCamera {
     device: Device,
     context: Arc<Mutex<Context>>,
     image_received: Signal<Arc<DynamicImage>>,
     imu_frame_received: Signal<IMUFrame>,
     rigid_body_ref: RigidBodyRef,
+    /// How much to spend at startup calibrating the
+    /// camera.
+    /// 
+    /// For now, only the acceleration is calibrated.
+    /// It is assumed that the camera is not moving
+    /// at startup, and the only acceleration occuring
+    /// is from gravity, which has a magnitude of 9.81 m/s^2.
     pub calibration_time: Duration
 }
 
 impl RealSenseCamera {
+    /// Attempts to connect to the camera at the given `dev` path.
     pub fn open(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let mut context = Context::new()?;
         let device = context.add_device(path)?;
@@ -52,14 +68,25 @@ impl RealSenseCamera {
         })
     }
 
+    /// Gets a reference to the `Signal` that represents received images.
     pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
         self.image_received.get_ref()
     }
 
+    /// Gets a reference to the `Signal` that represents received imu frames.
+    /// 
+    /// IMU frames are in global space, according to the rigid body
+    /// provided to the RealSense camera.
     pub fn imu_frame_received(&mut self) -> SignalRef<IMUFrame> {
         self.imu_frame_received.get_ref()
     }
 
+    /// Sets the rigid body that represents this camera.
+    /// 
+    /// Images are assumed to be captured from this rigid body, and the
+    /// RealSense IMU is assumed to be relative to this rigid body.
+    /// 
+    /// This will replace the last rigid body that was provided.
     pub fn set_rigid_body_ref(&mut self, rigid_body_ref: RigidBodyRef) {
         self.rigid_body_ref = rigid_body_ref;
     }
@@ -186,6 +213,7 @@ impl Node for RealSenseCamera {
     }
 }
 
+/// Returns an iterator over all the RealSense cameras that were identified on this computer.
 pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSenseCamera>> {
     let context = Context::new()?;
     let devices = context.query_devices(HashSet::new());

@@ -1,3 +1,9 @@
+//! This crate provides a node that can connect to any generic
+//! color camera. This crate is cross-platform.
+//! 
+//! Do note that this crate should not be expected to connect
+//! to RealSense cameras.
+
 use std::sync::Arc;
 
 use image::{imageops::FilterType, DynamicImage};
@@ -13,6 +19,9 @@ use unros_core::{
     tokio_rayon, Node, RuntimeContext,
 };
 
+/// A pending connection to a camera.
+/// 
+/// The connection is not created until this `Node` is ran.
 pub struct Camera {
     pub fps: u32,
     pub camera_index: u32,
@@ -22,6 +31,7 @@ pub struct Camera {
 }
 
 impl Camera {
+    /// Creates a pending connection to the camera with the given index.
     pub fn new(camera_index: u32) -> Self {
         Self {
             fps: 0,
@@ -32,6 +42,7 @@ impl Camera {
         }
     }
 
+    /// Gets a reference to the `Signal` that represents received images.
     pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
         self.image_received.get_ref()
     }
@@ -72,6 +83,7 @@ impl Node for Camera {
     }
 }
 
+/// Returns an iterator over all the cameras that were identified on this computer.
 pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
     Ok(query(nokhwa::utils::ApiBackend::Auto)?
         .into_iter()

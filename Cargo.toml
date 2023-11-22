@@ -8,6 +8,7 @@ members = [
     "camera",
     "apriltag",
     "apriltag-test",
+    # If you do not have the RealSense SDK, remove the realsense member
     "realsense",
     "positioning",
     "serial",

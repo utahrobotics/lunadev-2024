@@ -1,3 +1,7 @@
+//! This crate provides a node that can digest multiple streams
+//! of spatial input to determine where an object (presumably a
+//! robot) is in global space.
+
 use std::time::{Duration, Instant};
 
 pub use eskf;
@@ -8,18 +12,21 @@ use unros_core::{
     tokio, Node, RuntimeContext,
 };
 
+/// A position and variance measurement.
 #[derive(Clone, Copy)]
 pub struct PositionFrame {
     pub position: Point3<f64>,
     pub variance: Matrix3<f64>,
 }
 
+/// An orientation and variance measurement.
 #[derive(Clone, Copy)]
 pub struct OrientationFrame {
     pub orientation: UnitQuaternion<f64>,
     pub variance: Matrix3<f64>,
 }
 
+/// A measurement from an IMU.
 #[derive(Clone, Copy)]
 pub struct IMUFrame {
     pub acceleration: Vector3<f64>,
@@ -30,7 +37,12 @@ pub struct IMUFrame {
     pub angular_velocity_variance: Option<Vector3<f64>>,
 }
 
+/// A Node that can digest multiple streams of spatial input to
+/// determine where an object is in global space.
+/// 
+/// Processing does not occur until the node is running.
 pub struct Positioner {
+    /// The builder for the Error-State Kalman Filter
     pub builder: eskf::Builder,
     imu_sub: UnboundedSubscription<IMUFrame>,
     position_sub: UnboundedSubscription<PositionFrame>,
@@ -57,26 +69,38 @@ impl Default for Positioner {
 }
 
 impl Positioner {
+    /// Provide an imu subscription.
+    /// 
+    /// Some messages may be skipped if there are too many.
     pub fn add_imu_sub(&mut self, sub: UnboundedSubscription<IMUFrame>) {
         self.imu_sub += sub;
     }
 
+    /// Provide a position subscription.
+    /// 
+    /// Some messages may be skipped if there are too many.
     pub fn add_position_sub(&mut self, sub: UnboundedSubscription<PositionFrame>) {
         self.position_sub += sub;
     }
 
+    /// Provide an orientation subscription.
+    /// 
+    /// Some messages may be skipped if there are too many.
     pub fn add_orientation_sub(&mut self, sub: UnboundedSubscription<OrientationFrame>) {
         self.orientation_sub += sub;
     }
 
+    /// Gets a reference to the filtered position `Signal`.
     pub fn get_position_signal(&mut self) -> SignalRef<Point3<f64>> {
         self.position.get_ref()
     }
 
+    /// Gets a reference to the filtered velocity `Signal`.
     pub fn get_velocity_signal(&mut self) -> SignalRef<Vector3<f64>> {
         self.velocity.get_ref()
     }
 
+    /// Gets a reference to the filtered orientation `Signal`.
     pub fn get_orientation_signal(&mut self) -> SignalRef<UnitQuaternion<f64>> {
         self.orientation.get_ref()
     }
