@@ -1,3 +1,6 @@
+//! This crate offers several ways to interface with serial ports under
+//! the Unros framwork.
+
 use std::{collections::VecDeque, ops::Deref, sync::Arc, time::Duration};
 
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
@@ -15,33 +18,33 @@ use unros_core::{
     Node, RuntimeContext,
 };
 
+/// A single duplex connection to a serial port
 pub struct SerialConnection {
     path: Arc<str>,
     baud_rate: u32,
-    // stream: Option<SerialStream>,
     msg_received: Option<Signal<Bytes>>,
     messages_to_send: Arc<Mutex<BoundedSubscription<Bytes, 64>>>,
     tolerate_error: bool,
 }
 
 impl SerialConnection {
+    /// Creates a pending connection to a serial port.
+    /// 
+    /// The connection is not actually made until this node is ran.
+    /// If `tolerate_error` is `true`, then errors are ignored and
+    /// actions are retried.
     pub async fn new<'a>(
         path: String,
         baud_rate: u32,
         tolerate_error: bool,
-    ) -> anyhow::Result<Self> {
-        let out = Self {
+    ) -> Self {
+        Self {
             path: path.into_boxed_str().into(),
-            // stream: None,
             baud_rate,
             msg_received: Some(Default::default()),
             messages_to_send: Arc::new(Mutex::new(BoundedSubscription::none())),
             tolerate_error,
-        };
-
-        // out.connect().await?;
-
-        Ok(out)
+        }
     }
 
     async fn connect(&mut self, context: &RuntimeContext) -> anyhow::Result<Option<SerialStream>> {
@@ -78,10 +81,12 @@ impl SerialConnection {
         Ok(stream)
     }
 
+    /// Gets a reference to the `Signal` that represents received `Bytes`.
     pub fn get_msg_received_signal(&mut self) -> SignalRef<Bytes> {
         self.msg_received.as_mut().unwrap().get_ref()
     }
 
+    /// Provide a subscription whose messages will be written to the serial port.
     pub fn message_to_send_subscription(&mut self, sub: BoundedSubscription<Bytes, 64>) {
         *Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut() += sub;
     }
@@ -184,6 +189,7 @@ impl embedded_hal::serial::Write<u8> for VescWriter {
     }
 }
 
+/// A single `VESC` connection to a serial port.
 pub struct VescConnection {
     serial: SerialConnection,
     current: WatchedSubscription<u32>,
@@ -191,6 +197,9 @@ pub struct VescConnection {
 }
 
 impl VescConnection {
+    /// Wraps the given `SerialConnection` with the `VESC` protocol.
+    /// 
+    /// The given `SerialConnection` should not have any subscriptions.
     pub fn new(serial: SerialConnection) -> Self {
         Self {
             serial,
@@ -199,10 +208,16 @@ impl VescConnection {
         }
     }
 
+    /// Provide a subscription for the current level.
+    /// 
+    /// This will replace the last subscription provided.
     pub fn connect_current_from(&mut self, sub: WatchedSubscription<u32>) {
         self.current = sub;
     }
 
+    /// Provide a subscription for the duty cycle.
+    /// 
+    /// This will replace the last subscription provided.
     pub fn connect_duty_from(&mut self, sub: WatchedSubscription<u32>) {
         self.duty = sub;
     }

@@ -1,3 +1,8 @@
+//! The rig library serves as the analogue to the `tf2` library of `ROS`.
+//! 
+//! This library is being actively developed based on current needs, so it
+//! will never be a complete match to `tf2`.
+
 use std::{collections::VecDeque, f64::consts::PI, sync::Arc};
 
 use crossbeam::atomic::AtomicCell;
@@ -18,6 +23,8 @@ struct RigidBodyToml {
     children: FxHashMap<String, Self>,
 }
 
+/// An object that can only translate and rotate, and
+/// may be composed of multiple rigid bodies.
 pub struct RigidBody {
     translation: Point3<f64>,
     orientation: UnitQuaternion<f64>,
@@ -49,6 +56,7 @@ impl RigidBody {
         }
     }
 
+    /// Parses the given `toml` string.
     pub fn from_toml(data: &str) -> anyhow::Result<Self> {
         let out = Self::from_toml_obj(toml::from_str(data)?);
         if out.translation != Default::default() {
@@ -62,6 +70,7 @@ impl RigidBody {
         }
     }
 
+    /// Returns an iterator over all the rigid bodies in this object.
     pub fn destructure(self) -> impl Iterator<Item = RigidBodyRef> {
         let mut out = vec![];
         let mut process_queue = VecDeque::with_capacity(self.children.len());
@@ -118,6 +127,7 @@ enum Transform {
     Static(Isometry3<f64>),
 }
 
+/// A reference to a `RigidBody`
 pub enum RigidBodyRef {
     Dynamic(DynamicRigidBodyRef),
     Static(StaticRigidBodyRef),
@@ -142,6 +152,7 @@ impl RigidBodyRef {
         }
     }
 
+    /// Gets the global transformation of this rigid body.
     pub fn get_global_isometry(&self) -> Isometry3<f64> {
         match self {
             RigidBodyRef::Dynamic(x) => x.get_global_isometry(),
@@ -149,6 +160,7 @@ impl RigidBodyRef {
         }
     }
 
+    /// Gets the transformation of this rigid body relative to its parent.
     pub fn get_local_isometry(&self) -> Isometry3<f64> {
         match self {
             RigidBodyRef::Dynamic(x) => x.get_local_isometry(),
@@ -156,6 +168,9 @@ impl RigidBodyRef {
         }
     }
 
+    /// Gets the global transformation of this rigid body.
+    /// 
+    /// This uses f32 instead of f64
     pub fn get_global_isometry_f32(&self) -> Isometry3<f32> {
         match self {
             RigidBodyRef::Dynamic(x) => x.get_global_isometry_f32(),
@@ -163,6 +178,9 @@ impl RigidBodyRef {
         }
     }
 
+    /// Gets the transformation of this rigid body relative to its parent.
+    /// 
+    /// This uses f32 instead of f64
     pub fn get_local_isometry_f32(&self) -> Isometry3<f32> {
         match self {
             RigidBodyRef::Dynamic(x) => x.get_local_isometry_f32(),
@@ -171,6 +189,8 @@ impl RigidBodyRef {
     }
 }
 
+/// A reference to a `RigidBody` that cannot translate or rotate
+/// relative to its direct parent.
 #[derive(Clone)]
 pub struct StaticRigidBodyRef {
     name: Arc<str>,
@@ -178,6 +198,7 @@ pub struct StaticRigidBodyRef {
 }
 
 impl StaticRigidBodyRef {
+    /// Creates a new static `RigidBody` with the given name.
     pub fn identity(name: impl Into<String>) -> Self {
         Self {
             name: name.into().into_boxed_str().into(),
@@ -197,6 +218,7 @@ impl StaticRigidBodyRef {
         &self.name
     }
 
+    /// Gets the global transformation of this rigid body.
     pub fn get_global_isometry(&self) -> Isometry3<f64> {
         let mut out = Isometry3::default();
 
@@ -210,10 +232,14 @@ impl StaticRigidBodyRef {
         out
     }
 
+    /// Gets the global transformation of this rigid body.
+    /// 
+    /// This uses f32 instead of f64
     pub fn get_global_isometry_f32(&self) -> Isometry3<f32> {
         downcast_isometry(self.get_global_isometry())
     }
 
+    /// Gets the transformation of this rigid body relative to its parent.
     pub fn get_local_isometry(&self) -> Isometry3<f64> {
         let Transform::Static(x) = self.transforms.last().unwrap() else {
             unreachable!();
@@ -221,11 +247,17 @@ impl StaticRigidBodyRef {
         *x
     }
 
+    /// Gets the transformation of this rigid body relative to its parent.
+    /// 
+    /// This uses f32 instead of f64
     pub fn get_local_isometry_f32(&self) -> Isometry3<f32> {
         downcast_isometry(self.get_local_isometry())
     }
 }
 
+/// A reference to a `RigidBody` that can translate or rotate
+/// relative to its direct parent. Moving this `RigidBody` will
+/// update the global transformations of all its children.
 #[derive(Clone)]
 pub struct DynamicRigidBodyRef {
     name: Arc<str>,
@@ -233,6 +265,10 @@ pub struct DynamicRigidBodyRef {
 }
 
 impl DynamicRigidBodyRef {
+    /// Creates a new dynamic `RigidBody` with the given name.
+    /// 
+    /// Since this `RigidBody` will never have children, you
+    /// should consider if this object will be useful.
     pub fn identity(name: impl Into<String>) -> Self {
         Self {
             name: name.into().into_boxed_str().into(),
@@ -252,6 +288,7 @@ impl DynamicRigidBodyRef {
         &self.name
     }
 
+    /// Gets the global transformation of this rigid body.
     pub fn get_global_isometry(&self) -> Isometry3<f64> {
         let mut out = Isometry3::default();
 
@@ -265,10 +302,14 @@ impl DynamicRigidBodyRef {
         out
     }
 
+    /// Gets the global transformation of this rigid body.
+    /// 
+    /// This uses f32 instead of f64
     pub fn get_global_isometry_f32(&self) -> Isometry3<f32> {
         downcast_isometry(self.get_global_isometry())
     }
 
+    /// Gets the transformation of this rigid body relative to its parent.
     pub fn get_local_isometry(&self) -> Isometry3<f64> {
         let Transform::Dynamic(x) = self.transforms.last().unwrap() else {
             unreachable!();
@@ -276,10 +317,14 @@ impl DynamicRigidBodyRef {
         x.load()
     }
 
+    /// Gets the transformation of this rigid body relative to its parent.
+    /// 
+    /// This uses f32 instead of f64
     pub fn get_local_isometry_f32(&self) -> Isometry3<f32> {
         downcast_isometry(self.get_local_isometry())
     }
 
+    /// Sets the translation and orientation relative to the parent.
     pub fn set_local_isometry(&self, value: Isometry3<f64>) {
         let Transform::Dynamic(x) = self.transforms.last().unwrap() else {
             unreachable!();

@@ -1,3 +1,6 @@
+//! A Command Line Tool for interacting with Unros runtimes externally
+//! through auxilliary control.
+
 use std::net::SocketAddr;
 
 use clap::{Parser, Subcommand};
