@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut pid = pid::Pid::new(0.0, 100.0);
     pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);
-    let mut navigator = WaypointDriver::new(
+    let navigator = WaypointDriver::new(
         positioning.get_position_signal().watch(),
         positioning.get_velocity_signal().watch(),
         positioning.get_orientation_signal().watch(),

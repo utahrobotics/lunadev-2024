@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     ops::Deref,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, time::{Duration, Instant},
 };
 
 use image::{DynamicImage, ImageBuffer, Rgb};
@@ -35,6 +35,7 @@ pub struct RealSenseCamera {
     image_received: Signal<Arc<DynamicImage>>,
     imu_frame_received: Signal<IMUFrame>,
     rigid_body_ref: RigidBodyRef,
+    pub calibration_time: Duration
 }
 
 impl RealSenseCamera {
@@ -47,6 +48,7 @@ impl RealSenseCamera {
             image_received: Default::default(),
             imu_frame_received: Default::default(),
             rigid_body_ref: RigidBodyRef::Static(StaticRigidBodyRef::identity("realsense")),
+            calibration_time: Duration::from_secs(3)
         })
     }
 
@@ -78,22 +80,27 @@ impl Node for RealSenseCamera {
             config
                 .enable_device_from_serial(self.device.info(Rs2CameraInfo::SerialNumber).unwrap())?
                 .disable_all_streams()?
-                // .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 30)?
+                .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 30)?
                 .enable_stream(Rs2StreamKind::Color, None, 0, 0, Rs2Format::Rgb8, 0)?
                 .enable_stream(Rs2StreamKind::Accel, None, 0, 0, Rs2Format::Any, 0)?
                 .enable_stream(Rs2StreamKind::Gyro, None, 0, 0, Rs2Format::Any, 0)?;
         } else {
-            warn!("A Realsense camera is not attached to a USB 3.0 port");
+            warn!("This Realsense camera is not attached to a USB 3.0 port");
             config
                 .enable_device_from_serial(self.device.info(Rs2CameraInfo::SerialNumber).unwrap())?
                 .disable_all_streams()?
-                // .enable_stream(Rs2StreamKind::Depth, None, 640, 0, Rs2Format::Z16, 30)?
+                .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 30)?
                 .enable_stream(Rs2StreamKind::Accel, None, 0, 0, Rs2Format::Any, 0)?
                 .enable_stream(Rs2StreamKind::Gyro, None, 0, 0, Rs2Format::Any, 0)?;
         }
 
         // Change pipeline's type from InactivePipeline -> ActivePipeline
         let mut pipeline = pipeline.start(Some(config))?;
+        let mut calibrating = true;
+        let start = Instant::now();
+        let mut accel_sum = Vector3::default();
+        let mut accel_scale = 1.0;
+        let mut accel_count = 0usize;
 
         tokio_rayon::spawn(move || {
             let mut last_accel = Default::default();
@@ -156,8 +163,20 @@ impl Node for RealSenseCamera {
                     let accel = frame.acceleration();
                     last_accel = self.rigid_body_ref.get_global_isometry_f32().rotation
                         * Vector3::new(accel[0], accel[1], accel[2]);
+                    
+                    if calibrating {
+                        accel_sum += last_accel;
+                        accel_count += 1;
+
+                        if start.elapsed() >= self.calibration_time {
+                            calibrating = false;
+                            accel_scale = 9.81 / accel_sum.magnitude() * accel_count as f32;
+                            debug!("Realsense gravity calibrated");
+                        }
+                    }
+
                     self.imu_frame_received.set(IMUFrame {
-                        acceleration: last_accel,
+                        acceleration: last_accel * accel_scale,
                         angular_velocity: last_ang_vel,
                     });
                 }
@@ -178,5 +197,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         image_received: Default::default(),
         imu_frame_received: Default::default(),
         rigid_body_ref: RigidBodyRef::Static(StaticRigidBodyRef::identity("realsense")),
+        calibration_time: Duration::from_secs(5)
     }))
 }
