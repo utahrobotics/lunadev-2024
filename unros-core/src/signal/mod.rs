@@ -1,3 +1,11 @@
+//! Signals are an essential component of many frameworks in many different disciplines.
+//! 
+//! This is one of the aspects taken from `ROS` that have been greatly improved. We offer
+//! an `API` for signals that is more similar to `Rust`'s iterators. Signals are analagous
+//! to `Rust`'s channels in that they do not trigger code, unlike `ROS` subscriber callbacks.
+//! Signals in this crate also differ by having 3 different ways that they can be subscribed
+//! to depending on the needs of the code using it.
+
 use std::{collections::hash_map::Entry, num::NonZeroU32};
 
 use async_trait::async_trait;
@@ -17,7 +25,7 @@ pub mod watched;
 trait ChannelTrait<T>: Send + Sync + 'static {
     fn source_count(&self) -> usize;
 
-    async fn recv_ex(&mut self) -> Option<T>;
+    async fn recv_or_closed(&mut self) -> Option<T>;
     async fn recv(&mut self) -> T;
     // fn blocking_recv(&mut self) -> Option<T>;
 
@@ -35,8 +43,8 @@ impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
         self.source.source_count()
     }
 
-    async fn recv_ex(&mut self) -> Option<T> {
-        self.source.recv_ex().await.map(|x| (self.mapper)(x))
+    async fn recv_or_closed(&mut self) -> Option<T> {
+        self.source.recv_or_closed().await.map(|x| (self.mapper)(x))
     }
 
     async fn recv(&mut self) -> T {
@@ -69,14 +77,14 @@ where
         self.source_a.source_count() + self.source_b.source_count()
     }
 
-    async fn recv_ex(&mut self) -> Option<(A, B)> {
+    async fn recv_or_closed(&mut self) -> Option<(A, B)> {
         loop {
             tokio::select! {
-                new_item_a = self.source_a.recv_ex() => {
+                new_item_a = self.source_a.recv_or_closed() => {
                     let new_item_a = new_item_a?;
                     self.item_a = Some(new_item_a);
                 }
-                new_item_b = self.source_b.recv_ex() => {
+                new_item_b = self.source_b.recv_or_closed() => {
                     let new_item_b = new_item_b?;
                     self.item_b = Some(new_item_b);
                 }
@@ -168,6 +176,9 @@ impl<T> Default for Signal<T> {
 }
 
 impl<T: Clone> Signal<T> {
+    /// Gets a mutable reference to the signal.
+    /// 
+    /// It is through this reference that you can make subscriptions.
     pub fn get_ref(&mut self) -> SignalRef<T> {
         SignalRef(self)
     }
@@ -195,9 +206,22 @@ impl<T: Clone> Signal<T> {
     }
 }
 
+/// A mutable reference to a signal.
+/// 
+/// This is the only way to make subscriptions to a signal.
+/// This approach was used to reduce the odds of code outside
+/// of the code owning a `Signal` having a direct reference
+/// to the `Signal` itself, allowing them to `set` the `Signal`
+/// externally, which is an anti-pattern.
 pub struct SignalRef<'a, T>(&'a mut Signal<T>);
 
 impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
+    /// Create an unbounded subscription to the `Signal` that stores
+    /// all sent messages until they are read.
+    /// 
+    /// If you cannot guarantee that you can read from this subscription
+    /// faster than messages are sent, you should not use this subscription
+    /// as it will eat up memory.
     pub fn subscribe_unbounded(&mut self) -> UnboundedSubscription<T> {
         let (sender, recv) = mpsc::unbounded_channel();
         self.0.unbounded_senders.push(sender);
@@ -208,6 +232,14 @@ impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
         }
     }
 
+    /// Create an bounded subscription to the `Signal` that stores
+    /// a limited number of messages (the `SIZE` const parameter)
+    /// 
+    /// If you cannot guarantee that you can read from this subscription
+    /// faster than messages are sent, you should use this subscription
+    /// as it will prevent newer messages from entering. As a result, this
+    /// subscription will return an error when used if it identifies that
+    /// messages have been blocked.
     pub fn subscribe_bounded<const SIZE: u32>(&mut self) -> BoundedSubscription<T, SIZE> {
         let recv = match self.0.bounded_senders.entry(
             NonZeroU32::new(SIZE).expect("Size of BoundedSubscription should be greater than 0"),
@@ -225,6 +257,11 @@ impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
         }
     }
 
+    /// Create a subscription that only tracks the latest value.
+    /// 
+    /// This is generally the most performant option as it will never use
+    /// up a lot of memory when many messages are incoming but not many reads
+    /// are occurring.
     pub fn watch(&mut self) -> WatchedSubscription<T> {
         let watch_sender = self
             .0

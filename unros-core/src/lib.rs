@@ -1,3 +1,18 @@
+//! Unros is an experimental alternative to the ROS 1 & 2 frameworks.
+//! 
+//! It is written from the ground up in Rust and seeks to replicate most
+//! of the common functionality in ROS while adding some extra features
+//! that exploit Rust's abilities.
+//! 
+//! This crate contains the core functionality which defines what this
+//! framework offers:
+//! 
+//! 1. The Node trait
+//! 2. A complete logging system
+//! 3. An asynchronous Node runtime
+//! 4. Signals, with 3 subscription variants (analagous to ROS publisher and subscribers)
+//! 5. The Task trait (analagous to ROS actions)
+
 #![feature(associated_type_defaults, once_cell_try)]
 
 use std::{
@@ -31,13 +46,45 @@ use tokio::{
 };
 pub use tokio_rayon::{self, rayon};
 
+/// A Node just represents a long running task.
+/// 
+/// Nodes are only required to run once, and may terminate at any point in time.
+/// Nodes in ROS also serve as forms of isolation. If a thread faces an exception
+/// while running code in ROS, other code in the same thread will stop executing.
+/// Developers would then segment their code into nodes such that each node could
+/// operate in a different thread.
+/// 
+/// Rust allows developers to make stronger guarantees regarding when and where
+/// their code will panic. As such, Nodes are expected to never panic. Instead,
+/// they must return an `anyhow::Error` when facing an unrecoverable error, or
+/// log using the `error!` macro if normal functionality can be continued.
+/// 
+/// In the event that a Node panics, the thread running the node will not be taken
+/// down, nor will any other node. An error message including the name of the node
+/// that panicked will be logged. Even so, panics should be avoided.
 #[async_trait]
 pub trait Node: Send + 'static {
     const DEFAULT_NAME: &'static str;
 
+    /// The entry point of the node.
+    /// 
+    /// Nodes are always expected to be asynchronous, as asynchronous code is much
+    /// easier to manage.
+    /// 
+    /// If a node needs to run blocking code, it is recommended to use `tokio_rayon::spawn`
+    /// instead of `rayon::spawn` or `std::thread::spawn`, as `tokio_rayon` allows you
+    /// to await the spawned thread in a non-blocking way. If you spawn a thread and do not
+    /// wait on it, you may accidentally exit this method while threads are still running.
+    /// While this is not unsafe or incorrect, it can lead to misleading logs. Unros automatically
+    /// logs all nodes whose `run` methods have returned as terminated, even if they have spawned
+    /// threads that are still running.
+    /// 
+    /// Do keep in mind that `tokio_rayon` threads do not terminate if their handles are dropped,
+    /// which relates back to the issue previously mentioned.
     async fn run(self, context: RuntimeContext) -> anyhow::Result<()>;
 }
 
+/// A Node that is just an async function that runs once.
 pub struct FnNode<Fut, F>
 where
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
@@ -69,6 +116,11 @@ where
     }
 }
 
+/// A reference to the runtime that is currently running.
+/// 
+/// The typical way of receiving this is through the `run` method
+/// of `Node`. As such, the runtime in question is the runtime that
+/// is currently running the node.
 #[derive(Clone)]
 pub struct RuntimeContext {
     name: Arc<str>,
@@ -76,10 +128,12 @@ pub struct RuntimeContext {
 }
 
 impl RuntimeContext {
+    /// Get the name of the node that received this `RuntimeContext`.
     pub fn get_name(&self) -> &Arc<str> {
         &self.name
     }
 
+    /// Spawn a new node into the runtime that the runtime will keep track of.
     pub fn spawn_node(&self, node: impl Into<FinalizedNode>) {
         let _ = self.node_sender.send(node.into());
     }
@@ -89,6 +143,13 @@ struct RunError {
     critical: bool,
 }
 
+/// A node that has been boxed up and is ready to run.
+/// 
+/// Finalized nodes may be added together such that they run
+/// as a group. When one node in a group terminates, all other
+/// nodes terminate. If one of these other nodes are critical,
+/// the whole runtime will terminate even if the original node
+/// that terminated was not critical.
 pub struct FinalizedNode {
     critical: bool,
     runs: Vec<(
@@ -110,6 +171,9 @@ impl<N: Node> From<N> for FinalizedNode {
 }
 
 impl FinalizedNode {
+    /// Box up the given node.
+    /// 
+    /// The given name will be used as the name of the node.
     pub fn new<N: Node>(node: N, name: Option<String>) -> Self {
         let name = name.unwrap_or_else(|| N::DEFAULT_NAME.into());
         let name: Arc<str> = Arc::from(name.into_boxed_str());
@@ -132,10 +196,14 @@ impl FinalizedNode {
         }
     }
 
+    /// Sets the `critical` flag of the node.
+    /// 
+    /// Critical nodes terminate the whole runtime when they terminate.
     pub fn set_critical(&mut self, value: bool) {
         self.critical = value;
     }
 
+    /// Gets the `critical` flag of the node.
     pub fn get_critical(&mut self) -> bool {
         self.critical
     }
@@ -215,11 +283,22 @@ impl Add for FinalizedNode {
     }
 }
 
+/// Configurations for the runtime
 #[derive(Deserialize)]
 pub struct RunOptions {
+    /// The name of this runtime.
+    /// 
+    /// This changes what the sub-logging directory name is.
     #[serde(default)]
     pub runtime_name: String,
 
+    /// Whether or not auxilliary control should be enabled.
+    /// 
+    /// Auxilliary control is a way for the current runtime
+    /// to be controlled externally, such as from another program.
+    /// This is typically used to terminate the runtime remotely
+    /// when the interface to the program running the runtime has been
+    /// lost.
     #[serde(default = "default_auxilliary_control")]
     pub auxilliary_control: bool,
 }
@@ -228,6 +307,13 @@ fn default_auxilliary_control() -> bool {
     true
 }
 
+/// Creates a default `RunOptions`.
+/// 
+/// This macro was created instead of implementing `Default`
+/// so that the crate calling this macro can have its name
+/// used as the `runtime_name`.
+/// 
+/// By default, `auxilliary_control` is `true`.
 #[macro_export]
 macro_rules! default_run_options {
     () => {
@@ -238,6 +324,16 @@ macro_rules! default_run_options {
     };
 }
 
+/// Sets up a locally available set of logging macros.
+/// 
+/// The `log` crate allows users to configure the `target`
+/// parameter of a log, allowing developers to better filter
+/// messages by file. Unros takes this one step further by
+/// automatically setting this `target` parameter to be the name
+/// of the current node (as passed by the context). This allows
+/// two nodes of the same class to have different log targets
+/// if their names differ, which should help you to identify
+/// issues faster.
 #[macro_export]
 macro_rules! setup_logging {
     ($context: ident) => {
@@ -274,6 +370,13 @@ macro_rules! setup_logging {
 
 static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// Initializes the default logging implementation.
+/// 
+/// This is called automatically in `run_all` and `async_run_all`, but
+/// there may be additional logs produced before these methods that would
+/// be ignored if the logger was not set up yet. As such, you may call this
+/// method manually, when needed. Calling this multiple times is safe and
+/// will not return errors.
 pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     const LOGS_DIR: &str = "logs";
 
@@ -348,6 +451,13 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The entry point of the runtime itself.
+/// 
+/// This function automatically starts up a `tokio` runtime.
+/// As such, this method should not be called within a `tokio`
+/// runtime, or any `async` code in general.
+/// 
+/// Refer to `async_run_all` for more info.
 #[tokio::main]
 pub async fn run_all(
     runnables: impl IntoIterator<Item = FinalizedNode>,
@@ -369,6 +479,25 @@ impl Drop for LastDrop {
     }
 }
 
+/// The entry point of the runtime itself.
+/// 
+/// This function runs all of the provided `FinalizedNode`s
+/// in parallel, according to the given `RunOptions`. A
+/// logging implementation will be initialized if not present.
+/// 
+/// This function only returns `Ok(())` if `Ctrl-C` was received,
+/// or an auxilliary stop signal was received. In either case,
+/// this method always attempts to exit gracefully. It will signal
+/// to each `Node` to stop running, but the actual outcome of this
+/// varies based on the actual implementations of these `Node`s. Since
+/// this method waits on all `Node`s to exit, if one `Node` refuses to
+/// terminate, this method will never return gracefully.
+/// 
+/// Receiving a second stop signal from `Ctrl-C` or auxilliary will force
+/// exit the program. All threads other than the main thread will not exit
+/// gracefully (all objects in their stacks will not be dropped), but objects
+/// in the main thread will still be able to be dropped safely. This was chosen
+/// to be the best case scenario.
 pub async fn async_run_all(
     runnables: impl IntoIterator<Item = FinalizedNode>,
     run_options: RunOptions,

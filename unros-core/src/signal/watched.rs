@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::sync::watch;
 
 #[async_trait]
-pub trait WatchTrait<T>: Send + Sync + 'static {
+pub(super) trait WatchTrait<T>: Send + Sync + 'static {
     async fn get(&mut self) -> T;
     async fn wait_for_change(&mut self) -> T;
 
@@ -150,6 +150,7 @@ impl<A: Clone + Send + Sync + 'static, B: Clone + Send + Sync + 'static> WatchTr
     }
 }
 
+/// A subscription to a signal that stores just the last message that was received.
 pub struct WatchedSubscription<T> {
     pub(super) recv: Option<Box<dyn WatchTrait<T>>>,
 }
@@ -157,10 +158,19 @@ pub struct WatchedSubscription<T> {
 static_assertions::assert_impl_all!(WatchedSubscription<()>: Send, Sync);
 
 impl<T: 'static> WatchedSubscription<T> {
+    /// Creates a subscription that will never be updated.
+    /// 
+    /// None subscriptions are considered closed.
     pub fn none() -> Self {
         Self { recv: None }
     }
 
+    /// Gets the current value in this subscription.
+    /// 
+    /// If the `Signal` has yet to produce a message,
+    /// this method will wait until one is produced.
+    /// If the `Signal` is dropped before a message is
+    /// sent, this method will wait forever.
     pub async fn get(&mut self) -> T {
         if let Some(recv) = &mut self.recv {
             recv.get().await
@@ -170,10 +180,16 @@ impl<T: 'static> WatchedSubscription<T> {
         }
     }
 
+    /// Waits for the stored value to change, or for the
+    /// `Signal` to be closed.
     pub async fn changed_or_closed(&mut self) -> Option<T> {
         self.recv.as_mut()?.changed_or_closed().await
     }
 
+    /// Waits for the `Signal` to be changed.
+    /// 
+    /// If the `Signal` is dropped, this method will wait
+    /// forever.
     pub async fn wait_for_change(&mut self) -> T {
         if let Some(recv) = &mut self.recv {
             recv.wait_for_change().await
@@ -183,10 +199,26 @@ impl<T: 'static> WatchedSubscription<T> {
         }
     }
 
+    /// Gets the current value in this subscription.
+    /// 
+    /// If the `Signal` has yet to produce a message,
+    /// this method will return `None`.
+    /// If the `Signal` is dropped before a message is
+    /// sent, this method will return `None`.
     pub fn get_or_empty(&mut self) -> Option<T> {
         self.recv.as_mut().and_then(|x| x.get_or_empty())
     }
 
+    /// Changes the generic type of the signal that this subscription is for.
+    ///
+    /// This is done by applying a mapping function after a message is received.
+    /// This mapping function is ran in an asynchronous context, so it should be
+    /// non-blocking. Do note that the mapping function itself is not asynchronous
+    /// and is multi-thread safe.
+    ///
+    /// There is also a non-zero cost to mapping on top of the mapping functions,
+    /// so avoid having deeply mapped subscriptions. This is due to the lack of
+    /// `AsyncFn` traits and/or lending functions.
     pub fn map<V: 'static>(
         self,
         mapper: impl FnMut(T) -> V + 'static + Send + Sync,
@@ -199,6 +231,10 @@ impl<T: 'static> WatchedSubscription<T> {
         }
     }
 
+    /// Zips this subscription with the other given subscription.
+    /// 
+    /// Only one of the subscriptions have to identify a change for the
+    /// whole subscription to be considered changed.
     pub fn zip<B>(self, other: WatchedSubscription<B>) -> WatchedSubscription<(T, B)>
     where
         T: Clone + Send + Sync,

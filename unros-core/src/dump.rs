@@ -1,3 +1,11 @@
+//! Data dumps are an alternative way of logging that is more suited to
+//! large collections of data.
+//! 
+//! Data dumps offer a way to write data to some location such that the
+//! code producing the data does not get blocked by writing. If the write
+//! is queued successfully, then the write is guaranteed to occur, as long
+//! as the current program is not forcefully terminated.
+
 use std::{
     io::Write,
     net::SocketAddr,
@@ -19,24 +27,53 @@ struct DataDumpInner {
     empty_vecs: mpsc::UnboundedReceiver<Vec<u8>>,
 }
 
+/// A handle to the Data Dump thread that handles all writes
+/// to a location.
+/// 
+/// This struct implements the blocking `Write` interface as provided
+/// by `Rust`, instead of the non-blocking `AsyncWrite` offered by `tokio`.
+/// However, writes are guaranteed to be non-blocking and thus safe to use in
+/// async code.
+/// 
+/// # Note
+/// A default `DataDump` does not write to any location. It is equivalent to `sink()`.
 #[derive(Default)]
 pub struct DataDump(Option<DataDumpInner>);
 
 impl DataDump {
-    pub async fn new_file(filename: impl AsRef<Path>) -> std::io::Result<Self> {
-        let Some(path) = SUB_LOGGING_DIR.get() else {
-            return Ok(Self(None));
+    /// Create a `DataDump` that writes to the given path.
+    /// 
+    /// For logging purposes, the filename is used as the name of the dump.
+    /// 
+    /// # Note
+    /// If the given path is relative, it will be considered relative to the
+    /// sub-logging directory. If a logging implementation has not been initialized
+    /// through `init_logger`, `async_run_all`, or `run_all`, then this method will
+    /// return a `NotFound` io error.
+    pub async fn new_file(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let file = if path.as_ref().is_absolute() {
+            File::create(path.as_ref()).await?
+        } else {
+            let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`"));
+            };
+            let filename = PathBuf::from(path.as_ref());
+            File::create(PathBuf::from(sub_log_dir).join(&filename)).await?
         };
-        let filename = PathBuf::from(filename.as_ref());
-        let file = File::create(PathBuf::from(path).join(&filename)).await?;
-        Self::new(BufWriter::new(file), filename.to_string_lossy())
+        Self::new(BufWriter::new(file), path.as_ref().to_string_lossy())
     }
 
+    /// Create a `DataDump` that writes to the network address.
+    /// 
+    /// For logging purposes, the address is used as the name of the dump.
     pub async fn new_tcp(addr: SocketAddr) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
         Self::new(BufWriter::new(stream), addr.to_string())
     }
 
+    /// Create a `DataDump` that writes to the given writer.
+    /// 
+    /// For logging purposes, the given name is used as the name of the dump.
     pub fn new<A>(mut writer: A, name: impl Into<String>) -> std::io::Result<Self>
     where
         A: AsyncWrite + Unpin + Send + 'static,

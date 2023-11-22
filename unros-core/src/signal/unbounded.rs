@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 
 use super::{watched::WatchedSubscription, ChannelTrait, MappedChannel, Signal, ZippedChannel};
 
+/// A subscription to a signal that stores every message that was received.
 pub struct UnboundedSubscription<T> {
     pub(super) receivers: Vec<Box<dyn ChannelTrait<T>>>,
     pub(super) rng: SmallRng,
@@ -15,6 +16,9 @@ pub struct UnboundedSubscription<T> {
 static_assertions::assert_impl_all!(UnboundedSubscription<()>: Send, Sync);
 
 impl<T: Send + 'static> UnboundedSubscription<T> {
+    /// Creates a subscription that will never produce a message.
+    /// 
+    /// None subscriptions are considered closed.
     pub fn none() -> Self {
         Self {
             receivers: vec![],
@@ -22,13 +26,20 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
         }
     }
 
-    pub async fn recv_ex(&mut self) -> Option<T> {
+    /// Waits for a message to be sent, unless the `Signal` has been dropped.
+    pub async fn recv_or_closed(&mut self) -> Option<T> {
         let mut futures: FuturesUnordered<_> =
-            self.receivers.iter_mut().map(|x| x.recv_ex()).collect();
+            self.receivers.iter_mut().map(|x| x.recv_or_closed()).collect();
 
         futures.next().await.unwrap_or_default()
     }
 
+    /// Waits for a message to be sent, regardless of the state of the `Signal`.
+    /// 
+    /// If the `Signal` was dropped, this method will never return. This was
+    /// considered to be an acceptable abstraction as `Node`s should have a
+    /// limited view of the outside world, which includes not knowing if a
+    /// `Signal` is still alive or not.
     pub async fn recv(&mut self) -> T {
         let mut futures: FuturesUnordered<_> =
             self.receivers.iter_mut().map(|x| x.recv()).collect();
@@ -40,16 +51,10 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
         x
     }
 
-    // pub fn blocking_recv(&mut self) -> Option<T> {
-    //     let mut out: Vec<_> = self
-    //         .receivers
-    //         .par_iter_mut()
-    //         .filter_map(|x| x.blocking_recv())
-    //         .take_any(1)
-    //         .collect();
-    //     out.pop()
-    // }
-
+    /// Tries to receive a single value from the `Signal`.
+    /// 
+    /// Returns `None` if there are no messages right now
+    /// or the `Signal` is closed.
     pub fn try_recv(&mut self) -> Option<T> {
         self.receivers.shuffle(&mut self.rng);
         self.receivers
@@ -81,6 +86,12 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
         }
     }
 
+    /// Converts this subscription to a `WatchedSubscription`.
+    /// 
+    /// This is a useful technique to simulate adding `WatchedSubscription`s
+    /// together, since `WatchedSubscription`s cannot be added together once
+    /// created. You can first add multiple `UnboundedSubscriptions` together,
+    /// then call this method.
     pub async fn to_watched(mut self) -> WatchedSubscription<T>
     where
         T: Clone + Sync,
@@ -89,7 +100,7 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
         let sub = signal.get_ref().watch();
         tokio::spawn(async move {
             loop {
-                let Some(msg) = self.recv_ex().await else {
+                let Some(msg) = self.recv_or_closed().await else {
                     break;
                 };
                 signal.set(msg);
@@ -98,6 +109,9 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
         sub
     }
 
+    /// Zips this subscription with the other given subscription.
+    /// 
+    /// This is equivalent to the zipping iterators.
     pub fn zip<B>(mut self, other: UnboundedSubscription<B>) -> UnboundedSubscription<(T, B)>
     where
         T: Clone + Sync,
@@ -121,7 +135,7 @@ impl<T: Send + 'static> ChannelTrait<T> for mpsc::UnboundedReceiver<T> {
         1
     }
 
-    async fn recv_ex(&mut self) -> Option<T> {
+    async fn recv_or_closed(&mut self) -> Option<T> {
         self.recv().await
     }
 
@@ -138,10 +152,6 @@ impl<T: Send + 'static> ChannelTrait<T> for mpsc::UnboundedReceiver<T> {
     fn try_recv(&mut self) -> Option<T> {
         mpsc::UnboundedReceiver::try_recv(self).ok()
     }
-
-    // fn blocking_recv(&mut self) -> Option<T> {
-    //     mpsc::UnboundedReceiver::blocking_recv(self)
-    // }
 }
 
 #[async_trait]
@@ -150,8 +160,8 @@ impl<T: Send + 'static> ChannelTrait<T> for UnboundedSubscription<T> {
         self.receivers.iter().map(|x| x.source_count()).sum()
     }
 
-    async fn recv_ex(&mut self) -> Option<T> {
-        UnboundedSubscription::recv_ex(self).await
+    async fn recv_or_closed(&mut self) -> Option<T> {
+        UnboundedSubscription::recv_or_closed(self).await
     }
 
     async fn recv(&mut self) -> T {
@@ -161,10 +171,6 @@ impl<T: Send + 'static> ChannelTrait<T> for UnboundedSubscription<T> {
     fn try_recv(&mut self) -> Option<T> {
         UnboundedSubscription::try_recv(self)
     }
-
-    // fn blocking_recv(&mut self) -> Option<T> {
-    //     UnboundedSubscription::blocking_recv(self)
-    // }
 }
 
 impl<T: Send + 'static> Add for UnboundedSubscription<T> {
