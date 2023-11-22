@@ -1,0 +1,15 @@
+[package]
+name = "apriltag"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+apriltag = "0.4"
+apriltag-image = "0.1"
+apriltag-nalgebra = "0.1"
+unros-core = { path = "../unros-core" }
+nalgebra = { workspace = true }
+fxhash = { workspace = true }
+# crossbeam = "0.8"

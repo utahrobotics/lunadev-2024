@@ -1,0 +1,14 @@
+[package]
+name = "realsense"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+realsense-rust = { version = "1.2", features = ["buildtime-bindgen"] }
+unros-core = { path = "../unros-core" }
+rig = { path = "../rig" }
+image = { workspace = true }
+nalgebra = { workspace = true }
+quaternion-core = { workspace = true }

@@ -1,10 +1,13 @@
-[gd_scene load_steps=13 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=21 format=3 uid="uid://b8qgudi6vkflb"]
 
+[ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_1xyvq"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="1_hl7kb"]
 [ext_resource type="AudioStream" uid="uid://cephremnedhtp" path="res://addons/kenney_interface_sounds/error_002.wav" id="2_kejy0"]
 
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_f0mli"]
+
 [sub_resource type="GDScript" id="GDScript_45865"]
-script/source = "extends MarginContainer
+script/source = "extends Control
 
 
 func _ready() -> void:
@@ -170,51 +173,206 @@ func _update() -> void:
 		Lunabot.send_steering(0, 0)
 "
 
-[node name="Main" type="MarginContainer"]
+[sub_resource type="GDScript" id="GDScript_ggpmf"]
+script/source = "extends VBoxContainer
+
+
+const DATA_STRIDE := 16
+
+var data: PackedFloat32Array
+var data_index := 0
+var elapsed := 0.0
+var target_elapsed := 0.0
+var total_duration := 0.0
+
+@onready var robot: Node3D = $AspectRatioContainer/SubViewportContainer/SubViewport/Robot
+
+
+func _ready() -> void:
+	$HBoxContainer2/HSlider.drag_started.connect(
+		func():
+			set_process(false)
+	)
+	$HBoxContainer2/HSlider.drag_ended.connect(
+		func(value_changed: bool):
+			set_process(true)
+			if !value_changed:
+				return
+			elapsed = $HBoxContainer2/HSlider.value * total_duration
+			if elapsed < target_elapsed:
+				data_index = 0
+				target_elapsed = 0
+	)
+	set_process(false)
+
+
+func _on_open_file_pressed() -> void:
+	var dialog := FileDialog.new()
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.mode_overrides_title = false
+	dialog.title = \"Select a data file to play\"
+	dialog.add_filter(\"*.csv\", \"Comma Separated\")
+	dialog.close_requested.connect(
+		func():
+			dialog.queue_free()
+	)
+	dialog.show_hidden_files = true
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.file_selected.connect(
+		func(path: String):
+			var file := FileAccess.open(path, FileAccess.READ)
+			if file == null:
+				push_error(\"Error code: %s while opening %s\" % [FileAccess.get_open_error(), path])
+				return
+			var path_segments := path.split(\"/\")
+			$HBoxContainer/Label.text = path_segments[path_segments.size() - 1]
+			$HBoxContainer2/HSlider.editable = true
+			$HBoxContainer2/Play.disabled = false
+			$HBoxContainer2/PlayTime.editable = true
+			data.clear()
+			total_duration = 0
+			elapsed = 0
+			data_index = 0
+			
+			while true:
+				var line := file.get_csv_line()
+				if line.size() == 1 and line[0] == \"\":
+					break
+				if !line[0].is_valid_float():
+					continue
+				for text in line:
+					data.push_back(float(text))
+				if data.size() > DATA_STRIDE:
+					total_duration += data[data.size() - 1]
+			
+			target_elapsed = data[DATA_STRIDE * 2 - 1]
+	)
+	dialog.popup_exclusive_centered(self, Vector2i.ONE * 800)
+
+
+func _on_play_toggled(button_pressed: bool) -> void:
+	if button_pressed:
+		$HBoxContainer2/Play.text = \"Stop\"
+		set_process(true)
+	else:
+		$HBoxContainer2/Play.text = \"Play\"
+		set_process(false)
+
+
+func _process(delta: float) -> void:
+	elapsed += delta
+	while elapsed >= target_elapsed:
+		robot.rotation = Vector3(data[data_index + DATA_STRIDE - 3], data[data_index + DATA_STRIDE - 2], data[data_index + DATA_STRIDE - 4])
+		robot.position = Vector3(data[data_index + DATA_STRIDE - 7], data[data_index + DATA_STRIDE - 6], data[data_index + DATA_STRIDE - 5])
+		data_index += DATA_STRIDE
+		if data_index >= data.size():
+			elapsed = 0
+			data_index = 0
+			target_elapsed = data[DATA_STRIDE * 2 - 1]
+			break
+		var data_delta := data[data_index + DATA_STRIDE - 1]
+		if data_delta > delta:
+			break
+		target_elapsed += data_delta
+	$HBoxContainer2/HSlider.value = elapsed / total_duration
+	var mins := floori(elapsed / 60)
+	var secs := floori(elapsed) % 60
+	
+	if !$HBoxContainer2/PlayTime.has_focus():
+		if secs < 10:
+			$HBoxContainer2/PlayTime.text = \"%s:0%s\" % [mins, secs]
+		else:
+			$HBoxContainer2/PlayTime.text = \"%s:%s\" % [mins, secs]
+"
+
+[sub_resource type="GDScript" id="GDScript_mnw3m"]
+script/source = "extends SubViewportContainer
+
+
+const MOUSE_SENSITIVITY := 5.0
+
+var pressed := false
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		if !pressed:
+			return
+		event.relative /= -Vector2(get_viewport().size)
+		event.relative *= MOUSE_SENSITIVITY
+		$SubViewport/Node3D.global_rotate(Vector3.UP, event.relative.x)
+		$SubViewport/Node3D.rotate_object_local(Vector3.RIGHT, event.relative.y)
+	elif event is InputEventMouseButton:
+		if event.button_index != MOUSE_BUTTON_LEFT:
+			return
+		pressed = event.pressed
+"
+
+[sub_resource type="BoxMesh" id="BoxMesh_0laka"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7fexe"]
+albedo_color = Color(0.027451, 0.0235294, 0.0627451, 1)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_hrbaw"]
+material = SubResource("StandardMaterial3D_7fexe")
+size = Vector2(20, 20)
+
+[sub_resource type="Environment" id="Environment_bvywr"]
+background_mode = 1
+background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
+
+[node name="Main" type="TabContainer"]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+theme_override_styles/panel = SubResource("StyleBoxEmpty_f0mli")
 script = SubResource("GDScript_45865")
 
-[node name="Control" type="Control" parent="."]
+[node name="Controller" type="HSplitContainer" parent="."]
+visible = false
+layout_mode = 2
+theme_override_constants/autohide = 0
+split_offset = 400
+
+[node name="Control" type="Control" parent="Controller"]
 layout_mode = 2
 
-[node name="VBoxContainer3" type="VBoxContainer" parent="Control"]
+[node name="VBoxContainer3" type="VBoxContainer" parent="Controller/Control"]
 layout_mode = 1
-offset_right = 40.0
-offset_bottom = 40.0
+anchors_preset = -1
+anchor_right = 1.0
+offset_left = 10.0
+offset_top = 10.0
 
-[node name="ImportantData" type="Label" parent="Control/VBoxContainer3"]
+[node name="ImportantData" type="Label" parent="Controller/Control/VBoxContainer3"]
 layout_mode = 2
+size_flags_horizontal = 0
 text = "Not Connected"
 script = SubResource("GDScript_wemvy")
 
-[node name="LastReceived" type="Label" parent="Control/VBoxContainer3"]
+[node name="LastReceived" type="Label" parent="Controller/Control/VBoxContainer3"]
 layout_mode = 2
+size_flags_horizontal = 0
 text = "Last Received:"
 script = SubResource("GDScript_yu1su")
 
-[node name="VBoxContainer2" type="VBoxContainer" parent="Control"]
-layout_mode = 1
-anchors_preset = -1
-anchor_right = 0.7
-anchor_bottom = 1.0
+[node name="MarginContainer" type="MarginContainer" parent="Controller"]
+layout_mode = 2
+theme_override_constants/margin_left = 5
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
 
-[node name="VBoxContainer" type="VBoxContainer" parent="Control"]
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.7
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 0
+[node name="VBoxContainer" type="VBoxContainer" parent="Controller/MarginContainer"]
+layout_mode = 2
 
-[node name="TextureRect" type="TextureRect" parent="Control/VBoxContainer"]
+[node name="TextureRect" type="TextureRect" parent="Controller/MarginContainer/VBoxContainer"]
 custom_minimum_size = Vector2(0, 200)
 layout_mode = 2
 texture = SubResource("GradientTexture2D_adsri")
@@ -222,33 +380,33 @@ expand_mode = 5
 stretch_mode = 5
 script = SubResource("GDScript_67ds2")
 
-[node name="HBoxContainer" type="HBoxContainer" parent="Control/VBoxContainer"]
+[node name="HBoxContainer" type="HBoxContainer" parent="Controller/MarginContainer/VBoxContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="EnableCamera" type="Button" parent="Control/VBoxContainer/HBoxContainer"]
+[node name="EnableCamera" type="Button" parent="Controller/MarginContainer/VBoxContainer/HBoxContainer"]
 layout_mode = 2
 disabled = true
 text = "Enable Camera"
 script = SubResource("GDScript_amk46")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="Control/VBoxContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="Controller/MarginContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
 alignment = 2
 
-[node name="AspectRatioContainer" type="AspectRatioContainer" parent="Control/VBoxContainer/VBoxContainer"]
+[node name="AspectRatioContainer" type="AspectRatioContainer" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
 alignment_vertical = 2
 
-[node name="TextureRect" type="TextureRect" parent="Control/VBoxContainer/VBoxContainer/AspectRatioContainer"]
+[node name="TextureRect" type="TextureRect" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer"]
 layout_mode = 2
 mouse_filter = 0
 texture = SubResource("GradientTexture2D_lspd7")
 script = SubResource("GDScript_aogjq")
 
-[node name="CenterContainer" type="CenterContainer" parent="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect"]
+[node name="CenterContainer" type="CenterContainer" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -256,15 +414,102 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Label" type="Label" parent="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect/CenterContainer"]
+[node name="Label" type="Label" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect/CenterContainer"]
 layout_mode = 2
 text = "Click to Drive"
 
-[node name="Connected" type="AudioStreamPlayer" parent="."]
-stream = ExtResource("1_hl7kb")
+[node name="3D Player" type="VBoxContainer" parent="."]
+layout_mode = 2
+script = SubResource("GDScript_ggpmf")
+
+[node name="AspectRatioContainer" type="AspectRatioContainer" parent="3D Player"]
+layout_mode = 2
+size_flags_vertical = 3
+ratio = 1.8
+
+[node name="SubViewportContainer" type="SubViewportContainer" parent="3D Player/AspectRatioContainer"]
+layout_mode = 2
+focus_mode = 1
+stretch = true
+script = SubResource("GDScript_mnw3m")
+
+[node name="SubViewport" type="SubViewport" parent="3D Player/AspectRatioContainer/SubViewportContainer"]
+handle_input_locally = false
+size = Vector2i(628, 348)
+render_target_update_mode = 4
+
+[node name="Robot" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+rotation_order = 4
+mesh = SubResource("BoxMesh_0laka")
+
+[node name="RemoteTransform3D" type="RemoteTransform3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/Robot"]
+remote_path = NodePath("../../Node3D")
+update_rotation = false
+update_scale = false
+
+[node name="Node3D" type="Node3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
+transform = Transform3D(0.747033, -0.309606, 0.588291, 0, 0.884931, 0.465723, -0.664787, -0.34791, 0.661072, 0, 0, 0)
+
+[node name="Camera3D" type="Camera3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 2.80699)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.81442, 0)
+mesh = SubResource("PlaneMesh_hrbaw")
+
+[node name="Decal" type="Decal" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/MeshInstance3D"]
+size = Vector3(15, 1, 15)
+texture_albedo = ExtResource("1_1xyvq")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
+transform = Transform3D(0.243107, -0.860673, 0.44737, 3.6215e-11, 0.461207, 0.887293, -0.969999, -0.215707, 0.112123, 0, 1.80059, 0)
+shadow_enabled = true
+directional_shadow_mode = 1
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
+environment = SubResource("Environment_bvywr")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="3D Player"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="Button" type="Button" parent="3D Player/HBoxContainer"]
+layout_mode = 2
+text = "Open File"
+
+[node name="Label" type="Label" parent="3D Player/HBoxContainer"]
+layout_mode = 2
+
+[node name="HBoxContainer2" type="HBoxContainer" parent="3D Player"]
+layout_mode = 2
+
+[node name="Play" type="Button" parent="3D Player/HBoxContainer2"]
+layout_mode = 2
+disabled = true
+toggle_mode = true
+text = "Play"
+
+[node name="PlayTime" type="LineEdit" parent="3D Player/HBoxContainer2"]
+layout_mode = 2
+text = "0:00"
+editable = false
+
+[node name="HSlider" type="HSlider" parent="3D Player/HBoxContainer2"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 1.0
+step = 0.001
+editable = false
 
 [node name="Disconnected" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("2_kejy0")
 
-[connection signal="pressed" from="Control/VBoxContainer/HBoxContainer/EnableCamera" to="Control/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
-[connection signal="mouse_exited" from="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" to="Control/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" method="_on_mouse_exited"]
+[node name="Connected" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("1_hl7kb")
+
+[connection signal="pressed" from="Controller/MarginContainer/VBoxContainer/HBoxContainer/EnableCamera" to="Controller/MarginContainer/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
+[connection signal="mouse_exited" from="Controller/MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" to="Controller/MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" method="_on_mouse_exited"]
+[connection signal="pressed" from="3D Player/HBoxContainer/Button" to="3D Player" method="_on_open_file_pressed"]
+[connection signal="toggled" from="3D Player/HBoxContainer2/Play" to="3D Player" method="_on_play_toggled"]
