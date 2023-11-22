@@ -1,8 +1,9 @@
 # lunadev-2024
 
-This is the official workspace for the software team for Utah Student Robotics for the NASA Lunabotics 2024 competition.
+This is the official workspace for the software team for Utah Student Robotics for the NASA Lunabotics 2024 competition.  
+If you are a student (ie. not an active contributor) you will find more value on the [wiki](https://github.com/utahrobotics/lunadev-2024/wiki) page.
 
-## Where to start
+## Quickstart
 
 You will need Visual Studio Code (We'll call it VSCode).
 
@@ -19,29 +20,13 @@ After connecting, VSCode may ask you to type in your password very frequently. S
 
 If you use the VSCode SSH extension, you can then follow the first set of steps with DevContainers just like normal. Only this time, your Dev Container will have access to all the sensors we will use.
 
-## VNC
+## Cargo
 
-VNC is a very useful feature that allows Lunadev to share its screen with you so that you can run regular applications, such as RViz2. [Refer to the guide here.](https://github.com/utahrobotics/lunadev-2024/tree/main/lunadev)
+Every external dependency needed to run the code in lunadev-2024 on Lunaserver is already installed globally, with the exception of Rust itself, as it can only be installed for individual users. To install Rust, run the following command in Lunaserver:  
+`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`  
+and select the default options.
 
-# DevContainers
-`git clone` this repository and open it with VSCode. VSCode will then ask if you want to install the recommended extensions. In case that does not happen or you missed it, you only need 1 extension: DevContainers.
-This [guide to installing DevContainers](https://code.visualstudio.com/docs/devcontainers/tutorial) will also help you with Docker. Remember, you install this through VSCode.
+## What about a display?
 
-Assuming that the extension is installed, you will see a notification at the bottom right of the screen asking if you would like to open the repository in the container.
-If you missed that, refer back to the guide for DevContainers to see how to do that. Now, you can start developing locally. To make the development process easier for you guys, I configured our code to run with privileged access.
-This means that any code you run here has the possiblity to mess up the computer it is running on. As such, *please do not run code from untrusted sources*. As long as you don't copy code from sketchy websites, you should be good.
-
-If you do not want to use Lunaserver for whatever reason, such as experimenting with your own hardware, you will most likely need to download Docker Desktop (if you are on Linux, you only need to install Docker). After running it, you can just follow the above instructions on your own computer. Fair warning, connecting to USB devices from inside a DevContainer running on a Windows computer can be quite a pain. [Here is a guide for that](https://devblogs.microsoft.com/commandline/connecting-usb-devices-to-wsl/). Your best bet is to just use Lunaserver.
-
-## Troubleshooting DevContainers
-
-If you can't open this repository using DevContainers on your own computer, I can really only offer two pieces advice without seeing the error logs:
-
-1. Check that Docker Desktop is running
-2. Check that you are connected to the internet
-
-If you did both, send me a message and we'll work it through.
-
-## Wiki
-
-There is a [wiki](https://github.com/utahrobotics/lunadev-2024/wiki) for this repository that contains lots of useful information. Please read through it if you want to contribute effectively.
+I am actively working on finding a solution that will allow multiple people to have separate displays into Lunaserver without devcontainers.  
+If you need a display soon, please let me know as there are temporary solutions.
