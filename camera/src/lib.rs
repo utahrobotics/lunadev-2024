@@ -1,6 +1,6 @@
 //! This crate provides a node that can connect to any generic
 //! color camera. This crate is cross-platform.
-//! 
+//!
 //! Do note that this crate should not be expected to connect
 //! to RealSense cameras.
 
@@ -20,7 +20,7 @@ use unros_core::{
 };
 
 /// A pending connection to a camera.
-/// 
+///
 /// The connection is not created until this `Node` is ran.
 pub struct Camera {
     pub fps: u32,

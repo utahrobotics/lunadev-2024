@@ -159,14 +159,14 @@ static_assertions::assert_impl_all!(WatchedSubscription<()>: Send, Sync);
 
 impl<T: 'static> WatchedSubscription<T> {
     /// Creates a subscription that will never be updated.
-    /// 
+    ///
     /// None subscriptions are considered closed.
     pub fn none() -> Self {
         Self { recv: None }
     }
 
     /// Gets the current value in this subscription.
-    /// 
+    ///
     /// If the `Signal` has yet to produce a message,
     /// this method will wait until one is produced.
     /// If the `Signal` is dropped before a message is
@@ -187,7 +187,7 @@ impl<T: 'static> WatchedSubscription<T> {
     }
 
     /// Waits for the `Signal` to be changed.
-    /// 
+    ///
     /// If the `Signal` is dropped, this method will wait
     /// forever.
     pub async fn wait_for_change(&mut self) -> T {
@@ -200,7 +200,7 @@ impl<T: 'static> WatchedSubscription<T> {
     }
 
     /// Gets the current value in this subscription.
-    /// 
+    ///
     /// If the `Signal` has yet to produce a message,
     /// this method will return `None`.
     /// If the `Signal` is dropped before a message is
@@ -232,7 +232,7 @@ impl<T: 'static> WatchedSubscription<T> {
     }
 
     /// Zips this subscription with the other given subscription.
-    /// 
+    ///
     /// Only one of the subscriptions have to identify a change for the
     /// whole subscription to be considered changed.
     pub fn zip<B>(self, other: WatchedSubscription<B>) -> WatchedSubscription<(T, B)>

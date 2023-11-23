@@ -8,9 +8,7 @@ use nalgebra::Vector3;
 use navigator::{pid, WaypointDriver};
 use positioning::{eskf, OrientationFrame, PositionFrame, Positioner};
 use realsense::discover_all_realsense;
-use unros_core::{
-    anyhow, async_run_all, default_run_options, dump::DataDump, init_logger, tokio,
-};
+use unros_core::{anyhow, async_run_all, default_run_options, dump::DataDump, init_logger, tokio};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -1,12 +1,12 @@
 //! Unros is an experimental alternative to the ROS 1 & 2 frameworks.
-//! 
+//!
 //! It is written from the ground up in Rust and seeks to replicate most
 //! of the common functionality in ROS while adding some extra features
 //! that exploit Rust's abilities.
-//! 
+//!
 //! This crate contains the core functionality which defines what this
 //! framework offers:
-//! 
+//!
 //! 1. The Node trait
 //! 2. A complete logging system
 //! 3. An asynchronous Node runtime
@@ -47,18 +47,18 @@ use tokio::{
 pub use tokio_rayon::{self, rayon};
 
 /// A Node just represents a long running task.
-/// 
+///
 /// Nodes are only required to run once, and may terminate at any point in time.
 /// Nodes in ROS also serve as forms of isolation. If a thread faces an exception
 /// while running code in ROS, other code in the same thread will stop executing.
 /// Developers would then segment their code into nodes such that each node could
 /// operate in a different thread.
-/// 
+///
 /// Rust allows developers to make stronger guarantees regarding when and where
 /// their code will panic. As such, Nodes are expected to never panic. Instead,
 /// they must return an `anyhow::Error` when facing an unrecoverable error, or
 /// log using the `error!` macro if normal functionality can be continued.
-/// 
+///
 /// In the event that a Node panics, the thread running the node will not be taken
 /// down, nor will any other node. An error message including the name of the node
 /// that panicked will be logged. Even so, panics should be avoided.
@@ -67,10 +67,10 @@ pub trait Node: Send + 'static {
     const DEFAULT_NAME: &'static str;
 
     /// The entry point of the node.
-    /// 
+    ///
     /// Nodes are always expected to be asynchronous, as asynchronous code is much
     /// easier to manage.
-    /// 
+    ///
     /// If a node needs to run blocking code, it is recommended to use `tokio_rayon::spawn`
     /// instead of `rayon::spawn` or `std::thread::spawn`, as `tokio_rayon` allows you
     /// to await the spawned thread in a non-blocking way. If you spawn a thread and do not
@@ -78,7 +78,7 @@ pub trait Node: Send + 'static {
     /// While this is not unsafe or incorrect, it can lead to misleading logs. Unros automatically
     /// logs all nodes whose `run` methods have returned as terminated, even if they have spawned
     /// threads that are still running.
-    /// 
+    ///
     /// Do keep in mind that `tokio_rayon` threads do not terminate if their handles are dropped,
     /// which relates back to the issue previously mentioned.
     async fn run(self, context: RuntimeContext) -> anyhow::Result<()>;
@@ -117,7 +117,7 @@ where
 }
 
 /// A reference to the runtime that is currently running.
-/// 
+///
 /// The typical way of receiving this is through the `run` method
 /// of `Node`. As such, the runtime in question is the runtime that
 /// is currently running the node.
@@ -144,7 +144,7 @@ struct RunError {
 }
 
 /// A node that has been boxed up and is ready to run.
-/// 
+///
 /// Finalized nodes may be added together such that they run
 /// as a group. When one node in a group terminates, all other
 /// nodes terminate. If one of these other nodes are critical,
@@ -172,7 +172,7 @@ impl<N: Node> From<N> for FinalizedNode {
 
 impl FinalizedNode {
     /// Box up the given node.
-    /// 
+    ///
     /// The given name will be used as the name of the node.
     pub fn new<N: Node>(node: N, name: Option<String>) -> Self {
         let name = name.unwrap_or_else(|| N::DEFAULT_NAME.into());
@@ -197,7 +197,7 @@ impl FinalizedNode {
     }
 
     /// Sets the `critical` flag of the node.
-    /// 
+    ///
     /// Critical nodes terminate the whole runtime when they terminate.
     pub fn set_critical(&mut self, value: bool) {
         self.critical = value;
@@ -287,13 +287,13 @@ impl Add for FinalizedNode {
 #[derive(Deserialize)]
 pub struct RunOptions {
     /// The name of this runtime.
-    /// 
+    ///
     /// This changes what the sub-logging directory name is.
     #[serde(default)]
     pub runtime_name: String,
 
     /// Whether or not auxilliary control should be enabled.
-    /// 
+    ///
     /// Auxilliary control is a way for the current runtime
     /// to be controlled externally, such as from another program.
     /// This is typically used to terminate the runtime remotely
@@ -308,11 +308,11 @@ fn default_auxilliary_control() -> bool {
 }
 
 /// Creates a default `RunOptions`.
-/// 
+///
 /// This macro was created instead of implementing `Default`
 /// so that the crate calling this macro can have its name
 /// used as the `runtime_name`.
-/// 
+///
 /// By default, `auxilliary_control` is `true`.
 #[macro_export]
 macro_rules! default_run_options {
@@ -325,7 +325,7 @@ macro_rules! default_run_options {
 }
 
 /// Sets up a locally available set of logging macros.
-/// 
+///
 /// The `log` crate allows users to configure the `target`
 /// parameter of a log, allowing developers to better filter
 /// messages by file. Unros takes this one step further by
@@ -371,7 +371,7 @@ macro_rules! setup_logging {
 static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Initializes the default logging implementation.
-/// 
+///
 /// This is called automatically in `run_all` and `async_run_all`, but
 /// there may be additional logs produced before these methods that would
 /// be ignored if the logger was not set up yet. As such, you may call this
@@ -452,11 +452,11 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
 }
 
 /// The entry point of the runtime itself.
-/// 
+///
 /// This function automatically starts up a `tokio` runtime.
 /// As such, this method should not be called within a `tokio`
 /// runtime, or any `async` code in general.
-/// 
+///
 /// Refer to `async_run_all` for more info.
 #[tokio::main]
 pub async fn run_all(
@@ -480,11 +480,11 @@ impl Drop for LastDrop {
 }
 
 /// The entry point of the runtime itself.
-/// 
+///
 /// This function runs all of the provided `FinalizedNode`s
 /// in parallel, according to the given `RunOptions`. A
 /// logging implementation will be initialized if not present.
-/// 
+///
 /// This function only returns `Ok(())` if `Ctrl-C` was received,
 /// or an auxilliary stop signal was received. In either case,
 /// this method always attempts to exit gracefully. It will signal
@@ -492,7 +492,7 @@ impl Drop for LastDrop {
 /// varies based on the actual implementations of these `Node`s. Since
 /// this method waits on all `Node`s to exit, if one `Node` refuses to
 /// terminate, this method will never return gracefully.
-/// 
+///
 /// Receiving a second stop signal from `Ctrl-C` or auxilliary will force
 /// exit the program. All threads other than the main thread will not exit
 /// gracefully (all objects in their stacks will not be dropped), but objects
