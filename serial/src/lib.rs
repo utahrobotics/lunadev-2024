@@ -29,15 +29,11 @@ pub struct SerialConnection {
 
 impl SerialConnection {
     /// Creates a pending connection to a serial port.
-    /// 
+    ///
     /// The connection is not actually made until this node is ran.
     /// If `tolerate_error` is `true`, then errors are ignored and
     /// actions are retried.
-    pub async fn new<'a>(
-        path: String,
-        baud_rate: u32,
-        tolerate_error: bool,
-    ) -> Self {
+    pub async fn new<'a>(path: String, baud_rate: u32, tolerate_error: bool) -> Self {
         Self {
             path: path.into_boxed_str().into(),
             baud_rate,
@@ -198,7 +194,7 @@ pub struct VescConnection {
 
 impl VescConnection {
     /// Wraps the given `SerialConnection` with the `VESC` protocol.
-    /// 
+    ///
     /// The given `SerialConnection` should not have any subscriptions.
     pub fn new(serial: SerialConnection) -> Self {
         Self {
@@ -209,14 +205,14 @@ impl VescConnection {
     }
 
     /// Provide a subscription for the current level.
-    /// 
+    ///
     /// This will replace the last subscription provided.
     pub fn connect_current_from(&mut self, sub: WatchedSubscription<u32>) {
         self.current = sub;
     }
 
     /// Provide a subscription for the duty cycle.
-    /// 
+    ///
     /// This will replace the last subscription provided.
     pub fn connect_duty_from(&mut self, sub: WatchedSubscription<u32>) {
         self.duty = sub;

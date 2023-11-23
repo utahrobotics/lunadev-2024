@@ -39,7 +39,7 @@ pub struct IMUFrame {
 
 /// A Node that can digest multiple streams of spatial input to
 /// determine where an object is in global space.
-/// 
+///
 /// Processing does not occur until the node is running.
 pub struct Positioner {
     /// The builder for the Error-State Kalman Filter
@@ -70,21 +70,21 @@ impl Default for Positioner {
 
 impl Positioner {
     /// Provide an imu subscription.
-    /// 
+    ///
     /// Some messages may be skipped if there are too many.
     pub fn add_imu_sub(&mut self, sub: UnboundedSubscription<IMUFrame>) {
         self.imu_sub += sub;
     }
 
     /// Provide a position subscription.
-    /// 
+    ///
     /// Some messages may be skipped if there are too many.
     pub fn add_position_sub(&mut self, sub: UnboundedSubscription<PositionFrame>) {
         self.position_sub += sub;
     }
 
     /// Provide an orientation subscription.
-    /// 
+    ///
     /// Some messages may be skipped if there are too many.
     pub fn add_orientation_sub(&mut self, sub: UnboundedSubscription<OrientationFrame>) {
         self.orientation_sub += sub;

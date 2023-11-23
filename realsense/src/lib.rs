@@ -1,6 +1,6 @@
 //! This crate provides a node that can connect to RealSense cameras and interpret
 //! depth and color images.
-//! 
+//!
 //! Unfortunately, this crate depends on the RealSense SDK. If you do not have this
 //! SDK, remove this crate from the workspace.
 
@@ -8,7 +8,8 @@ use std::{
     collections::HashSet,
     ops::Deref,
     path::Path,
-    sync::{Arc, Mutex}, time::{Duration, Instant},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use image::{DynamicImage, ImageBuffer, Rgb};
@@ -45,12 +46,12 @@ pub struct RealSenseCamera {
     rigid_body_ref: RigidBodyRef,
     /// How much to spend at startup calibrating the
     /// camera.
-    /// 
+    ///
     /// For now, only the acceleration is calibrated.
     /// It is assumed that the camera is not moving
     /// at startup, and the only acceleration occuring
     /// is from gravity, which has a magnitude of 9.81 m/s^2.
-    pub calibration_time: Duration
+    pub calibration_time: Duration,
 }
 
 impl RealSenseCamera {
@@ -64,7 +65,7 @@ impl RealSenseCamera {
             image_received: Default::default(),
             imu_frame_received: Default::default(),
             rigid_body_ref: RigidBodyRef::Static(StaticRigidBodyRef::identity("realsense")),
-            calibration_time: Duration::from_secs(3)
+            calibration_time: Duration::from_secs(3),
         })
     }
 
@@ -74,7 +75,7 @@ impl RealSenseCamera {
     }
 
     /// Gets a reference to the `Signal` that represents received imu frames.
-    /// 
+    ///
     /// IMU frames are in global space, according to the rigid body
     /// provided to the RealSense camera.
     pub fn imu_frame_received(&mut self) -> SignalRef<IMUFrame> {
@@ -82,10 +83,10 @@ impl RealSenseCamera {
     }
 
     /// Sets the rigid body that represents this camera.
-    /// 
+    ///
     /// Images are assumed to be captured from this rigid body, and the
     /// RealSense IMU is assumed to be relative to this rigid body.
-    /// 
+    ///
     /// This will replace the last rigid body that was provided.
     pub fn set_rigid_body_ref(&mut self, rigid_body_ref: RigidBodyRef) {
         self.rigid_body_ref = rigid_body_ref;
@@ -190,7 +191,7 @@ impl Node for RealSenseCamera {
                     let accel = frame.acceleration();
                     last_accel = self.rigid_body_ref.get_global_isometry_f32().rotation
                         * Vector3::new(accel[0], accel[1], accel[2]);
-                    
+
                     if calibrating {
                         accel_sum += last_accel;
                         accel_count += 1;
@@ -225,6 +226,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         image_received: Default::default(),
         imu_frame_received: Default::default(),
         rigid_body_ref: RigidBodyRef::Static(StaticRigidBodyRef::identity("realsense")),
-        calibration_time: Duration::from_secs(5)
+        calibration_time: Duration::from_secs(5),
     }))
 }

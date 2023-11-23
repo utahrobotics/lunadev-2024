@@ -1,5 +1,5 @@
 //! Signals are an essential component of many frameworks in many different disciplines.
-//! 
+//!
 //! This is one of the aspects taken from `ROS` that have been greatly improved. We offer
 //! an `API` for signals that is more similar to `Rust`'s iterators. Signals are analagous
 //! to `Rust`'s channels in that they do not trigger code, unlike `ROS` subscriber callbacks.
@@ -177,7 +177,7 @@ impl<T> Default for Signal<T> {
 
 impl<T: Clone> Signal<T> {
     /// Gets a mutable reference to the signal.
-    /// 
+    ///
     /// It is through this reference that you can make subscriptions.
     pub fn get_ref(&mut self) -> SignalRef<T> {
         SignalRef(self)
@@ -207,7 +207,7 @@ impl<T: Clone> Signal<T> {
 }
 
 /// A mutable reference to a signal.
-/// 
+///
 /// This is the only way to make subscriptions to a signal.
 /// This approach was used to reduce the odds of code outside
 /// of the code owning a `Signal` having a direct reference
@@ -218,7 +218,7 @@ pub struct SignalRef<'a, T>(&'a mut Signal<T>);
 impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
     /// Create an unbounded subscription to the `Signal` that stores
     /// all sent messages until they are read.
-    /// 
+    ///
     /// If you cannot guarantee that you can read from this subscription
     /// faster than messages are sent, you should not use this subscription
     /// as it will eat up memory.
@@ -234,7 +234,7 @@ impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
 
     /// Create an bounded subscription to the `Signal` that stores
     /// a limited number of messages (the `SIZE` const parameter)
-    /// 
+    ///
     /// If you cannot guarantee that you can read from this subscription
     /// faster than messages are sent, you should use this subscription
     /// as it will prevent newer messages from entering. As a result, this
@@ -258,7 +258,7 @@ impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
     }
 
     /// Create a subscription that only tracks the latest value.
-    /// 
+    ///
     /// This is generally the most performant option as it will never use
     /// up a lot of memory when many messages are incoming but not many reads
     /// are occurring.

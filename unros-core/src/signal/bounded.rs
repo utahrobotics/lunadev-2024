@@ -18,7 +18,7 @@ static_assertions::assert_impl_all!(BoundedSubscription<(), 1>: Send, Sync);
 
 impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
     /// Creates a subscription that will never produce a message.
-    /// 
+    ///
     /// None subscriptions are considered closed.
     pub fn none() -> Self {
         Self {
@@ -29,8 +29,11 @@ impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
 
     /// Waits for a message to be sent, unless the `Signal` has been dropped.
     pub async fn recv_ex(&mut self) -> Option<Result<T, u64>> {
-        let mut futures: FuturesUnordered<_> =
-            self.receivers.iter_mut().map(|x| x.recv_or_closed()).collect();
+        let mut futures: FuturesUnordered<_> = self
+            .receivers
+            .iter_mut()
+            .map(|x| x.recv_or_closed())
+            .collect();
 
         let Some(x) = futures.next().await else {
             std::future::pending::<()>().await;
@@ -40,7 +43,7 @@ impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
     }
 
     /// Waits for a message to be sent, regardless of the state of the `Signal`.
-    /// 
+    ///
     /// If the `Signal` was dropped, this method will never return. This was
     /// considered to be an acceptable abstraction as `Node`s should have a
     /// limited view of the outside world, which includes not knowing if a
@@ -57,7 +60,7 @@ impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
     }
 
     /// Tries to receive a single value from the `Signal`.
-    /// 
+    ///
     /// Returns `None` if there are no messages right now
     /// or the `Signal` is closed.
     pub fn try_recv(&mut self) -> Option<Result<T, u64>> {
@@ -92,7 +95,7 @@ impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
     }
 
     /// Converts this subscription to a `WatchedSubscription`.
-    /// 
+    ///
     /// This is a useful technique to simulate adding `WatchedSubscription`s
     /// together, since `WatchedSubscription`s cannot be added together once
     /// created. You can first add multiple `BoundedSubscriptions` together,

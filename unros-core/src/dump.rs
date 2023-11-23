@@ -1,6 +1,6 @@
 //! Data dumps are an alternative way of logging that is more suited to
 //! large collections of data.
-//! 
+//!
 //! Data dumps offer a way to write data to some location such that the
 //! code producing the data does not get blocked by writing. If the write
 //! is queued successfully, then the write is guaranteed to occur, as long
@@ -29,12 +29,12 @@ struct DataDumpInner {
 
 /// A handle to the Data Dump thread that handles all writes
 /// to a location.
-/// 
+///
 /// This struct implements the blocking `Write` interface as provided
 /// by `Rust`, instead of the non-blocking `AsyncWrite` offered by `tokio`.
 /// However, writes are guaranteed to be non-blocking and thus safe to use in
 /// async code.
-/// 
+///
 /// # Note
 /// A default `DataDump` does not write to any location. It is equivalent to `sink()`.
 #[derive(Default)]
@@ -42,9 +42,9 @@ pub struct DataDump(Option<DataDumpInner>);
 
 impl DataDump {
     /// Create a `DataDump` that writes to the given path.
-    /// 
+    ///
     /// For logging purposes, the filename is used as the name of the dump.
-    /// 
+    ///
     /// # Note
     /// If the given path is relative, it will be considered relative to the
     /// sub-logging directory. If a logging implementation has not been initialized
@@ -64,7 +64,7 @@ impl DataDump {
     }
 
     /// Create a `DataDump` that writes to the network address.
-    /// 
+    ///
     /// For logging purposes, the address is used as the name of the dump.
     pub async fn new_tcp(addr: SocketAddr) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
@@ -72,7 +72,7 @@ impl DataDump {
     }
 
     /// Create a `DataDump` that writes to the given writer.
-    /// 
+    ///
     /// For logging purposes, the given name is used as the name of the dump.
     pub fn new<A>(mut writer: A, name: impl Into<String>) -> std::io::Result<Self>
     where

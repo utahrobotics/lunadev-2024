@@ -17,7 +17,7 @@ static_assertions::assert_impl_all!(UnboundedSubscription<()>: Send, Sync);
 
 impl<T: Send + 'static> UnboundedSubscription<T> {
     /// Creates a subscription that will never produce a message.
-    /// 
+    ///
     /// None subscriptions are considered closed.
     pub fn none() -> Self {
         Self {
@@ -28,14 +28,17 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
 
     /// Waits for a message to be sent, unless the `Signal` has been dropped.
     pub async fn recv_or_closed(&mut self) -> Option<T> {
-        let mut futures: FuturesUnordered<_> =
-            self.receivers.iter_mut().map(|x| x.recv_or_closed()).collect();
+        let mut futures: FuturesUnordered<_> = self
+            .receivers
+            .iter_mut()
+            .map(|x| x.recv_or_closed())
+            .collect();
 
         futures.next().await.unwrap_or_default()
     }
 
     /// Waits for a message to be sent, regardless of the state of the `Signal`.
-    /// 
+    ///
     /// If the `Signal` was dropped, this method will never return. This was
     /// considered to be an acceptable abstraction as `Node`s should have a
     /// limited view of the outside world, which includes not knowing if a
@@ -52,7 +55,7 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
     }
 
     /// Tries to receive a single value from the `Signal`.
-    /// 
+    ///
     /// Returns `None` if there are no messages right now
     /// or the `Signal` is closed.
     pub fn try_recv(&mut self) -> Option<T> {
@@ -87,7 +90,7 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
     }
 
     /// Converts this subscription to a `WatchedSubscription`.
-    /// 
+    ///
     /// This is a useful technique to simulate adding `WatchedSubscription`s
     /// together, since `WatchedSubscription`s cannot be added together once
     /// created. You can first add multiple `UnboundedSubscriptions` together,
@@ -110,7 +113,7 @@ impl<T: Send + 'static> UnboundedSubscription<T> {
     }
 
     /// Zips this subscription with the other given subscription.
-    /// 
+    ///
     /// This is equivalent to the zipping iterators.
     pub fn zip<B>(mut self, other: UnboundedSubscription<B>) -> UnboundedSubscription<(T, B)>
     where
