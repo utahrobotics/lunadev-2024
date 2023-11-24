@@ -15,9 +15,9 @@ use tokio::sync::{mpsc, watch};
 pub mod joints;
 
 /// The order with which a set of euler angles should be applied.
-/// 
+///
 /// This is usually provided alongside the euler angles themselves.
-/// 
+///
 /// The default rotation sequence for this crate is YXZ. When used with
 /// intrinsic rotation, it most accurately depicts human head rotation
 /// and is used in many places, especially turrets. In words, this order
@@ -66,9 +66,9 @@ impl Into<quaternion_core::RotationSequence> for RotationSequence {
 }
 
 /// The type of rotation that a set of euler angles are describing.
-/// 
+///
 /// This is usually provided alongside the euler angles themselves.
-/// 
+///
 /// Intrinsic rotations mean that the axes of rotation - x, y, z -
 /// are rotated by the previous rotation in the sequence. For example,
 /// if we are following YXZ sequence, we first rotate along the global
@@ -77,11 +77,11 @@ impl Into<quaternion_core::RotationSequence> for RotationSequence {
 /// then finally rotate by the z-axis, which was rotated by the y and x axis.
 /// This is usually the most intuitive and common form of rotation and thus
 /// is the default in this crate.
-/// 
+///
 /// Extrinsic rotations simply mean that the axes of rotation - x, y, z -
 /// themselves do not rotate. If we follow YXZ sequence, we first rotate along
 /// the global y, then global x, then global z.
-/// 
+///
 /// Properly distinguishing between these two is critical for implementing
 /// rotations correctly, and this property must not be overlooked.
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -123,11 +123,6 @@ pub struct PendingRobotElement {
 
 #[derive(Deserialize, Serialize)]
 pub struct Robot {
-    // #[serde(skip)]
-    // isometry: AtomicCell<Isometry3<f64>>,
-    pub fixed_translation: bool,
-    pub fixed_rotation: bool,
-
     pub children: FxHashMap<Box<str>, PendingRobotElement>,
 }
 
@@ -140,10 +135,9 @@ impl Robot {
         let base_element = RobotBase(Arc::new(RobotBaseInner {
             isometry: Default::default(),
             linear_velocity: Default::default(),
-            sender: watch::channel(()).0
+            sender: watch::channel(()).0,
         }));
-        let mut existing_robot_elements: FxHashMap<_, Arc<IsometryAndJoint>> =
-            FxHashMap::default();
+        let mut existing_robot_elements: FxHashMap<_, Arc<IsometryAndJoint>> = FxHashMap::default();
         let mut chain = Vec::new();
 
         for element_path in element_paths {
@@ -203,15 +197,16 @@ impl Robot {
                     .ok_or_else(|| anyhow::anyhow!("Missing element: {element_path}"))?;
             }
 
-            out.insert(
+            if out.insert(
                 element_path,
                 RobotElement(Arc::new(RobotElementInner {
                     chain: chain.drain(..).collect(),
                     reference: base_element.get_ref(),
                     receiver: receiver.into(),
                 })),
-            )
-            .ok_or_else(|| anyhow::anyhow!("Duplicate element: {element_path}"))?;
+            ).is_some() {
+                return Err(anyhow::anyhow!("Duplicate element: {element_path}"));
+            }
         }
 
         Ok((out, base_element))
@@ -300,14 +295,21 @@ impl RobotElementRef {
     }
 
     pub async fn wait_for_change(&self) {
-        self.0.0.receiver.lock().await.recv().await.expect("Sender should still be alive");
+        self.0
+             .0
+            .receiver
+            .lock()
+            .await
+            .recv()
+            .await
+            .expect("Sender should still be alive");
     }
 }
 
 struct RobotBaseInner {
     isometry: AtomicCell<Isometry3<f64>>,
     linear_velocity: AtomicCell<Vector3<f64>>,
-    sender: watch::Sender<()>
+    sender: watch::Sender<()>,
 }
 
 /// The base of the robot.
@@ -327,7 +329,7 @@ pub struct RobotBaseRef(RobotBase, watch::Receiver<()>);
 
 impl Clone for RobotBaseRef {
     fn clone(&self) -> Self {
-        Self(RobotBase(self.0.0.clone()), self.1.clone())
+        Self(RobotBase(self.0 .0.clone()), self.1.clone())
     }
 }
 
@@ -346,6 +348,10 @@ impl RobotBase {
     pub fn set_linear_velocity(&self, linear_velocity: Vector3<f64>) {
         self.0.linear_velocity.store(linear_velocity);
         self.0.sender.send_replace(());
+    }
+
+    pub fn get_linear_velocity(&self) -> Vector3<f64> {
+        self.0.linear_velocity.load()
     }
 
     pub fn set_isometry(&self, isometry: Isometry3<f64>) {
@@ -371,7 +377,14 @@ impl RobotBaseRef {
         self.0.get_isometry()
     }
 
+    pub fn get_linear_velocity(&self) -> Vector3<f64> {
+        self.0.get_linear_velocity()
+    }
+
     pub async fn wait_for_change(&mut self) {
-        self.1.changed().await.expect("Sender should not be dropped");
+        self.1
+            .changed()
+            .await
+            .expect("Sender should not be dropped");
     }
 }

@@ -9,11 +9,12 @@ use std::{
     ops::Deref,
     path::Path,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::{Duration, Instant}, ffi::OsStr, os::unix::ffi::OsStrExt,
 };
 
 use image::{DynamicImage, ImageBuffer, Rgb};
-use nalgebra::{UnitQuaternion, Vector3};
+use localization::IMUFrame;
+use nalgebra::Vector3;
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -28,14 +29,6 @@ use unros_core::{
     signal::{Signal, SignalRef},
     tokio_rayon, Node, RuntimeContext,
 };
-
-/// A single frame from an IMU
-#[derive(Clone)]
-pub struct IMUFrame {
-    pub acceleration: Vector3<f32>,
-    pub angular_velocity: Vector3<f32>,
-    pub robot_element: RobotElementRef,
-}
 
 /// A connection to a RealSense Camera.
 pub struct RealSenseCamera {
@@ -74,6 +67,11 @@ impl RealSenseCamera {
         self.image_received.get_ref()
     }
 
+    pub fn get_path(&self) -> &Path {
+        let path = self.device.info(Rs2CameraInfo::Name).expect("Failed to query camera name").to_bytes();
+        Path::new(OsStr::from_bytes(path))
+    }
+
     /// Gets a reference to the `Signal` that represents received imu frames.
     ///
     /// IMU frames are in global space, according to the rigid body
@@ -82,12 +80,14 @@ impl RealSenseCamera {
         self.imu_frame_received.get_ref()
     }
 
-    /// Sets the rigid body that represents this camera.
+    /// Sets the robot element that represents this camera.
     ///
     /// Images are assumed to be captured from this rigid body, and the
-    /// RealSense IMU is assumed to be relative to this rigid body.
+    /// RealSense IMU is assumed to be relative to this rigid body. If a
+    /// robot element was not provided, IMU messages will *not* be produced.
     ///
     /// This will replace the last rigid body that was provided.
+    ///
     pub fn set_robot_element_ref(&mut self, robot_element_ref: RobotElementRef) {
         self.robot_element = Some(robot_element_ref);
     }
@@ -174,30 +174,11 @@ impl Node for RealSenseCamera {
                 };
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
-                    let ang_vel = frame.rotational_velocity();
-                    let (w, [i, j, k]) = quaternion_core::from_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, angles);
-                    let mut ang_vel =
-                        UnitQuaternion::from_axis_angle(&Vector3::x_axis(), ang_vel[0])
-                            * UnitQuaternion::from_axis_angle(&Vector3::y_axis(), ang_vel[1])
-                            * UnitQuaternion::from_axis_angle(&Vector3::z_axis(), ang_vel[2]);
-                    ang_vel = self.rigid_body_ref.get_global_isometry_f32().rotation * ang_vel;
-
-                    let ang_vel = (ang_vel.w, [ang_vel.i, ang_vel.j, ang_vel.k]);
-
-                    last_ang_vel =
-                        to_euler_angles(RotationType::Intrinsic, RotationSequence::XYZ, ang_vel)
-                            .into();
-
-                    self.imu_frame_received.set(IMUFrame {
-                        acceleration: last_accel,
-                        angular_velocity: last_ang_vel,
-                    });
+                    last_ang_vel = nalgebra::convert(Vector3::from(*frame.rotational_velocity()));
                 }
 
                 for frame in frames.frames_of_type::<AccelFrame>() {
-                    let accel = frame.acceleration();
-                    last_accel = self.rigid_body_ref.get_global_isometry_f32().rotation
-                        * Vector3::new(accel[0], accel[1], accel[2]);
+                    last_accel = nalgebra::convert(Vector3::from(*frame.acceleration()));
 
                     if calibrating {
                         accel_sum += last_accel;
@@ -205,16 +186,23 @@ impl Node for RealSenseCamera {
 
                         if start.elapsed() >= self.calibration_time {
                             calibrating = false;
-                            accel_scale = 9.81 / accel_sum.magnitude() * accel_count as f32;
+                            accel_scale = 9.81 / accel_sum.magnitude() * accel_count as f64;
                             debug!("Realsense gravity calibrated");
                         }
                     }
 
-                    self.imu_frame_received.set(IMUFrame {
-                        acceleration: last_accel * accel_scale,
-                        angular_velocity: last_ang_vel,
-                    });
+                    last_accel *= accel_scale;
                 }
+
+                self.imu_frame_received.set(IMUFrame {
+                    acceleration: last_accel,
+                    angular_velocity: last_ang_vel,
+                    rotation_sequence: rig::RotationSequence::XYZ,
+                    rotation_type: rig::RotationType::Intrinsic,
+                    acceleration_variance: Vector3::default() * 0.01,
+                    angular_velocity_variance: Vector3::default() * 0.01,
+                    robot_element: robot_element.clone(),
+                });
             }
         })
         .await
@@ -232,7 +220,7 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         context: context.clone(),
         image_received: Default::default(),
         imu_frame_received: Default::default(),
-        rigid_body_ref: RigidBodyRef::Static(StaticRigidBodyRef::identity("realsense")),
+        robot_element: None,
         calibration_time: Duration::from_secs(5),
     }))
 }

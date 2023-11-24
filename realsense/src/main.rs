@@ -1,4 +1,4 @@
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 
 use realsense::discover_all_realsense;
 use unros_core::{anyhow, async_run_all, default_run_options, tokio, FinalizedNode};

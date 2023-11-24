@@ -12,4 +12,7 @@ realsense = { path = "../realsense" }
 navigator = { path = "../navigator" }
 localization = { path = "../localization" }
 apriltag = { path = "../apriltag" }
+rig = { path = "../rig" }
 nalgebra = { workspace = true }
+toml = { workspace = true }
+fxhash = { workspace = true }

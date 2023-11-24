@@ -5,12 +5,11 @@
 use std::time::{Duration, Instant};
 
 pub use eskf;
-use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3, Isometry3, Quaternion};
+use nalgebra::{Isometry3, Matrix3, Point3, Quaternion, UnitQuaternion, Vector3};
 use rig::{RobotBase, RobotElementRef, RotationSequence, RotationType};
 use unros_core::{
-    anyhow, async_trait, setup_logging,
-    signal::unbounded::UnboundedSubscription,
-    tokio, Node, RuntimeContext,
+    anyhow, async_trait, setup_logging, signal::unbounded::UnboundedSubscription, tokio, Node,
+    RuntimeContext,
 };
 
 /// A position and variance measurement.
@@ -48,7 +47,7 @@ pub struct IMUFrame {
 /// determine where an object is in global space.
 ///
 /// Processing does not occur until the node is running.
-pub struct Positioner {
+pub struct Localizer {
     /// The builder for the Error-State Kalman Filter
     pub builder: eskf::Builder,
     imu_sub: UnboundedSubscription<IMUFrame>,
@@ -58,14 +57,14 @@ pub struct Positioner {
     robot_base: RobotBase,
 }
 
-impl Positioner {
+impl Localizer {
     pub fn new(robot_base: RobotBase) -> Self {
         Self {
             builder: Default::default(),
             imu_sub: UnboundedSubscription::none(),
             position_sub: UnboundedSubscription::none(),
             orientation_sub: UnboundedSubscription::none(),
-            robot_base
+            robot_base,
         }
     }
 
@@ -92,7 +91,7 @@ impl Positioner {
 }
 
 #[async_trait]
-impl Node for Positioner {
+impl Node for Localizer {
     const DEFAULT_NAME: &'static str = "positioning";
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
