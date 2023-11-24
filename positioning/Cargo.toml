@@ -10,3 +10,4 @@ eskf = { git = "https://github.com/manglemix/eskf-rs.git" }
 unros-core = { path = "../unros-core" }
 nalgebra = { workspace = true }
 rig = { path = "../rig" }
+quaternion-core = { workspace = true }

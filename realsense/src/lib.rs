@@ -175,7 +175,7 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     let ang_vel = frame.rotational_velocity();
-                    let (w, [i, j, k]) = quaternion_core::from_euler_angles(rt, rs, angles);
+                    let (w, [i, j, k]) = quaternion_core::from_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, angles);
                     let mut ang_vel =
                         UnitQuaternion::from_axis_angle(&Vector3::x_axis(), ang_vel[0])
                             * UnitQuaternion::from_axis_angle(&Vector3::y_axis(), ang_vel[1])

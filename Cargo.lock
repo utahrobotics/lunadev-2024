@@ -2109,6 +2109,7 @@ version = "0.1.0"
 dependencies = [
  "eskf",
  "nalgebra",
+ "quaternion-core",
  "rig",
  "unros-core",
 ]

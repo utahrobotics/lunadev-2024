@@ -14,6 +14,14 @@ use tokio::sync::{mpsc, watch};
 
 pub mod joints;
 
+/// The order with which a set of euler angles should be applied.
+/// 
+/// This is usually provided alongside the euler angles themselves.
+/// 
+/// The default rotation sequence for this crate is YXZ. When used with
+/// intrinsic rotation, it most accurately depicts human head rotation
+/// and is used in many places, especially turrets. In words, this order
+/// means yaw-pitch-roll.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub enum RotationSequence {
     // Proper (z-x-z, x-y-x, y-z-y, z-y-z, x-z-x, y-x-y)
@@ -57,6 +65,25 @@ impl Into<quaternion_core::RotationSequence> for RotationSequence {
     }
 }
 
+/// The type of rotation that a set of euler angles are describing.
+/// 
+/// This is usually provided alongside the euler angles themselves.
+/// 
+/// Intrinsic rotations mean that the axes of rotation - x, y, z -
+/// are rotated by the previous rotation in the sequence. For example,
+/// if we are following YXZ sequence, we first rotate along the global
+/// y-axis. However, the x and z axes should be rotated as well. We then
+/// rotate by the rotated x-axis. The z-axis would be rotated as well. We
+/// then finally rotate by the z-axis, which was rotated by the y and x axis.
+/// This is usually the most intuitive and common form of rotation and thus
+/// is the default in this crate.
+/// 
+/// Extrinsic rotations simply mean that the axes of rotation - x, y, z -
+/// themselves do not rotate. If we follow YXZ sequence, we first rotate along
+/// the global y, then global x, then global z.
+/// 
+/// Properly distinguishing between these two is critical for implementing
+/// rotations correctly, and this property must not be overlooked.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub enum RotationType {
     Intrinsic,

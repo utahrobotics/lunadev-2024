@@ -5,8 +5,8 @@
 use std::time::{Duration, Instant};
 
 pub use eskf;
-use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3, Isometry3};
-use rig::RobotBase;
+use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3, Isometry3, Quaternion};
+use rig::{RobotBase, RobotElementRef, RotationSequence, RotationType};
 use unros_core::{
     anyhow, async_trait, setup_logging,
     signal::unbounded::UnboundedSubscription,
@@ -14,28 +14,34 @@ use unros_core::{
 };
 
 /// A position and variance measurement.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct PositionFrame {
     pub position: Point3<f64>,
     pub variance: Matrix3<f64>,
+    pub robot_element: RobotElementRef,
 }
 
 /// An orientation and variance measurement.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct OrientationFrame {
     pub orientation: UnitQuaternion<f64>,
     pub variance: Matrix3<f64>,
+    pub robot_element: RobotElementRef,
 }
 
 /// A measurement from an IMU.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct IMUFrame {
     pub acceleration: Vector3<f64>,
-    /// XYZ rotation order
-    pub angular_velocity: Vector3<f64>,
 
-    pub acceleration_variance: Option<Vector3<f64>>,
-    pub angular_velocity_variance: Option<Vector3<f64>>,
+    pub angular_velocity: Vector3<f64>,
+    pub rotation_sequence: RotationSequence,
+    pub rotation_type: RotationType,
+
+    pub acceleration_variance: Vector3<f64>,
+    pub angular_velocity_variance: Vector3<f64>,
+
+    pub robot_element: RobotElementRef,
 }
 
 /// A Node that can digest multiple streams of spatial input to
@@ -129,29 +135,28 @@ impl Node for Positioner {
                         imu_recv_counter += 1;
                     }
 
-                    if let Some(acceleration_variance) = frame.acceleration_variance {
-                        eskf.set_acceleration_variance(acceleration_variance);
-                    }
+                    let isometry = frame.robot_element.get_isometry_from_base();
+                    frame.acceleration_variance = isometry * frame.acceleration_variance;
+                    frame.acceleration = isometry * frame.acceleration;
+
+                    let (w, [i, j, k]) = quaternion_core::from_euler_angles(frame.rotation_type.into(), frame.rotation_sequence.into(), [frame.angular_velocity_variance.x, frame.angular_velocity_variance.y, frame.angular_velocity_variance.z]);
+                    let angular_velocity_variance_quat = isometry.rotation * UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k));
+                    let angular_velocity_variance_quat = (angular_velocity_variance_quat.w, [angular_velocity_variance_quat.i, angular_velocity_variance_quat.j, angular_velocity_variance_quat.k]);
+
+                    eskf.set_acceleration_variance(frame.acceleration_variance);
+                    eskf.set_rotational_variance(quaternion_core::to_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, angular_velocity_variance_quat).into());
+
+                    eskf.gravity = eskf.orientation * Vector3::y_axis().into_inner() * -9.81;
+                    let (w, [i, j, k]) = quaternion_core::from_euler_angles(frame.rotation_type.into(), frame.rotation_sequence.into(), [frame.angular_velocity.x, frame.angular_velocity.y, frame.angular_velocity.z]);
+                    let vel_quat = isometry.rotation * UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k));
+                    let vel_quat = (vel_quat.w, [vel_quat.i, vel_quat.j, vel_quat.k]);
+                    frame.angular_velocity = quaternion_core::to_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, vel_quat).into();
 
                     let now = start.elapsed();
                     let delta = now - last_elapsed;
-
-                    if let Some(angular_velocity_variance) = frame.angular_velocity_variance {
-                        eskf.set_rotational_variance(eskf.orientation_uncertainty() + angular_velocity_variance * delta.as_secs_f64());
-                    } else {
-                        eskf.set_rotational_variance(eskf.orientation_uncertainty());
-                    }
-
-                    frame.angular_velocity *= delta.as_secs_f64();
-
-                    eskf.gravity = eskf.orientation * Vector3::y_axis().into_inner() * -9.81;
-
                     eskf.predict(
                         frame.acceleration,
-                        (UnitQuaternion::from_axis_angle(&Vector3::x_axis(), frame.angular_velocity.x) *
-                        UnitQuaternion::from_axis_angle(&Vector3::y_axis(), frame.angular_velocity.y) *
-                        UnitQuaternion::from_axis_angle(&Vector3::z_axis(), frame.angular_velocity.z) *
-                        eskf.orientation).scaled_axis(),
+                        frame.angular_velocity,
                         delta
                     );
                     last_elapsed = now;
@@ -159,13 +164,17 @@ impl Node for Positioner {
                     self.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
                     self.robot_base.set_linear_velocity(eskf.velocity);
                 }
-                (frame, position_sub_counter) = position_sub.wait_for_change() => {
+                (mut frame, position_sub_counter) = position_sub.wait_for_change() => {
                     if position_sub_counter != position_recv_counter {
                         warn!("Lagged behind by {} position frames", position_sub_counter - position_recv_counter);
                         position_recv_counter = position_sub_counter + 1;
                     } else {
                         position_recv_counter += 1;
                     }
+
+                    let isometry = frame.robot_element.get_isometry_from_base();
+                    frame.position = isometry * frame.position;
+                    frame.variance = isometry.rotation.to_rotation_matrix() * frame.variance;
 
                     if let Err(e) = eskf.observe_position(frame.position, frame.variance) {
                         error!("Failed to observe position: {e:#?}");
@@ -175,13 +184,17 @@ impl Node for Positioner {
                     self.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
                     self.robot_base.set_linear_velocity(eskf.velocity);
                 }
-                (frame, orientation_sub_counter) = orientation_sub.wait_for_change() => {
+                (mut frame, orientation_sub_counter) = orientation_sub.wait_for_change() => {
                     if orientation_sub_counter != orientation_recv_counter {
                         warn!("Lagged behind by {} orientation frames", imu_recv_counter - orientation_sub_counter);
                         orientation_recv_counter = orientation_sub_counter + 1;
                     } else {
                         orientation_recv_counter += 1;
                     }
+
+                    let isometry = frame.robot_element.get_isometry_from_base();
+                    frame.orientation = isometry.rotation * frame.orientation;
+                    frame.variance = isometry.rotation.to_rotation_matrix() * frame.variance;
 
                     if let Err(e) = eskf.observe_orientation(frame.orientation, frame.variance) {
                         error!("Failed to observe orientation: {e:#?}");
