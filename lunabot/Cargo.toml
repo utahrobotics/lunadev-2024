@@ -10,6 +10,6 @@ unros-core = { path = "../unros-core" }
 telemetry = { path = "../telemetry" }
 realsense = { path = "../realsense" }
 navigator = { path = "../navigator" }
-positioning = { path = "../positioning" }
+localization = { path = "../localization" }
 apriltag = { path = "../apriltag" }
 nalgebra = { workspace = true }
