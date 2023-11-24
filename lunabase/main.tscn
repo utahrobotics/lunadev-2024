@@ -289,7 +289,7 @@ func _process(delta: float) -> void:
 script/source = "extends SubViewportContainer
 
 
-const MOUSE_SENSITIVITY := 5.0
+const MOUSE_SENSITIVITY := 0.75
 
 var pressed := false
 
@@ -299,6 +299,7 @@ func _gui_input(event: InputEvent) -> void:
 		if !pressed:
 			return
 		event.relative /= -Vector2(get_viewport().size)
+		event.relative = Vector2(sqrt(absf(event.relative.x)), sqrt(absf(event.relative.y))) * event.relative.sign()
 		event.relative *= MOUSE_SENSITIVITY
 		$SubViewport/Node3D.global_rotate(Vector3.UP, event.relative.x)
 		$SubViewport/Node3D.rotate_object_local(Vector3.RIGHT, event.relative.y)
@@ -335,7 +336,6 @@ theme_override_styles/panel = SubResource("StyleBoxEmpty_f0mli")
 script = SubResource("GDScript_45865")
 
 [node name="Controller" type="HSplitContainer" parent="."]
-visible = false
 layout_mode = 2
 theme_override_constants/autohide = 0
 split_offset = 400
@@ -419,6 +419,7 @@ layout_mode = 2
 text = "Click to Drive"
 
 [node name="3D Player" type="VBoxContainer" parent="."]
+visible = false
 layout_mode = 2
 script = SubResource("GDScript_ggpmf")
 
@@ -435,11 +436,11 @@ script = SubResource("GDScript_mnw3m")
 
 [node name="SubViewport" type="SubViewport" parent="3D Player/AspectRatioContainer/SubViewportContainer"]
 handle_input_locally = false
-size = Vector2i(628, 348)
-render_target_update_mode = 4
+msaa_3d = 1
+size = Vector2i(2, 2)
+render_target_update_mode = 0
 
 [node name="Robot" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 rotation_order = 4
 mesh = SubResource("BoxMesh_0laka")
 
