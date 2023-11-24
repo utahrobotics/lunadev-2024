@@ -145,7 +145,8 @@ impl Node for Localizer {
                     eskf.set_acceleration_variance(frame.acceleration_variance);
                     eskf.set_rotational_variance(quaternion_core::to_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, angular_velocity_variance_quat).into());
 
-                    eskf.gravity = eskf.orientation * Vector3::y_axis().into_inner() * -9.81;
+                    eskf.gravity = eskf.orientation * Vector3::y_axis().into_inner() * 9.81;
+
                     let (w, [i, j, k]) = quaternion_core::from_euler_angles(frame.rotation_type.into(), frame.rotation_sequence.into(), [frame.angular_velocity.x, frame.angular_velocity.y, frame.angular_velocity.z]);
                     let vel_quat = isometry.rotation * UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k));
                     let vel_quat = (vel_quat.w, [vel_quat.i, vel_quat.j, vel_quat.k]);
