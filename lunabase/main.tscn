@@ -271,9 +271,9 @@ func _process(delta: float) -> void:
 			target_elapsed = data[DATA_STRIDE * 2 - 1]
 			break
 		var data_delta := data[data_index + DATA_STRIDE - 1]
+		target_elapsed += data_delta
 		if data_delta > delta:
 			break
-		target_elapsed += data_delta
 	$HBoxContainer2/HSlider.value = elapsed / total_duration
 	var mins := floori(elapsed / 60)
 	var secs := floori(elapsed) % 60
