@@ -14,7 +14,6 @@ use std::{
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 use nalgebra::{UnitQuaternion, Vector3};
-use quaternion_core::{to_euler_angles, RotationSequence, RotationType};
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -23,7 +22,7 @@ use realsense_rust::{
     kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind},
     pipeline::InactivePipeline,
 };
-use rig::{RigidBodyRef, StaticRigidBodyRef};
+use rig::RobotElementRef;
 use unros_core::{
     anyhow, async_trait, setup_logging,
     signal::{Signal, SignalRef},
@@ -31,10 +30,11 @@ use unros_core::{
 };
 
 /// A single frame from an IMU
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct IMUFrame {
     pub acceleration: Vector3<f32>,
     pub angular_velocity: Vector3<f32>,
+    pub robot_element: RobotElementRef,
 }
 
 /// A connection to a RealSense Camera.
@@ -43,7 +43,7 @@ pub struct RealSenseCamera {
     context: Arc<Mutex<Context>>,
     image_received: Signal<Arc<DynamicImage>>,
     imu_frame_received: Signal<IMUFrame>,
-    rigid_body_ref: RigidBodyRef,
+    robot_element: Option<RobotElementRef>,
     /// How much to spend at startup calibrating the
     /// camera.
     ///
@@ -64,7 +64,7 @@ impl RealSenseCamera {
             context: Arc::new(Mutex::new(context)),
             image_received: Default::default(),
             imu_frame_received: Default::default(),
-            rigid_body_ref: RigidBodyRef::Static(StaticRigidBodyRef::identity("realsense")),
+            robot_element: None,
             calibration_time: Duration::from_secs(3),
         })
     }
@@ -88,8 +88,8 @@ impl RealSenseCamera {
     /// RealSense IMU is assumed to be relative to this rigid body.
     ///
     /// This will replace the last rigid body that was provided.
-    pub fn set_rigid_body_ref(&mut self, rigid_body_ref: RigidBodyRef) {
-        self.rigid_body_ref = rigid_body_ref;
+    pub fn set_robot_element_ref(&mut self, robot_element_ref: RobotElementRef) {
+        self.robot_element = Some(robot_element_ref);
     }
 }
 
@@ -109,17 +109,19 @@ impl Node for RealSenseCamera {
                 .enable_device_from_serial(self.device.info(Rs2CameraInfo::SerialNumber).unwrap())?
                 .disable_all_streams()?
                 .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 30)?
-                .enable_stream(Rs2StreamKind::Color, None, 0, 0, Rs2Format::Rgb8, 0)?
-                .enable_stream(Rs2StreamKind::Accel, None, 0, 0, Rs2Format::Any, 0)?
-                .enable_stream(Rs2StreamKind::Gyro, None, 0, 0, Rs2Format::Any, 0)?;
+                .enable_stream(Rs2StreamKind::Color, None, 0, 0, Rs2Format::Rgb8, 0)?;
         } else {
             warn!("This Realsense camera is not attached to a USB 3.0 port");
             config
                 .enable_device_from_serial(self.device.info(Rs2CameraInfo::SerialNumber).unwrap())?
                 .disable_all_streams()?
-                .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 30)?
-                .enable_stream(Rs2StreamKind::Accel, None, 0, 0, Rs2Format::Any, 0)?
-                .enable_stream(Rs2StreamKind::Gyro, None, 0, 0, Rs2Format::Any, 0)?;
+                .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 30)?;
+        }
+
+        if self.robot_element.is_some() {
+            config
+                .enable_stream(Rs2StreamKind::Gyro, None, 0, 0, Rs2Format::Any, 0)?
+                .enable_stream(Rs2StreamKind::Accel, None, 0, 0, Rs2Format::Any, 0)?;
         }
 
         // Change pipeline's type from InactivePipeline -> ActivePipeline
@@ -167,8 +169,13 @@ impl Node for RealSenseCamera {
                     }
                 }
 
+                let Some(robot_element) = &self.robot_element else {
+                    continue;
+                };
+
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     let ang_vel = frame.rotational_velocity();
+                    let (w, [i, j, k]) = quaternion_core::from_euler_angles(rt, rs, angles);
                     let mut ang_vel =
                         UnitQuaternion::from_axis_angle(&Vector3::x_axis(), ang_vel[0])
                             * UnitQuaternion::from_axis_angle(&Vector3::y_axis(), ang_vel[1])

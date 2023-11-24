@@ -3,17 +3,14 @@
 //! This library is being actively developed based on current needs, so it
 //! will never be a complete match to `tf2`.
 
-use std::{
-    collections::HashMap,
-    hash::BuildHasher,
-    sync::Arc,
-};
+use std::{collections::HashMap, hash::BuildHasher, sync::Arc};
 
 use crossbeam::atomic::AtomicCell;
 use fxhash::FxHashMap;
 use joints::{Joint, JointRef};
 use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, Vector3};
 use serde::{Deserialize, Serialize};
+use tokio::sync::{mpsc, watch};
 
 pub mod joints;
 
@@ -41,7 +38,6 @@ impl Default for RotationSequence {
     }
 }
 
-
 impl Into<quaternion_core::RotationSequence> for RotationSequence {
     fn into(self) -> quaternion_core::RotationSequence {
         match self {
@@ -67,7 +63,6 @@ pub enum RotationType {
     Extrinsic,
 }
 
-
 impl Into<quaternion_core::RotationType> for RotationType {
     fn into(self) -> quaternion_core::RotationType {
         match self {
@@ -76,7 +71,6 @@ impl Into<quaternion_core::RotationType> for RotationType {
         }
     }
 }
-
 
 impl Default for RotationType {
     fn default() -> Self {
@@ -94,7 +88,6 @@ pub struct PendingRobotElement {
     pub rotation_order: RotationSequence,
     #[serde(default)]
     pub rotation_type: RotationType,
-    // pub isometry: Isometry3<f64>,
     #[serde(default)]
     pub joint: Joint,
     #[serde(default)]
@@ -119,8 +112,10 @@ impl Robot {
         let mut out = HashMap::default();
         let base_element = RobotBase(Arc::new(RobotBaseInner {
             isometry: Default::default(),
+            linear_velocity: Default::default(),
+            sender: watch::channel(()).0
         }));
-        let mut existing_robot_elements: FxHashMap<_, Arc<RobotElementInner>> =
+        let mut existing_robot_elements: FxHashMap<_, Arc<IsometryAndJoint>> =
             FxHashMap::default();
         let mut chain = Vec::new();
 
@@ -129,7 +124,9 @@ impl Robot {
             let mut slices_iter = element_path.split('/');
             let mut slices_vec = Vec::new();
 
-            let first_slice = slices_iter.next().ok_or_else(|| anyhow::anyhow!("Empty element path encountered"))?;
+            let first_slice = slices_iter
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("Empty element path encountered"))?;
 
             let mut current_element = self
                 .children
@@ -137,9 +134,11 @@ impl Robot {
                 .ok_or_else(|| anyhow::anyhow!("Missing element: {element_path}"))?;
 
             slices_vec.push(first_slice);
+            let (sender, receiver) = mpsc::channel(1);
 
             loop {
                 current_element.joint.init();
+                current_element.joint.add_subscriber(sender.clone());
                 let (w, [i, j, k]) = quaternion_core::from_euler_angles(
                     current_element.rotation_type.into(),
                     current_element.rotation_order.into(),
@@ -150,7 +149,7 @@ impl Robot {
                     ],
                 );
 
-                let robot_element = Arc::new(RobotElementInner {
+                let robot_element = Arc::new(IsometryAndJoint {
                     isometry: Isometry3::from_parts(
                         current_element.position.into(),
                         UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k)),
@@ -161,14 +160,16 @@ impl Robot {
                 existing_robot_elements.insert(slices_vec.clone(), robot_element.clone());
                 chain.push(robot_element);
 
-                let Some(path_slice) = slices_iter.next() else { break; };
+                let Some(path_slice) = slices_iter.next() else {
+                    break;
+                };
                 slices_vec.push(path_slice);
 
                 if let Some(robot_element) = existing_robot_elements.get(&slices_vec) {
                     chain.push(robot_element.clone());
                     continue;
                 }
-                
+
                 current_element = current_element
                     .children
                     .get_mut(path_slice)
@@ -177,7 +178,11 @@ impl Robot {
 
             out.insert(
                 element_path,
-                RobotElement(chain.drain(..).collect(), base_element.get_ref()),
+                RobotElement(Arc::new(RobotElementInner {
+                    chain: chain.drain(..).collect(),
+                    reference: base_element.get_ref(),
+                    receiver: receiver.into(),
+                })),
             )
             .ok_or_else(|| anyhow::anyhow!("Duplicate element: {element_path}"))?;
         }
@@ -186,14 +191,21 @@ impl Robot {
     }
 }
 
-struct RobotElementInner {
+struct IsometryAndJoint {
     isometry: Isometry3<f64>,
     joint: Joint,
 }
 
+struct RobotElementInner {
+    chain: Box<[Arc<IsometryAndJoint>]>,
+    reference: RobotBaseRef,
+    receiver: tokio::sync::Mutex<mpsc::Receiver<()>>,
+}
+
 /// An element of a robot, which can be moved if it is attached by a non-fixed
 /// joint to its parent.
-pub struct RobotElement(Arc<[Arc<RobotElementInner>]>, RobotBaseRef);
+// pub struct RobotElement(Arc<[Arc<RobotElementInner>]>, RobotBaseRef);
+pub struct RobotElement(Arc<RobotElementInner>);
 
 /// An immutable reference to an element of a robot.
 ///
@@ -202,24 +214,22 @@ pub struct RobotElement(Arc<[Arc<RobotElementInner>]>, RobotBaseRef);
 /// changes will never be made.
 pub struct RobotElementRef(RobotElement);
 
-
 impl Clone for RobotElementRef {
     fn clone(&self) -> Self {
-        Self(RobotElement(self.0.0.clone(), self.0.1.clone()))
+        Self(RobotElement(self.0 .0.clone()))
     }
 }
 
-
 impl RobotElement {
     /// Gets an immutable reference to this element.
-    /// 
+    ///
     /// This is as cheap as cloning an existing reference.
     pub fn get_ref(&self) -> RobotElementRef {
-        RobotElementRef(Self(self.0.clone(), self.1.clone()))
+        RobotElementRef(RobotElement(self.0.clone()))
     }
 
-    fn get_local_element(&self) -> &RobotElementInner {
-        self.0.last().unwrap()
+    fn get_local_element(&self) -> &IsometryAndJoint {
+        self.0.chain.last().unwrap()
     }
 
     pub fn get_local_joint(&mut self) -> &Joint {
@@ -229,7 +239,7 @@ impl RobotElement {
     pub fn get_isometry_from_base(&self) -> Isometry3<f64> {
         let mut out = Isometry3::default();
 
-        for element in self.0.iter().rev() {
+        for element in self.0.chain.iter().rev() {
             out = element.isometry * element.joint.get_isometry() * out;
         }
 
@@ -237,7 +247,7 @@ impl RobotElement {
     }
 
     pub fn get_isometry_of_base(&self) -> Isometry3<f64> {
-        self.1.get_isometry()
+        self.0.reference.get_isometry()
     }
 
     pub fn get_global_isometry(&self) -> Isometry3<f64> {
@@ -245,9 +255,8 @@ impl RobotElement {
     }
 }
 
-
 impl RobotElementRef {
-    pub fn get_local_joint(&mut self) -> JointRef {
+    pub fn get_local_joint(&self) -> JointRef {
         self.0.get_local_element().joint.get_ref()
     }
 
@@ -262,10 +271,16 @@ impl RobotElementRef {
     pub fn get_global_isometry(&self) -> Isometry3<f64> {
         self.0.get_isometry_of_base() * self.0.get_isometry_from_base()
     }
+
+    pub async fn wait_for_change(&self) {
+        self.0.0.receiver.lock().await.recv().await.expect("Sender should still be alive");
+    }
 }
 
 struct RobotBaseInner {
     isometry: AtomicCell<Isometry3<f64>>,
+    linear_velocity: AtomicCell<Vector3<f64>>,
+    sender: watch::Sender<()>
 }
 
 /// The base of the robot.
@@ -281,30 +296,34 @@ pub struct RobotBase(Arc<RobotBaseInner>);
 /// Changes may only be observed through this reference,
 /// never written. If the original `RobotBase` has been dropped,
 /// changes will never be made.
-pub struct RobotBaseRef(RobotBase);
-
+pub struct RobotBaseRef(RobotBase, watch::Receiver<()>);
 
 impl Clone for RobotBaseRef {
     fn clone(&self) -> Self {
-        Self(RobotBase(self.0.0.clone()))
+        Self(RobotBase(self.0.0.clone()), self.1.clone())
     }
 }
 
-
 impl RobotBase {
     /// Gets an immutable reference to this base.
-    /// 
+    ///
     /// This is as cheap as cloning an existing reference.
     pub fn get_ref(&self) -> RobotBaseRef {
-        RobotBaseRef(Self(self.0.clone()))
+        RobotBaseRef(Self(self.0.clone()), self.0.sender.subscribe())
     }
 
     pub fn get_isometry(&self) -> Isometry3<f64> {
         self.0.isometry.load()
     }
 
+    pub fn set_linear_velocity(&self, linear_velocity: Vector3<f64>) {
+        self.0.linear_velocity.store(linear_velocity);
+        self.0.sender.send_replace(());
+    }
+
     pub fn set_isometry(&self, isometry: Isometry3<f64>) {
         self.0.isometry.store(isometry);
+        self.0.sender.send_replace(());
     }
 
     pub fn set_position(&self, position: Point3<f64>) {
@@ -320,9 +339,12 @@ impl RobotBase {
     }
 }
 
-
 impl RobotBaseRef {
     pub fn get_isometry(&self) -> Isometry3<f64> {
         self.0.get_isometry()
+    }
+
+    pub async fn wait_for_change(&mut self) {
+        self.1.changed().await.expect("Sender should not be dropped");
     }
 }

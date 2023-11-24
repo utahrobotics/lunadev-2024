@@ -5,10 +5,11 @@
 use std::time::{Duration, Instant};
 
 pub use eskf;
-use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3};
+use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3, Isometry3};
+use rig::RobotBase;
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{unbounded::UnboundedSubscription, Signal, SignalRef},
+    signal::unbounded::UnboundedSubscription,
     tokio, Node, RuntimeContext,
 };
 
@@ -48,27 +49,20 @@ pub struct Positioner {
     position_sub: UnboundedSubscription<PositionFrame>,
     orientation_sub: UnboundedSubscription<OrientationFrame>,
 
-    position: Signal<Point3<f64>>,
-    velocity: Signal<Vector3<f64>>,
-    orientation: Signal<UnitQuaternion<f64>>,
+    robot_base: RobotBase,
 }
 
-impl Default for Positioner {
-    fn default() -> Self {
+impl Positioner {
+    pub fn new(robot_base: RobotBase) -> Self {
         Self {
             builder: Default::default(),
             imu_sub: UnboundedSubscription::none(),
             position_sub: UnboundedSubscription::none(),
             orientation_sub: UnboundedSubscription::none(),
-
-            position: Default::default(),
-            velocity: Default::default(),
-            orientation: Default::default(),
+            robot_base
         }
     }
-}
 
-impl Positioner {
     /// Provide an imu subscription.
     ///
     /// Some messages may be skipped if there are too many.
@@ -88,21 +82,6 @@ impl Positioner {
     /// Some messages may be skipped if there are too many.
     pub fn add_orientation_sub(&mut self, sub: UnboundedSubscription<OrientationFrame>) {
         self.orientation_sub += sub;
-    }
-
-    /// Gets a reference to the filtered position `Signal`.
-    pub fn get_position_signal(&mut self) -> SignalRef<Point3<f64>> {
-        self.position.get_ref()
-    }
-
-    /// Gets a reference to the filtered velocity `Signal`.
-    pub fn get_velocity_signal(&mut self) -> SignalRef<Vector3<f64>> {
-        self.velocity.get_ref()
-    }
-
-    /// Gets a reference to the filtered orientation `Signal`.
-    pub fn get_orientation_signal(&mut self) -> SignalRef<UnitQuaternion<f64>> {
-        self.orientation.get_ref()
     }
 }
 
@@ -177,9 +156,8 @@ impl Node for Positioner {
                     );
                     last_elapsed = now;
 
-                    self.position.set(eskf.position);
-                    self.velocity.set(eskf.velocity);
-                    self.orientation.set(eskf.orientation);
+                    self.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
+                    self.robot_base.set_linear_velocity(eskf.velocity);
                 }
                 (frame, position_sub_counter) = position_sub.wait_for_change() => {
                     if position_sub_counter != position_recv_counter {
@@ -194,9 +172,8 @@ impl Node for Positioner {
                         continue;
                     }
 
-                    self.position.set(eskf.position);
-                    self.velocity.set(eskf.velocity);
-                    self.orientation.set(eskf.orientation);
+                    self.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
+                    self.robot_base.set_linear_velocity(eskf.velocity);
                 }
                 (frame, orientation_sub_counter) = orientation_sub.wait_for_change() => {
                     if orientation_sub_counter != orientation_recv_counter {
@@ -211,9 +188,8 @@ impl Node for Positioner {
                         continue;
                     }
 
-                    self.position.set(eskf.position);
-                    self.velocity.set(eskf.velocity);
-                    self.orientation.set(eskf.orientation);
+                    self.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
+                    self.robot_base.set_linear_velocity(eskf.velocity);
                 }
             }
         }

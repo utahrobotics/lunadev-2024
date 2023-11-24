@@ -9,3 +9,4 @@ edition = "2021"
 eskf = { git = "https://github.com/manglemix/eskf-rs.git" }
 unros-core = { path = "../unros-core" }
 nalgebra = { workspace = true }
+rig = { path = "../rig" }
