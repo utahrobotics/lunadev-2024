@@ -450,6 +450,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2bd12c1caf447e69cd4528f47f94d203fd2582878ecb9e9465484c4148a8223"
 
 [[package]]
+name = "cam-geom"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35cbc78121508edaef40f74082f1224f9d650f5f7c4d3824e098b4aea4f0046c"
+dependencies = [
+ "approx",
+ "itertools 0.11.0",
+ "nalgebra",
+ "num-iter",
+]
+
+[[package]]
 name = "camera"
 version = "0.1.0"
 dependencies = [
@@ -1904,6 +1916,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-iter"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d03e6c028c5dc5cac6e2dec0efda81fc887605bb3d884578bb6d6bf7514e252"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-rational"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1921,6 +1944,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39e3200413f237f41ab11ad6d161bc7239c84dcb631773ccd7de3dfe4b5c267c"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -2251,6 +2275,7 @@ dependencies = [
 name = "realsense"
 version = "0.1.0"
 dependencies = [
+ "cam-geom",
  "image",
  "localization",
  "nalgebra",

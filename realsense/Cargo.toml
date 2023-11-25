@@ -13,3 +13,4 @@ rig = { path = "../rig" }
 image = { workspace = true }
 nalgebra = { workspace = true }
 quaternion-core = { workspace = true }
+cam-geom = "0.14"

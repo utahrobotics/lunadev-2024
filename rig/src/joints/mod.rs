@@ -89,7 +89,7 @@ impl HingeJoint {
 }
 
 /// A mutable reference to a `HingeJoint`.
-/// 
+///
 /// This is the only way to rotate a `HingeJoint`.
 pub struct HingeJointMut<'a>(&'a HingeJoint);
 

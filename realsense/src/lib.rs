@@ -14,29 +14,45 @@ use std::{
     time::{Duration, Instant},
 };
 
+use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
 use image::{DynamicImage, ImageBuffer, Rgb};
 use localization::IMUFrame;
-use nalgebra::Vector3;
+use nalgebra::{Const, Dyn, Matrix, Point3, VecStorage, Vector3};
 use realsense_rust::{
     config::Config,
     context::Context,
     device::Device,
-    frame::{AccelFrame, ColorFrame, GyroFrame, PixelKind},
+    frame::{AccelFrame, ColorFrame, DepthFrame, GyroFrame, PixelKind},
     kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind},
     pipeline::InactivePipeline,
 };
 use rig::RobotElementRef;
 use unros_core::{
-    anyhow, async_trait, setup_logging,
+    anyhow, async_trait,
+    rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    setup_logging,
     signal::{Signal, SignalRef},
     tokio_rayon, Node, RuntimeContext,
 };
+
+#[derive(Clone)]
+pub struct PointCloud {
+    /// An array of points in *global* space.
+    ///
+    /// The points have already been transformed
+    /// to global space as efficient processing
+    /// of this transformation is a hefty implementation
+    /// detail that users need not worry
+    /// about.
+    pub points: Arc<[Point3<f32>]>,
+}
 
 /// A connection to a RealSense Camera.
 pub struct RealSenseCamera {
     device: Device,
     context: Arc<Mutex<Context>>,
     image_received: Signal<Arc<DynamicImage>>,
+    point_cloud_received: Signal<PointCloud>,
     imu_frame_received: Signal<IMUFrame>,
     robot_element: Option<RobotElementRef>,
     /// How much to spend at startup calibrating the
@@ -47,6 +63,7 @@ pub struct RealSenseCamera {
     /// at startup, and the only acceleration occuring
     /// is from gravity, which has a magnitude of 9.81 m/s^2.
     pub calibration_time: Duration,
+    pub focal_length_frac: f32,
 }
 
 impl RealSenseCamera {
@@ -58,15 +75,22 @@ impl RealSenseCamera {
             device,
             context: Arc::new(Mutex::new(context)),
             image_received: Default::default(),
+            point_cloud_received: Default::default(),
             imu_frame_received: Default::default(),
             robot_element: None,
             calibration_time: Duration::from_secs(3),
+            focal_length_frac: 0.5,
         })
     }
 
     /// Gets a reference to the `Signal` that represents received images.
     pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
         self.image_received.get_ref()
+    }
+
+    /// Gets a reference to the `Signal` that represents received point clouds.
+    pub fn point_cloud_received_signal(&mut self) -> SignalRef<PointCloud> {
+        self.point_cloud_received.get_ref()
     }
 
     pub fn get_path(&self) -> &Path {
@@ -153,17 +177,6 @@ impl Node for RealSenseCamera {
             loop {
                 let frames = pipeline.wait(None)?;
 
-                // Get depth
-                // let mut depth_frames = frames.frames_of_type::<DepthFrame>();
-                // if !depth_frames.is_empty() {
-                //     let depth_frame = depth_frames.pop().unwrap();
-                //     let tmp_distance =
-                //         depth_frame.distance(depth_frame.width() / 2, depth_frame.height() / 2)?;
-                //     if tmp_distance != 0.0 {
-                //         distance = tmp_distance;
-                //     }
-                // }
-
                 // Get color
                 for frame in frames.frames_of_type::<ColorFrame>() {
                     let Some(img) = ImageBuffer::<Rgb<u8>, _>::from_raw(
@@ -190,6 +203,72 @@ impl Node for RealSenseCamera {
                 let Some(robot_element) = &self.robot_element else {
                     continue;
                 };
+
+                // Get depth
+                let depth_frames = frames.frames_of_type::<DepthFrame>();
+                for frame in depth_frames {
+                    let focal_length = frame.width() as f32 * self.focal_length_frac;
+                    let global_isometry = robot_element.get_global_isometry();
+                    let cam_geom = cam_geom::Camera::new(
+                        IntrinsicParametersPerspective::from(PerspectiveParams {
+                            fx: focal_length,
+                            fy: focal_length,
+                            skew: 0.0,
+                            cx: frame.width() as f32 / 2.0,
+                            cy: frame.height() as f32 / 2.0,
+                        }),
+                        ExtrinsicParameters::from_pose(&nalgebra::convert(global_isometry)),
+                    );
+                    let pixel_coords: Vec<_> = (0..frame.height())
+                        .into_iter()
+                        .map(|y| {
+                            (0..frame.width())
+                                .into_iter()
+                                .map(move |x| [x as f32, y as f32])
+                                .flatten()
+                        })
+                        .flatten()
+                        .collect();
+                    let pixel_coords = Pixels::new(Matrix::<_, Dyn, _, _>::from_data(
+                        VecStorage::new(Dyn(frame.height() * frame.width()), Const, pixel_coords),
+                    ));
+                    let raw_rays = cam_geom.pixel_to_world(&pixel_coords);
+                    let raw_rays = raw_rays.data.data.as_slice();
+                    let rx_slice = raw_rays.split_at(raw_rays.len() / 3).0;
+                    let ry_slice = raw_rays
+                        .split_at(raw_rays.len() / 3)
+                        .1
+                        .split_at(rx_slice.len() / 2)
+                        .0;
+                    let rz_slice = raw_rays.split_at(raw_rays.len() / 3 * 2).1;
+                    let scale = frame.depth_units().unwrap();
+                    let depths: Vec<_> = frame
+                        .iter()
+                        .filter_map(|px| {
+                            let PixelKind::Z16 { depth } = px else {
+                                unreachable!()
+                            };
+                            if *depth == 0 {
+                                None
+                            } else {
+                                Some((*depth as f32) * scale)
+                            }
+                        })
+                        .collect();
+                    let origin: Vector3<f32> =
+                        nalgebra::convert(global_isometry.translation.vector);
+                    let points: Arc<[_]> = depths
+                        .into_par_iter()
+                        .zip(rx_slice)
+                        .zip(ry_slice)
+                        .zip(rz_slice)
+                        .map(|(((depth, x), y), z)| {
+                            let ray = Vector3::new(*x, *y, *z);
+                            Point3::from(ray * depth + origin)
+                        })
+                        .collect();
+                    self.point_cloud_received.set(PointCloud { points });
+                }
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     last_ang_vel = nalgebra::convert(Vector3::from(*frame.rotational_velocity()));
@@ -237,8 +316,10 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         device,
         context: context.clone(),
         image_received: Default::default(),
+        point_cloud_received: Default::default(),
         imu_frame_received: Default::default(),
         robot_element: None,
         calibration_time: Duration::from_secs(5),
+        focal_length_frac: 0.5,
     }))
 }
