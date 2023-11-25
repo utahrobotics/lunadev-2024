@@ -5,13 +5,13 @@ use std::{
 };
 
 use global_msgs::Steering;
-use nalgebra::{wrap, Point2, Point3, UnitQuaternion, UnitVector2, Vector2, Vector3, Isometry3};
+use nalgebra::{wrap, Isometry3, Point2, UnitVector2, Vector2, Vector3};
 use ordered_float::NotNan;
 use pid::Pid;
 use rig::RobotBaseRef;
 use unros_core::{
     anyhow, async_trait,
-    signal::{watched::WatchedSubscription, Signal, SignalRef},
+    signal::{Signal, SignalRef},
     task::{Task, TaskHandle},
     tokio::{self, sync::oneshot},
     tokio_rayon, Node, RuntimeContext,
@@ -88,10 +88,7 @@ pub struct WaypointDriver {
 }
 
 impl WaypointDriver {
-    pub fn new(
-        robot_base: RobotBaseRef,
-        steering_pid: Pid<f64>,
-    ) -> Self {
+    pub fn new(robot_base: RobotBaseRef, steering_pid: Pid<f64>) -> Self {
         let (task_sender, task_receiver) = mpsc::sync_channel(0);
         Self {
             driving_task: DrivingTask { task_sender },
@@ -140,7 +137,10 @@ impl Node for WaypointDriver {
         'main: loop {
             let DrivingTaskInit { data, sender } = init;
             let mut distance_travelled = 0.0f64;
-            let Isometry3 { translation, rotation: mut orientation } = self.robot_base.get_isometry();
+            let Isometry3 {
+                translation,
+                rotation: mut orientation,
+            } = self.robot_base.get_isometry();
             let mut position = translation.vector;
             let mut yaw_travelled = 0.0f64;
 

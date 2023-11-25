@@ -7,7 +7,8 @@ use apriltag::AprilTagDetector;
 use fxhash::FxBuildHasher;
 use nalgebra::Isometry;
 // use navigator::{pid, WaypointDriver};
-use localization::{eskf, OrientationFrame, PositionFrame, Localizer};
+use localization::{eskf, Localizer, OrientationFrame, PositionFrame};
+use navigator::{pid, WaypointDriver};
 use realsense::discover_all_realsense;
 use rig::Robot;
 use unros_core::{anyhow, async_run_all, default_run_options, dump::DataDump, init_logger, tokio};
@@ -28,8 +29,13 @@ async fn main() -> anyhow::Result<()> {
 
     camera.set_robot_element_ref(camera_element.get_ref());
 
-    let mut apriltag =
-        AprilTagDetector::new(640.0, 1280, 720, camera.image_received_signal().watch(), camera_element.get_ref());
+    let mut apriltag = AprilTagDetector::new(
+        640.0,
+        1280,
+        720,
+        camera.image_received_signal().watch(),
+        camera_element.get_ref(),
+    );
     apriltag.add_tag(Default::default(), Default::default(), 0.107, 0);
 
     let mut positioning = Localizer::new(robot_base);
@@ -40,21 +46,17 @@ async fn main() -> anyhow::Result<()> {
             .map(|tag| PositionFrame {
                 position: tag.position,
                 variance: eskf::ESKF::variance_from_element(0.05),
-                robot_element: tag.robot_element
+                robot_element: tag.robot_element,
             }),
     );
     positioning.add_orientation_sub(apriltag.tag_detected_signal().subscribe_unbounded().map(
         |tag| OrientationFrame {
             orientation: tag.orientation,
             variance: eskf::ESKF::variance_from_element(0.05),
-            robot_element: tag.robot_element
+            robot_element: tag.robot_element,
         },
     ));
-    positioning.add_imu_sub(
-        camera
-            .imu_frame_received()
-            .subscribe_unbounded()
-    );
+    positioning.add_imu_sub(camera.imu_frame_received().subscribe_unbounded());
     // let mut pos = positioning.get_position_signal().watch();
     // tokio::spawn(async move {
     //     loop {
@@ -63,14 +65,9 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // });
 
-    // let mut pid = pid::Pid::new(0.0, 100.0);
-    // pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);
-    // let navigator = WaypointDriver::new(
-    //     positioning.get_position_signal().watch(),
-    //     positioning.get_velocity_signal().watch(),
-    //     positioning.get_orientation_signal().watch(),
-    //     pid,
-    // );
+    let mut pid = pid::Pid::new(0.0, 100.0);
+    pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);
+    let navigator = WaypointDriver::new(robot_base_ref.clone(), pid);
 
     let mut data_dump = DataDump::new_file("data.csv").await?;
     writeln!(
@@ -78,16 +75,17 @@ async fn main() -> anyhow::Result<()> {
         "imu_ax,imu_ay,imu_az,imu_rvx,imu_rvy,imu_rvz,vx,vy,vz,x,y,z,roll,pitch,yaw,delta"
     )
     .unwrap();
-    let mut imu_sub = camera
-        .imu_frame_received()
-        .watch();
+    let mut imu_sub = camera.imu_frame_received().watch();
     tokio::spawn(async move {
         let start = Instant::now();
         let mut elapsed = Duration::ZERO;
 
         loop {
             let imu = imu_sub.wait_for_change().await;
-            let Isometry { translation: pos, rotation } = robot_base_ref.get_isometry();
+            let Isometry {
+                translation: pos,
+                rotation,
+            } = robot_base_ref.get_isometry();
             let vel = robot_base_ref.get_linear_velocity();
             let (roll, pitch, yaw) = rotation.euler_angles();
             let now = start.elapsed();
@@ -114,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
             camera.into(),
             apriltag.into(),
             positioning.into(),
-            // navigator.into(),
+            navigator.into(),
         ],
         run_options,
     )

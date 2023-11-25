@@ -197,14 +197,17 @@ impl Robot {
                     .ok_or_else(|| anyhow::anyhow!("Missing element: {element_path}"))?;
             }
 
-            if out.insert(
-                element_path,
-                RobotElement(Arc::new(RobotElementInner {
-                    chain: chain.drain(..).collect(),
-                    reference: base_element.get_ref(),
-                    receiver: receiver.into(),
-                })),
-            ).is_some() {
+            if out
+                .insert(
+                    element_path,
+                    RobotElement(Arc::new(RobotElementInner {
+                        chain: chain.drain(..).collect(),
+                        reference: base_element.get_ref(),
+                        receiver: receiver.into(),
+                    })),
+                )
+                .is_some()
+            {
                 return Err(anyhow::anyhow!("Duplicate element: {element_path}"));
             }
         }

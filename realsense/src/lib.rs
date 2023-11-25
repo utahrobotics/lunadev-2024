@@ -6,10 +6,12 @@
 
 use std::{
     collections::HashSet,
+    ffi::OsStr,
     ops::Deref,
+    os::unix::ffi::OsStrExt,
     path::Path,
     sync::{Arc, Mutex},
-    time::{Duration, Instant}, ffi::OsStr, os::unix::ffi::OsStrExt,
+    time::{Duration, Instant},
 };
 
 use image::{DynamicImage, ImageBuffer, Rgb};
@@ -68,7 +70,11 @@ impl RealSenseCamera {
     }
 
     pub fn get_path(&self) -> &Path {
-        let path = self.device.info(Rs2CameraInfo::Name).expect("Failed to query camera name").to_bytes();
+        let path = self
+            .device
+            .info(Rs2CameraInfo::Name)
+            .expect("Failed to query camera name")
+            .to_bytes();
         Path::new(OsStr::from_bytes(path))
     }
 
