@@ -5,9 +5,10 @@ use std::{
 };
 
 use global_msgs::Steering;
-use nalgebra::{wrap, Point2, Point3, UnitQuaternion, UnitVector2, Vector2, Vector3};
+use nalgebra::{wrap, Point2, Point3, UnitQuaternion, UnitVector2, Vector2, Vector3, Isometry3};
 use ordered_float::NotNan;
 use pid::Pid;
+use rig::RobotBaseRef;
 use unros_core::{
     anyhow, async_trait,
     signal::{watched::WatchedSubscription, Signal, SignalRef},
@@ -79,9 +80,7 @@ impl Task for DrivingTask {
 pub struct WaypointDriver {
     driving_task: DrivingTask,
     steering_signal: Signal<Steering>,
-    position: WatchedSubscription<Point3<f64>>,
-    velocity: WatchedSubscription<Vector3<f64>>,
-    orientation: WatchedSubscription<UnitQuaternion<f64>>,
+    robot_base: RobotBaseRef,
     task_receiver: mpsc::Receiver<DrivingTaskInit>,
     steering_pid: Pid<f64>,
     pub completion_distance: f64,
@@ -90,18 +89,14 @@ pub struct WaypointDriver {
 
 impl WaypointDriver {
     pub fn new(
-        position: WatchedSubscription<Point3<f64>>,
-        velocity: WatchedSubscription<Vector3<f64>>,
-        orientation: WatchedSubscription<UnitQuaternion<f64>>,
+        robot_base: RobotBaseRef,
         steering_pid: Pid<f64>,
     ) -> Self {
         let (task_sender, task_receiver) = mpsc::sync_channel(0);
         Self {
             driving_task: DrivingTask { task_sender },
             steering_signal: Default::default(),
-            position,
-            velocity,
-            orientation,
+            robot_base,
             task_receiver,
             steering_pid,
             completion_distance: 0.3,
@@ -145,10 +140,9 @@ impl Node for WaypointDriver {
         'main: loop {
             let DrivingTaskInit { data, sender } = init;
             let mut distance_travelled = 0.0f64;
-            let mut position = self.position.get().await;
-            let mut _velocity = self.velocity.get().await;
+            let Isometry3 { translation, rotation: mut orientation } = self.robot_base.get_isometry();
+            let mut position = translation.vector;
             let mut yaw_travelled = 0.0f64;
-            let mut orientation = self.orientation.get().await;
 
             for waypoint in data.waypoints {
                 loop {
@@ -240,14 +234,12 @@ impl Node for WaypointDriver {
                                 continue 'main;
                             }
                         }
-                        new_position = self.position.wait_for_change() => {
-                            distance_travelled = (new_position.coords - position.coords).magnitude();
+                        () = self.robot_base.wait_for_change() => {
+                            let Isometry3 { translation, rotation: new_orientation } = self.robot_base.get_isometry();
+                            let new_position = translation.vector;
+                            distance_travelled = (new_position - position).magnitude();
                             position = new_position;
-                        }
-                        new_velocity = self.velocity.wait_for_change() => {
-                            _velocity = new_velocity;
-                        }
-                        new_orientation = self.orientation.wait_for_change() => {
+
                             let old_front_vector = orientation * - Vector3::z_axis();
                             let old_front_vector = UnitVector2::new_normalize(Vector2::new(old_front_vector.x, old_front_vector.z));
 
