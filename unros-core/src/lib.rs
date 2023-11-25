@@ -19,7 +19,7 @@ use std::{
     future::Future,
     ops::{Add, AddAssign},
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
 };
 
 pub mod logging;
@@ -278,6 +278,25 @@ impl Add for FinalizedNode {
     fn add(mut self, rhs: Self) -> Self::Output {
         self += rhs;
         self
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct DropCheck(Arc<AtomicBool>);
+
+impl Drop for DropCheck {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+impl DropCheck {
+    pub fn has_dropped(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    pub fn reset(&self) {
+        self.0.store(true, Ordering::SeqCst);
     }
 }
 

@@ -32,7 +32,7 @@ use unros_core::{
     rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     setup_logging,
     signal::{Signal, SignalRef},
-    tokio_rayon, Node, RuntimeContext,
+    tokio_rayon, Node, RuntimeContext, DropCheck,
 };
 
 #[derive(Clone)]
@@ -170,12 +170,17 @@ impl Node for RealSenseCamera {
         let mut accel_sum = Vector3::default();
         let mut accel_scale = 1.0;
         let mut accel_count = 0usize;
+        let drop_check = DropCheck::default();
+        let _outer_drop_check = drop_check.clone();
 
         tokio_rayon::spawn(move || {
             let mut last_accel = Default::default();
             let mut last_ang_vel = Default::default();
             loop {
                 let frames = pipeline.wait(None)?;
+                if drop_check.has_dropped() {
+                    break Ok(());
+                }
 
                 // Get color
                 for frame in frames.frames_of_type::<ColorFrame>() {
@@ -238,13 +243,13 @@ impl Node for RealSenseCamera {
                     let ry_slice = raw_rays
                         .split_at(raw_rays.len() / 3)
                         .1
-                        .split_at(rx_slice.len() / 2)
+                        .split_at(rx_slice.len())
                         .0;
                     let rz_slice = raw_rays.split_at(raw_rays.len() / 3 * 2).1;
                     let scale = frame.depth_units().unwrap();
                     let depths: Vec<_> = frame
                         .iter()
-                        .filter_map(|px| {
+                        .map(|px| {
                             let PixelKind::Z16 { depth } = px else {
                                 unreachable!()
                             };
@@ -262,9 +267,9 @@ impl Node for RealSenseCamera {
                         .zip(rx_slice)
                         .zip(ry_slice)
                         .zip(rz_slice)
-                        .map(|(((depth, x), y), z)| {
+                        .filter_map(|(((depth, x), y), z)| {
                             let ray = Vector3::new(*x, *y, *z);
-                            Point3::from(ray * depth + origin)
+                            Some(Point3::from(ray * depth? + origin))
                         })
                         .collect();
                     self.point_cloud_received.set(PointCloud { points });
