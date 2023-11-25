@@ -1,4 +1,8 @@
-use std::{sync::OnceLock, path::{PathBuf, Path}, time::Instant};
+use std::{
+    path::{Path, PathBuf},
+    sync::OnceLock,
+    time::Instant,
+};
 
 use anyhow::Context;
 use chrono::{Datelike, Timelike};

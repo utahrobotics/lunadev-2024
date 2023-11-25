@@ -29,3 +29,17 @@ crossbeam = "0.8"
 quaternion-core = "0.4"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
+
+# The following crates need to run at full power
+# in most contexts to be effective.
+[profile.dev.package.realsense]
+opt-level = 3
+
+[profile.dev.package.apriltag]
+opt-level = 3
+
+[profile.dev.package.localization]
+opt-level = 3
+
+[profile.dev.package.camera]
+opt-level = 3

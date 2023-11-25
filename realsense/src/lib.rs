@@ -21,7 +21,7 @@ use realsense_rust::{
     config::Config,
     context::Context,
     device::Device,
-    frame::{AccelFrame, ColorFrame, GyroFrame},
+    frame::{AccelFrame, ColorFrame, GyroFrame, PixelKind},
     kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind},
     pipeline::InactivePipeline,
 };
@@ -166,22 +166,25 @@ impl Node for RealSenseCamera {
 
                 // Get color
                 for frame in frames.frames_of_type::<ColorFrame>() {
-                    unsafe {
-                        let ptr: *const _ = frame.get_data();
-                        let buf =
-                            std::slice::from_raw_parts(ptr.cast::<u8>(), frame.get_data_size())
-                                .to_vec();
-                        let Some(img) = ImageBuffer::<Rgb<u8>, _>::from_raw(
-                            frame.width() as u32,
-                            frame.height() as u32,
-                            buf,
-                        ) else {
-                            error!("Failed to copy realsense image");
-                            continue;
-                        };
-                        let img = DynamicImage::from(img);
-                        self.image_received.set(Arc::new(img));
-                    }
+                    let Some(img) = ImageBuffer::<Rgb<u8>, _>::from_raw(
+                        frame.width() as u32,
+                        frame.height() as u32,
+                        frame
+                            .iter()
+                            .map(|px| {
+                                let PixelKind::Bgr8 { r, g, b } = px else {
+                                    unreachable!()
+                                };
+                                [*r, *g, *b]
+                            })
+                            .flatten()
+                            .collect(),
+                    ) else {
+                        error!("Failed to copy realsense image");
+                        continue;
+                    };
+                    let img = DynamicImage::from(img);
+                    self.image_received.set(Arc::new(img));
                 }
 
                 let Some(robot_element) = &self.robot_element else {

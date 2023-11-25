@@ -22,9 +22,9 @@ use std::{
     sync::Arc,
 };
 
+pub mod logging;
 pub mod signal;
 pub mod task;
-pub mod logging;
 
 pub use anyhow;
 pub use async_trait::async_trait;
@@ -321,8 +321,6 @@ macro_rules! default_run_options {
         }
     };
 }
-
-
 
 /// The entry point of the runtime itself.
 ///

@@ -11,7 +11,11 @@ use localization::{eskf, Localizer, OrientationFrame, PositionFrame};
 use navigator::{pid, WaypointDriver};
 use realsense::discover_all_realsense;
 use rig::Robot;
-use unros_core::{anyhow, async_run_all, default_run_options, logging::{dump::DataDump, init_logger, rate::RateLogger}, tokio};
+use unros_core::{
+    anyhow, async_run_all, default_run_options,
+    logging::{dump::DataDump, init_logger, rate::RateLogger},
+    tokio,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

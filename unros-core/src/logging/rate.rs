@@ -7,16 +7,20 @@ pub struct RateLogger {
     epoch: usize,
     count: usize,
     pub window_size: f32,
-    pub target: String
+    pub target: String,
 }
-
 
 impl Default for RateLogger {
     fn default() -> Self {
-        Self { start: Instant::now(), epoch: 0, count: 0, window_size: 1.0, target: "rate-logger".into() }
+        Self {
+            start: Instant::now(),
+            epoch: 0,
+            count: 0,
+            window_size: 1.0,
+            target: "rate-logger".into(),
+        }
     }
 }
-
 
 impl RateLogger {
     pub fn increment(&mut self) {
