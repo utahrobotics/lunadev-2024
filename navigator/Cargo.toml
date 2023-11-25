@@ -9,5 +9,6 @@ edition = "2021"
 pid = "4"
 unros-core = { path = "../unros-core" }
 global-msgs = { path = "../global-msgs" }
+rig = { path = "../rig" }
 nalgebra = { workspace = true }
 ordered-float = { workspace = true }
