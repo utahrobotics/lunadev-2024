@@ -123,14 +123,14 @@ impl Node for RealSenseCamera {
             config
                 .enable_device_from_serial(self.device.info(Rs2CameraInfo::SerialNumber).unwrap())?
                 .disable_all_streams()?
-                .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 30)?
+                .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 0)?
                 .enable_stream(Rs2StreamKind::Color, None, 0, 0, Rs2Format::Rgb8, 0)?;
         } else {
             warn!("This Realsense camera is not attached to a USB 3.0 port");
             config
                 .enable_device_from_serial(self.device.info(Rs2CameraInfo::SerialNumber).unwrap())?
                 .disable_all_streams()?
-                .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 30)?;
+                .enable_stream(Rs2StreamKind::Depth, None, 0, 0, Rs2Format::Z16, 0)?;
         }
 
         if self.robot_element.is_some() {

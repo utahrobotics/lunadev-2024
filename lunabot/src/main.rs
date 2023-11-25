@@ -11,7 +11,7 @@ use localization::{eskf, Localizer, OrientationFrame, PositionFrame};
 use navigator::{pid, WaypointDriver};
 use realsense::discover_all_realsense;
 use rig::Robot;
-use unros_core::{anyhow, async_run_all, default_run_options, dump::DataDump, init_logger, tokio};
+use unros_core::{anyhow, async_run_all, default_run_options, logging::{dump::DataDump, init_logger, rate::RateLogger}, tokio};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -37,6 +37,14 @@ async fn main() -> anyhow::Result<()> {
         camera_element.get_ref(),
     );
     apriltag.add_tag(Default::default(), Default::default(), 0.107, 0);
+    let mut img_sub = camera.image_received_signal().watch();
+    tokio::spawn(async move {
+        let mut rate_logger = RateLogger::default();
+        loop {
+            img_sub.wait_for_change().await;
+            rate_logger.increment();
+        }
+    });
 
     let mut positioning = Localizer::new(robot_base);
     positioning.add_position_sub(

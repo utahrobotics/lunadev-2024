@@ -20,7 +20,7 @@ use tokio::{
     sync::mpsc,
 };
 
-use crate::SUB_LOGGING_DIR;
+use super::SUB_LOGGING_DIR;
 
 struct DataDumpInner {
     writer: mpsc::UnboundedSender<Vec<u8>>,
