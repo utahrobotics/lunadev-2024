@@ -22,14 +22,14 @@ impl Joint {
     pub(super) fn init(&mut self) {
         match self {
             Joint::Fixed => {}
-            Joint::Hinge(joint) => joint.set_angle(joint.starting_angle),
+            Joint::Hinge(joint) => *joint.angle.get_mut() = joint.starting_angle,
         }
     }
 
-    pub fn get_ref(&self) -> JointRef {
+    pub(super) fn get_joint_mut(&self) -> JointMut {
         match self {
-            Joint::Fixed => JointRef::Fixed,
-            Joint::Hinge(x) => JointRef::Hinge(HingeJointRef(x)),
+            Joint::Fixed => JointMut::Fixed,
+            Joint::Hinge(joint) => JointMut::Hinge(HingeJointMut(joint)),
         }
     }
 
@@ -51,15 +51,16 @@ impl Joint {
     }
 }
 
-/// An immutable reference to a joint.
+/// A mutable reference to a joint.
 ///
 /// Unlike `RobotElementRef`, this is bounded to the lifetime of
 /// the original joint.
-pub enum JointRef<'a> {
+pub enum JointMut<'a> {
     Fixed,
-    Hinge(HingeJointRef<'a>),
+    Hinge(HingeJointMut<'a>),
 }
 
+/// A joint that rotates about a single axis.
 #[derive(Deserialize, Serialize)]
 pub struct HingeJoint {
     pub axis: UnitVector3<f64>,
@@ -77,18 +78,9 @@ impl HingeJoint {
         }
     }
 
-    pub fn set_angle(&self, angle: f64) {
-        self.angle.store(angle, Ordering::Release);
-        self.update();
-    }
-
+    /// Gets the signed angle of the hinge from the starting point.
     pub fn get_angle(&self) -> f64 {
         self.angle.load(Ordering::Acquire)
-    }
-
-    pub fn add_angle(&self, angle: f64) {
-        self.angle.fetch_add(angle, Ordering::Release);
-        self.update();
     }
 
     pub(super) fn add_subscriber(&self, sender: mpsc::Sender<()>) {
@@ -96,10 +88,23 @@ impl HingeJoint {
     }
 }
 
-pub struct HingeJointRef<'a>(&'a HingeJoint);
+/// A mutable reference to a `HingeJoint`.
+/// 
+/// This is the only way to rotate a `HingeJoint`.
+pub struct HingeJointMut<'a>(&'a HingeJoint);
 
-impl<'a> HingeJointRef<'a> {
+impl<'a> HingeJointMut<'a> {
     pub fn get_angle(&self) -> f64 {
         self.0.get_angle()
+    }
+
+    pub fn add_angle(&mut self, angle: f64) {
+        self.0.angle.fetch_add(angle, Ordering::Release);
+        self.0.update();
+    }
+
+    pub fn set_angle(&mut self, angle: f64) {
+        self.0.angle.store(angle, Ordering::Release);
+        self.0.update();
     }
 }

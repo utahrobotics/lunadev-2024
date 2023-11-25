@@ -7,7 +7,7 @@ use std::{collections::HashMap, hash::BuildHasher, sync::Arc};
 
 use crossbeam::atomic::AtomicCell;
 use fxhash::FxHashMap;
-use joints::{Joint, JointRef};
+use joints::{Joint, JointMut};
 use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, Vector3};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
@@ -257,8 +257,8 @@ impl RobotElement {
         self.0.chain.last().unwrap()
     }
 
-    pub fn get_local_joint(&mut self) -> &Joint {
-        &self.get_local_element().joint
+    pub fn get_local_joint(&mut self) -> JointMut {
+        self.get_local_element().joint.get_joint_mut()
     }
 
     pub fn get_isometry_from_base(&self) -> Isometry3<f64> {
@@ -281,8 +281,8 @@ impl RobotElement {
 }
 
 impl RobotElementRef {
-    pub fn get_local_joint(&self) -> JointRef {
-        self.0.get_local_element().joint.get_ref()
+    pub fn get_local_joint(&self) -> &Joint {
+        &self.0.get_local_element().joint
     }
 
     pub fn get_isometry_from_base(&self) -> Isometry3<f64> {
