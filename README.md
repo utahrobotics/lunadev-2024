@@ -33,18 +33,18 @@ If you need a display soon, please let me know as there are temporary solutions.
 
 ## Directory
 
-1. [unros-core](https://github.com/utahrobotics/lunadev-2024/tree/unros/unros-core) - The core framework for Unros
-2. [rig](https://github.com/utahrobotics/lunadev-2024/tree/unros/rig) - Tracks the various moving parts of a robot
-3. [realsense](https://github.com/utahrobotics/lunadev-2024/tree/unros/realsense) - Working with realsense cameras
-4. [camera](https://github.com/utahrobotics/lunadev-2024/tree/unros/camera) - Working with generic cameras
-5. [apriltag](https://github.com/utahrobotics/lunadev-2024/tree/unros/apriltag) - Identifying apriltags
-6. [drive](https://github.com/utahrobotics/lunadev-2024/tree/unros/drive) - Controlling the wheels
-7. [global-msgs](https://github.com/utahrobotics/lunadev-2024/tree/unros/global-msgs) - Messages used for lunabotics that are not related to Unros
-8. [navigator](https://github.com/utahrobotics/lunadev-2024/tree/unros/navigator) - Drive controller for driving to waypoints
-9. [positioning](https://github.com/utahrobotics/lunadev-2024/tree/unros/positioning) - Localizes the robot in space based on sensor data
-10. [serial](https://github.com/utahrobotics/lunadev-2024/tree/unros/serial) - Working with serial ports
-11. [telemtry](https://github.com/utahrobotics/lunadev-2024/tree/unros/telemetry) - Connecting with Lunabase
-12. [lunabase](https://github.com/utahrobotics/lunadev-2024/tree/unros/lunabase) - Mission control software, with some development utilities
-13. [tools](https://github.com/utahrobotics/lunadev-2024/tree/unros/tools) - Command Line Application for controlling Unros externally
-14. [lunabot](https://github.com/utahrobotics/lunadev-2024/tree/unros/lunabot) - The final executable for lunabot
-15. [lunadev](https://github.com/utahrobotics/lunadev-2024/tree/unros/lunadev) - Some stuff that help with development
+1. [unros-core](https://github.com/utahrobotics/lunadev-2024/tree/main/unros-core) - The core framework for Unros
+2. [rig](https://github.com/utahrobotics/lunadev-2024/tree/main/rig) - Tracks the various moving parts of a robot
+3. [realsense](https://github.com/utahrobotics/lunadev-2024/tree/main/realsense) - Working with realsense cameras
+4. [camera](https://github.com/utahrobotics/lunadev-2024/tree/main/camera) - Working with generic cameras
+5. [apriltag](https://github.com/utahrobotics/lunadev-2024/tree/main/apriltag) - Identifying apriltags
+6. [drive](https://github.com/utahrobotics/lunadev-2024/tree/main/drive) - Controlling the wheels
+7. [global-msgs](https://github.com/utahrobotics/lunadev-2024/tree/main/global-msgs) - Messages used for lunabotics that are not related to Unros
+8. [navigator](https://github.com/utahrobotics/lunadev-2024/tree/main/navigator) - Drive controller for driving to waypoints
+9. [localization](https://github.com/utahrobotics/lunadev-2024/tree/main/localization) - Localizes the robot in space based on sensor data
+10. [serial](https://github.com/utahrobotics/lunadev-2024/tree/main/serial) - Working with serial ports
+11. [telemtry](https://github.com/utahrobotics/lunadev-2024/tree/main/telemetry) - Connecting with Lunabase
+12. [lunabase](https://github.com/utahrobotics/lunadev-2024/tree/main/lunabase) - Mission control software, with some development utilities
+13. [tools](https://github.com/utahrobotics/lunadev-2024/tree/main/tools) - Command Line Application for controlling Unros externally
+14. [lunabot](https://github.com/utahrobotics/lunadev-2024/tree/main/lunabot) - The final executable for lunabot
+15. [lunadev](https://github.com/utahrobotics/lunadev-2024/tree/main/lunadev) - Some stuff that help with development
