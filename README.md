@@ -43,7 +43,7 @@ If you need a display soon, please let me know as there are temporary solutions.
 8. [navigator](https://github.com/utahrobotics/lunadev-2024/tree/main/navigator) - Drive controller for driving to waypoints
 9. [localization](https://github.com/utahrobotics/lunadev-2024/tree/main/localization) - Localizes the robot in space based on sensor data
 10. [serial](https://github.com/utahrobotics/lunadev-2024/tree/main/serial) - Working with serial ports
-11. [telemtry](https://github.com/utahrobotics/lunadev-2024/tree/main/telemetry) - Connecting with Lunabase
+11. [telemetry](https://github.com/utahrobotics/lunadev-2024/tree/main/telemetry) - Connecting with Lunabase
 12. [lunabase](https://github.com/utahrobotics/lunadev-2024/tree/main/lunabase) - Mission control software, with some development utilities
 13. [tools](https://github.com/utahrobotics/lunadev-2024/tree/main/tools) - Command Line Application for controlling Unros externally
 14. [lunabot](https://github.com/utahrobotics/lunadev-2024/tree/main/lunabot) - The final executable for lunabot
