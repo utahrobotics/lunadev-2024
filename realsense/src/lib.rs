@@ -72,6 +72,15 @@ impl RealSenseCamera {
     pub fn get_path(&self) -> &Path {
         let path = self
             .device
+            .info(Rs2CameraInfo::PhysicalPort)
+            .expect("Failed to query camera port")
+            .to_bytes();
+        Path::new(OsStr::from_bytes(path))
+    }
+
+    pub fn get_name(&self) -> &Path {
+        let path = self
+            .device
             .info(Rs2CameraInfo::Name)
             .expect("Failed to query camera name")
             .to_bytes();

@@ -10,7 +10,7 @@ tokio-serial = "5"
 unros-core = { path = "../unros-core" }
 embedded-hal = "0.2"
 nb = "1"
-vesc-comm = { git = "https://github.com/fmckeogh/vesc-comm.git" }
+vesc-comm = { git = "https://github.com/manglemix/vesc-comm.git" }
 # tokio-util = { version = "0.7", features = ["codec"] }
 # futures = "0.3"
 # crossbeam = "0.8"
