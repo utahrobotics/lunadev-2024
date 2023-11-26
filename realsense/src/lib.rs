@@ -11,13 +11,14 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::Path,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::{Duration, Instant}, num::NonZeroU32,
 };
 
+use bytemuck::cast_slice;
 use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
-use image::{DynamicImage, ImageBuffer, Rgb};
+use image::{DynamicImage, ImageBuffer, Rgb, Luma};
 use localization::IMUFrame;
-use nalgebra::{Const, Dyn, Matrix, Point3, VecStorage, Vector3};
+use nalgebra::{Dyn, Matrix, Point3, VecStorage, Vector3, U2};
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -29,7 +30,7 @@ use realsense_rust::{
 use rig::RobotElementRef;
 use unros_core::{
     anyhow, async_trait,
-    rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+    rayon::{iter::{IndexedParallelIterator, ParallelIterator, IntoParallelIterator}, join},
     setup_logging,
     signal::{Signal, SignalRef},
     tokio_rayon, Node, RuntimeContext, DropCheck,
@@ -44,7 +45,7 @@ pub struct PointCloud {
     /// of this transformation is a hefty implementation
     /// detail that users need not worry
     /// about.
-    pub points: Arc<[Point3<f32>]>,
+    pub points: Arc<[(Point3<f32>, image::Rgb<u8>)]>,
 }
 
 /// A connection to a RealSense Camera.
@@ -172,6 +173,7 @@ impl Node for RealSenseCamera {
         let mut accel_count = 0usize;
         let drop_check = DropCheck::default();
         let _outer_drop_check = drop_check.clone();
+        let mut last_img = None;
 
         tokio_rayon::spawn(move || {
             let mut last_accel = Default::default();
@@ -198,80 +200,121 @@ impl Node for RealSenseCamera {
                             .flatten()
                             .collect(),
                     ) else {
-                        error!("Failed to copy realsense image");
+                        error!("Failed to copy realsense color image");
                         continue;
                     };
-                    let img = DynamicImage::from(img);
-                    self.image_received.set(Arc::new(img));
+                    last_img = Some(img.clone());
+                    let img = Arc::new(DynamicImage::from(img));
+                    self.image_received.set(img);
                 }
 
                 let Some(robot_element) = &self.robot_element else {
                     continue;
                 };
 
-                // Get depth
-                let depth_frames = frames.frames_of_type::<DepthFrame>();
-                for frame in depth_frames {
-                    let focal_length = frame.width() as f32 * self.focal_length_frac;
+                let Some(last_img) = &last_img else {
+                    continue;
+                };
+
+                // Create Resizer instance and resize source image
+                // into buffer of destination image
+                let mut resizer = fast_image_resize::Resizer::new(
+                    fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Hamming),
+                );
+
+                for frame in frames.frames_of_type::<DepthFrame>() {
+                    let Some(img) = ImageBuffer::<Luma<u16>, Vec<_>>::from_raw(
+                        frame.width() as u32,
+                        frame.height() as u32,
+                        frame
+                            .iter()
+                            .map(|px| {
+                                let PixelKind::Z16 { depth } = px else {
+                                    unreachable!()
+                                };
+                                *depth
+                            })
+                            .collect(),
+                    ) else {
+                        error!("Failed to copy realsense depth image");
+                        continue;
+                    };
+
+                    let focal_length = frame.width() as f32 * self.focal_length_frac / 4.0;
                     let global_isometry = robot_element.get_global_isometry();
-                    let cam_geom = cam_geom::Camera::new(
-                        IntrinsicParametersPerspective::from(PerspectiveParams {
-                            fx: focal_length,
-                            fy: focal_length,
-                            skew: 0.0,
-                            cx: frame.width() as f32 / 2.0,
-                            cy: frame.height() as f32 / 2.0,
-                        }),
-                        ExtrinsicParameters::from_pose(&nalgebra::convert(global_isometry)),
-                    );
-                    let pixel_coords: Vec<_> = (0..frame.height())
-                        .into_iter()
-                        .map(|y| {
-                            (0..frame.width())
+                    let frame_width = frame.width() as u32;
+                    let frame_height = frame.height() as u32;
+
+                    let (frame_bytes, raw_rays) = join(
+                        || {
+                            let width = NonZeroU32::new(frame_width).unwrap();
+                            let height = NonZeroU32::new(frame_height).unwrap();
+                            let src_image = fast_image_resize::Image::from_vec_u8(
+                                width,
+                                height,
+                                cast_slice(&img).to_vec(),
+                                fast_image_resize::PixelType::U16,
+                            ).unwrap();
+
+                            let dst_width = NonZeroU32::new(frame_width / 4).unwrap();
+                            let dst_height = NonZeroU32::new(frame_height / 4).unwrap();
+                            let mut dst_image = fast_image_resize::Image::new(
+                                dst_width,
+                                dst_height,
+                                src_image.pixel_type(),
+                            );
+
+                            // Get mutable view of destination image data
+                            let mut dst_view = dst_image.view_mut();
+                            resizer.resize(&src_image.view(), &mut dst_view).unwrap();
+                            dst_image.into_vec()
+                        },
+                        || {
+                            let cam_geom = cam_geom::Camera::new(
+                                IntrinsicParametersPerspective::from(PerspectiveParams {
+                                    fx: focal_length,
+                                    fy: focal_length,
+                                    skew: 0.0,
+                                    cx: frame_width as f32 / 4.0,
+                                    cy: frame_height as f32 / 4.0,
+                                }),
+                                ExtrinsicParameters::from_pose(&nalgebra::convert(global_isometry)),
+                            );
+                            let pixel_coords = (0..frame_height / 4)
                                 .into_iter()
-                                .map(move |x| [x as f32, y as f32])
-                                .flatten()
-                        })
-                        .flatten()
-                        .collect();
-                    let pixel_coords = Pixels::new(Matrix::<_, Dyn, _, _>::from_data(
-                        VecStorage::new(Dyn(frame.height() * frame.width()), Const, pixel_coords),
-                    ));
-                    let raw_rays = cam_geom.pixel_to_world(&pixel_coords);
-                    let raw_rays = raw_rays.data.data.as_slice();
-                    let rx_slice = raw_rays.split_at(raw_rays.len() / 3).0;
-                    let ry_slice = raw_rays
-                        .split_at(raw_rays.len() / 3)
-                        .1
-                        .split_at(rx_slice.len())
-                        .0;
-                    let rz_slice = raw_rays.split_at(raw_rays.len() / 3 * 2).1;
+                                .map(|y| {
+                                    (0..frame_width / 4)
+                                        .into_iter()
+                                        .map(move |x| [x as f32, y as f32])
+                                        .flatten()
+                                })
+                                .flatten();
+                            
+                            let pixel_coords = Pixels::new(Matrix::<f32, Dyn, U2, VecStorage<f32, Dyn, U2>>::from_row_iterator(frame_height as usize * frame_width as usize / 16, pixel_coords));
+                            cam_geom.pixel_to_world(&pixel_coords)
+                        }
+                    );
+                    
                     let scale = frame.depth_units().unwrap();
-                    let depths: Vec<_> = frame
-                        .iter()
-                        .map(|px| {
-                            let PixelKind::Z16 { depth } = px else {
-                                unreachable!()
-                            };
-                            if *depth == 0 {
-                                None
-                            } else {
-                                Some((*depth as f32) * scale)
-                            }
-                        })
-                        .collect();
+                    // println!("{scale}");
                     let origin: Vector3<f32> =
                         nalgebra::convert(global_isometry.translation.vector);
-                    let points: Arc<[_]> = depths
+
+                    let points: Arc<[_]> = cast_slice::<_, u16>(&frame_bytes)
                         .into_par_iter()
-                        .zip(rx_slice)
-                        .zip(ry_slice)
-                        .zip(rz_slice)
-                        .filter_map(|(((depth, x), y), z)| {
-                            let ray = Vector3::new(*x, *y, *z);
-                            Some(Point3::from(ray * depth? + origin))
+                        .enumerate()
+                        .filter_map(|(i, depth)| {
+                            if *depth == 0 {
+                                return None;
+                            }
+                            let depth = *depth as f32 * scale;
+                            let ray = raw_rays.data.row(i).transpose().normalize();
+                            // assert_eq!(ray.magnitude(), 1.0);
+                            // let ray = Vector3::new(ray[0], ray[1], ray[2]).normalize();
+                            Some((Point3::from(ray * depth + origin), *last_img.get_pixel(i as u32 % (frame_width / 4) * 4, i as u32 / (frame_width / 4) * 4)))
                         })
                         .collect();
+                    // let points: Arc<[_]> = raw_rays.data.row_iter().map(|x| x.transpose().into()).collect();
                     self.point_cloud_received.set(PointCloud { points });
                 }
 

@@ -16,3 +16,4 @@ rig = { path = "../rig" }
 nalgebra = { workspace = true }
 toml = { workspace = true }
 fxhash = { workspace = true }
+las = "0.8"

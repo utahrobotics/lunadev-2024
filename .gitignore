@@ -2,3 +2,4 @@
 logs*
 .vscode
 rustc-ice-*.txt
+*.las

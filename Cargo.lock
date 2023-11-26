@@ -947,6 +947,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast_image_resize"
+version = "2.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc789a40040e11bbe4ba31ca319406805a12fe3f8d71314bbc4bd076602ad55a"
+dependencies = [
+ "num-traits",
+ "thiserror",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1443,6 +1453,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "las"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6021d378135165202cd287627dd6fbb25fb80cc740adf72ce5576fab1946a4c3"
+dependencies = [
+ "byteorder",
+ "chrono",
+ "log",
+ "num-traits",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1525,6 +1549,7 @@ version = "0.1.0"
 dependencies = [
  "apriltag 0.1.0",
  "fxhash",
+ "las",
  "localization",
  "nalgebra",
  "navigator",
@@ -2275,7 +2300,9 @@ dependencies = [
 name = "realsense"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "cam-geom",
+ "fast_image_resize",
  "image",
  "localization",
  "nalgebra",
@@ -3024,6 +3051,12 @@ name = "utf8parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
+
+[[package]]
+name = "uuid"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e395fcf16a7a3d8127ec99782007af141946b4795001f876d54fb0d55978560"
 
 [[package]]
 name = "v4l"
