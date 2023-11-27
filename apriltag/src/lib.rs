@@ -4,14 +4,14 @@
 use std::{
     f64::consts::PI,
     fmt::{Debug, Display},
-    sync::{mpsc::sync_channel, Arc},
+    sync::{mpsc::sync_channel, Arc}, time::Instant,
 };
 
 use apriltag::{families::Tag16h5, DetectorBuilder, Image, TagParams};
 use apriltag_image::{image::DynamicImage, ImageExt};
 use apriltag_nalgebra::PoseExt;
 use fxhash::FxHashMap;
-use nalgebra::{Point3, UnitQuaternion};
+use nalgebra::{Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros_core::{
     anyhow, async_trait, setup_logging,
@@ -25,6 +25,7 @@ use unros_core::{
 #[derive(Clone)]
 pub struct PoseObservation {
     pub position: Point3<f64>,
+    pub velocity: Option<Vector3<f64>>,
     pub orientation: UnitQuaternion<f64>,
     /// The goodness of an observation.
     ///
@@ -71,6 +72,7 @@ pub struct AprilTagDetector {
     image_width: u32,
     image_height: u32,
     robot_element: RobotElementRef,
+    pub velocity_window: usize
 }
 
 impl AprilTagDetector {
@@ -98,6 +100,7 @@ impl AprilTagDetector {
             image_width,
             image_height,
             robot_element,
+            velocity_window: 200
         }
     }
 
@@ -160,6 +163,8 @@ impl Node for AprilTagDetector {
                 .add_family_bits(Tag16h5::default(), 1)
                 .build());
 
+            let mut seen: FxHashMap<usize, (Instant, Point3<f64>)> = FxHashMap::default();
+
             loop {
                 let img = match img_receiver.recv() {
                     Ok(x) => x,
@@ -188,6 +193,7 @@ impl Node for AprilTagDetector {
                         warn!("Failed to estimate pose of {}", detection.id());
                         continue;
                     };
+
                     let tag_pose = tag_pose.to_na();
 
                     let mut tag_orientation_euler = tag_pose.rotation.euler_angles();
@@ -205,9 +211,26 @@ impl Node for AprilTagDetector {
                     tag_quaternion =
                         UnitQuaternion::from_euler_angles(tag_orientation_euler.0, 0.0, 0.0)
                             * tag_quaternion;
+                    
+                    let position: Point3<f64> = (known.position.coords + tag_pose.translation.vector).into();
+                    let velocity;
+
+                    if let Some((time, old_pos)) = seen.get_mut(&detection.id()) {
+                        let elapsed = time.elapsed().as_millis();
+                        if elapsed <= self.velocity_window as u128 {
+                            velocity = Some((position.coords - old_pos.coords) * (1000.0 / elapsed as f64));
+                        } else {
+                            velocity = None;
+                        }
+                        *time = Instant::now();
+                    } else {
+                        seen.insert(detection.id(), (Instant::now(), position));
+                        velocity = None;
+                    }
 
                     self.tag_detected.set(PoseObservation {
-                        position: (known.position.coords + tag_pose.translation.vector).into(),
+                        position,
+                        velocity,
                         orientation: known.orientation * tag_quaternion,
                         decision_margin: detection.decision_margin(),
                         robot_element: self.robot_element.clone(),

@@ -19,7 +19,10 @@ use std::{
     future::Future,
     ops::{Add, AddAssign},
     pin::Pin,
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 pub mod logging;

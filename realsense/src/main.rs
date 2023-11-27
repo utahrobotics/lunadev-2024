@@ -11,17 +11,21 @@ async fn main() -> anyhow::Result<()> {
     // let frame_count: &_ = Box::leak(Box::new(frame_count));
     async_run_all(
         cameras.map(|mut x| {
-            // let mut img_sub = x.image_received_signal().subscribe_unbounded();
-            let mut imu_sub = x.imu_frame_received().watch();
+            let mut img_sub = x.image_received_signal().subscribe_unbounded();
+            // let mut imu_sub = x.imu_frame_received().watch();
             tokio::spawn(async move {
+                let mut i = 0;
                 loop {
+                    let img = img_sub.recv().await;
+                    img.save(format!("{i}.png")).unwrap();
+                    i += 1;
                     // println!("{:?}", img_sub.recv().await.dimensions());
-                    let imu = imu_sub.wait_for_change().await;
-                    println!(
-                        "ang_vel: {} accel: {}",
-                        imu.angular_velocity / PI * 180.0,
-                        imu.acceleration
-                    );
+                    // let imu = imu_sub.wait_for_change().await;
+                    // println!(
+                    //     "ang_vel: {} accel: {}",
+                    //     imu.angular_velocity / PI * 180.0,
+                    //     imu.acceleration
+                    // );
                 }
             });
             FinalizedNode::from(x)

@@ -2,7 +2,7 @@
 //! of spatial input to determine where an object (presumably a
 //! robot) is in global space.
 
-use std::time::{Duration, Instant};
+use std::{time::{Duration, Instant}, f64::consts::TAU};
 
 pub use eskf;
 use nalgebra::{Isometry3, Matrix3, Point3, Quaternion, UnitQuaternion, Vector3};
@@ -17,6 +17,9 @@ use unros_core::{
 pub struct PositionFrame {
     pub position: Point3<f64>,
     pub variance: Matrix3<f64>,
+    
+    pub velocity: Option<Vector3<f64>>,
+
     pub robot_element: RobotElementRef,
 }
 
@@ -146,6 +149,9 @@ impl Node for Localizer {
                     eskf.set_rotational_variance(quaternion_core::to_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, angular_velocity_variance_quat).into());
 
                     eskf.gravity = eskf.orientation * Vector3::y_axis().into_inner() * 9.81;
+                    frame.angular_velocity.x = nalgebra::wrap(frame.angular_velocity.x, - TAU, TAU);
+                    frame.angular_velocity.y = nalgebra::wrap(frame.angular_velocity.y, - TAU, TAU);
+                    frame.angular_velocity.z = nalgebra::wrap(frame.angular_velocity.z, - TAU, TAU);
 
                     let (w, [i, j, k]) = quaternion_core::from_euler_angles(frame.rotation_type.into(), frame.rotation_sequence.into(), [frame.angular_velocity.x, frame.angular_velocity.y, frame.angular_velocity.z]);
                     let vel_quat = isometry.rotation * UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k));
@@ -175,6 +181,14 @@ impl Node for Localizer {
                     let isometry = frame.robot_element.get_isometry_from_base();
                     frame.position = isometry * frame.position;
                     frame.variance = isometry.rotation.to_rotation_matrix() * frame.variance;
+
+                    if let Some(mut velocity) = frame.velocity {
+                        velocity = isometry * velocity;
+                        if let Err(e) = eskf.observe_velocity(velocity, frame.variance) {
+                            error!("Failed to observe velocity: {e:#?}");
+                            continue;
+                        }
+                    }
 
                     if let Err(e) = eskf.observe_position(frame.position, frame.variance) {
                         error!("Failed to observe position: {e:#?}");

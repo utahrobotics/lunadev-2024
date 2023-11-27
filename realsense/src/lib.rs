@@ -7,16 +7,17 @@
 use std::{
     collections::HashSet,
     ffi::OsStr,
+    num::NonZeroU32,
     ops::Deref,
     os::unix::ffi::OsStrExt,
     path::Path,
     sync::{Arc, Mutex},
-    time::{Duration, Instant}, num::NonZeroU32,
+    time::{Duration, Instant},
 };
 
 use bytemuck::cast_slice;
 use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
-use image::{DynamicImage, ImageBuffer, Rgb, Luma};
+use image::{DynamicImage, ImageBuffer, Luma, Rgb};
 use localization::IMUFrame;
 use nalgebra::{Dyn, Matrix, Point3, VecStorage, Vector3, U2};
 use realsense_rust::{
@@ -30,10 +31,13 @@ use realsense_rust::{
 use rig::RobotElementRef;
 use unros_core::{
     anyhow, async_trait,
-    rayon::{iter::{IndexedParallelIterator, ParallelIterator, IntoParallelIterator}, join},
+    rayon::{
+        iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
+        join,
+    },
     setup_logging,
     signal::{Signal, SignalRef},
-    tokio_rayon, Node, RuntimeContext, DropCheck,
+    tokio_rayon, DropCheck, Node, RuntimeContext,
 };
 
 #[derive(Clone)]
@@ -168,9 +172,15 @@ impl Node for RealSenseCamera {
         let mut pipeline = pipeline.start(Some(config))?;
         let mut calibrating = true;
         let start = Instant::now();
+
         let mut accel_sum = Vector3::default();
         let mut accel_scale = 1.0;
         let mut accel_count = 0usize;
+
+        let mut ang_vel_sum = Vector3::default();
+        let mut ang_vel_bias = Vector3::default();
+        let mut ang_vel_count = 0usize;
+
         let drop_check = DropCheck::default();
         let _outer_drop_check = drop_check.clone();
         let mut last_img = None;
@@ -212,15 +222,57 @@ impl Node for RealSenseCamera {
                     continue;
                 };
 
+                for frame in frames.frames_of_type::<GyroFrame>() {
+                    last_ang_vel = nalgebra::convert(Vector3::from(*frame.rotational_velocity()));
+
+                    if calibrating {
+                        ang_vel_sum += last_ang_vel;
+                        ang_vel_count += 1;
+                    }
+
+                    last_ang_vel -= ang_vel_bias;
+                }
+
+                for frame in frames.frames_of_type::<AccelFrame>() {
+                    last_accel = nalgebra::convert(Vector3::from(*frame.acceleration()));
+
+                    if calibrating {
+                        accel_sum += last_accel;
+                        accel_count += 1;
+                    }
+
+                    last_accel *= accel_scale;
+                }
+                
+                if calibrating {
+                    if start.elapsed() >= self.calibration_time {
+                        calibrating = false;
+                        accel_scale = 9.81 / accel_sum.magnitude() * accel_count as f64;
+                        ang_vel_bias = ang_vel_sum / ang_vel_count as f64;
+                        debug!("Realsense calibrated");
+                    }
+                }
+
+                self.imu_frame_received.set(IMUFrame {
+                    acceleration: last_accel,
+                    angular_velocity: last_ang_vel,
+                    rotation_sequence: rig::RotationSequence::XYZ,
+                    rotation_type: rig::RotationType::Intrinsic,
+                    acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.05,
+                    angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 0.05,
+                    robot_element: robot_element.clone(),
+                });
+
                 let Some(last_img) = &last_img else {
                     continue;
                 };
 
                 // Create Resizer instance and resize source image
                 // into buffer of destination image
-                let mut resizer = fast_image_resize::Resizer::new(
-                    fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Hamming),
-                );
+                let mut resizer =
+                    fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(
+                        fast_image_resize::FilterType::Hamming,
+                    ));
 
                 for frame in frames.frames_of_type::<DepthFrame>() {
                     let Some(img) = ImageBuffer::<Luma<u16>, Vec<_>>::from_raw(
@@ -254,7 +306,8 @@ impl Node for RealSenseCamera {
                                 height,
                                 cast_slice(&img).to_vec(),
                                 fast_image_resize::PixelType::U16,
-                            ).unwrap();
+                            )
+                            .unwrap();
 
                             let dst_width = NonZeroU32::new(frame_width / 4).unwrap();
                             let dst_height = NonZeroU32::new(frame_height / 4).unwrap();
@@ -289,12 +342,20 @@ impl Node for RealSenseCamera {
                                         .flatten()
                                 })
                                 .flatten();
-                            
-                            let pixel_coords = Pixels::new(Matrix::<f32, Dyn, U2, VecStorage<f32, Dyn, U2>>::from_row_iterator(frame_height as usize * frame_width as usize / 16, pixel_coords));
+
+                            let pixel_coords = Pixels::new(Matrix::<
+                                f32,
+                                Dyn,
+                                U2,
+                                VecStorage<f32, Dyn, U2>,
+                            >::from_row_iterator(
+                                frame_height as usize * frame_width as usize / 16,
+                                pixel_coords,
+                            ));
                             cam_geom.pixel_to_world(&pixel_coords)
-                        }
+                        },
                     );
-                    
+
                     let scale = frame.depth_units().unwrap();
                     // println!("{scale}");
                     let origin: Vector3<f32> =
@@ -311,43 +372,18 @@ impl Node for RealSenseCamera {
                             let ray = raw_rays.data.row(i).transpose().normalize();
                             // assert_eq!(ray.magnitude(), 1.0);
                             // let ray = Vector3::new(ray[0], ray[1], ray[2]).normalize();
-                            Some((Point3::from(ray * depth + origin), *last_img.get_pixel(i as u32 % (frame_width / 4) * 4, i as u32 / (frame_width / 4) * 4)))
+                            Some((
+                                Point3::from(ray * depth + origin),
+                                *last_img.get_pixel(
+                                    i as u32 % (frame_width / 4) * 4,
+                                    i as u32 / (frame_width / 4) * 4,
+                                ),
+                            ))
                         })
                         .collect();
                     // let points: Arc<[_]> = raw_rays.data.row_iter().map(|x| x.transpose().into()).collect();
                     self.point_cloud_received.set(PointCloud { points });
                 }
-
-                for frame in frames.frames_of_type::<GyroFrame>() {
-                    last_ang_vel = nalgebra::convert(Vector3::from(*frame.rotational_velocity()));
-                }
-
-                for frame in frames.frames_of_type::<AccelFrame>() {
-                    last_accel = nalgebra::convert(Vector3::from(*frame.acceleration()));
-
-                    if calibrating {
-                        accel_sum += last_accel;
-                        accel_count += 1;
-
-                        if start.elapsed() >= self.calibration_time {
-                            calibrating = false;
-                            accel_scale = 9.81 / accel_sum.magnitude() * accel_count as f64;
-                            debug!("Realsense gravity calibrated");
-                        }
-                    }
-
-                    last_accel *= accel_scale;
-                }
-
-                self.imu_frame_received.set(IMUFrame {
-                    acceleration: last_accel,
-                    angular_velocity: last_ang_vel,
-                    rotation_sequence: rig::RotationSequence::XYZ,
-                    rotation_type: rig::RotationType::Intrinsic,
-                    acceleration_variance: Vector3::default() * 0.01,
-                    angular_velocity_variance: Vector3::default() * 0.01,
-                    robot_element: robot_element.clone(),
-                });
             }
         })
         .await
