@@ -212,17 +212,23 @@ impl Node for AprilTagDetector {
                         UnitQuaternion::from_euler_angles(tag_orientation_euler.0, 0.0, 0.0)
                             * tag_quaternion;
                     
-                    let position: Point3<f64> = (known.position.coords + tag_pose.translation.vector).into();
+                    let position: Point3<f64> = (known.position.coords - known.orientation * tag_pose.rotation * tag_pose.translation.vector).into();
                     let velocity;
 
                     if let Some((time, old_pos)) = seen.get_mut(&detection.id()) {
                         let elapsed = time.elapsed().as_millis();
-                        if elapsed <= self.velocity_window as u128 {
-                            velocity = Some((position.coords - old_pos.coords) * (1000.0 / elapsed as f64));
+
+                        if elapsed >= 100 {
+                            if elapsed <= self.velocity_window as u128 {
+                                velocity = Some((position.coords - old_pos.coords) * (1000.0 / elapsed as f64));
+                            } else {
+                                velocity = None;
+                            }
+                            *time = Instant::now();
+                            *old_pos = position;
                         } else {
                             velocity = None;
                         }
-                        *time = Instant::now();
                     } else {
                         seen.insert(detection.id(), (Instant::now(), position));
                         velocity = None;
@@ -231,7 +237,7 @@ impl Node for AprilTagDetector {
                     self.tag_detected.set(PoseObservation {
                         position,
                         velocity,
-                        orientation: known.orientation * tag_quaternion,
+                        orientation: known.orientation * tag_quaternion.inverse(),
                         decision_margin: detection.decision_margin(),
                         robot_element: self.robot_element.clone(),
                     });

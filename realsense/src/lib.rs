@@ -186,8 +186,8 @@ impl Node for RealSenseCamera {
         let mut last_img = None;
 
         tokio_rayon::spawn(move || {
-            let mut last_accel = Default::default();
-            let mut last_ang_vel = Default::default();
+            let mut last_accel: Vector3<f64> = Default::default();
+            let mut last_ang_vel: Vector3<f64> = Default::default();
             loop {
                 let frames = pipeline.wait(None)?;
                 if drop_check.has_dropped() {
@@ -224,6 +224,7 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     last_ang_vel = nalgebra::convert(Vector3::from(*frame.rotational_velocity()));
+                    // last_ang_vel.z *= -1.0;
 
                     if calibrating {
                         ang_vel_sum += last_ang_vel;
@@ -235,6 +236,7 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<AccelFrame>() {
                     last_accel = nalgebra::convert(Vector3::from(*frame.acceleration()));
+                    last_accel *= -1.0;
 
                     if calibrating {
                         accel_sum += last_accel;
@@ -249,7 +251,7 @@ impl Node for RealSenseCamera {
                         calibrating = false;
                         accel_scale = 9.81 / accel_sum.magnitude() * accel_count as f64;
                         ang_vel_bias = ang_vel_sum / ang_vel_count as f64;
-                        debug!("Realsense calibrated");
+                        info!("Realsense calibrated");
                     }
                 }
 
@@ -258,8 +260,8 @@ impl Node for RealSenseCamera {
                     angular_velocity: last_ang_vel,
                     rotation_sequence: rig::RotationSequence::XYZ,
                     rotation_type: rig::RotationType::Intrinsic,
-                    acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.05,
-                    angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 0.05,
+                    acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.65,
+                    angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 0.65,
                     robot_element: robot_element.clone(),
                 });
 

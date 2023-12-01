@@ -81,14 +81,14 @@ async fn main() -> anyhow::Result<()> {
             .map(|tag| PositionFrame {
                 position: tag.position,
                 velocity: tag.velocity,
-                variance: eskf::ESKF::variance_from_element(0.03),
+                variance: eskf::ESKF::variance_from_element(0.5),
                 robot_element: tag.robot_element,
             }),
     );
     positioning.add_orientation_sub(apriltag.tag_detected_signal().subscribe_unbounded().map(
         |tag| OrientationFrame {
             orientation: tag.orientation,
-            variance: eskf::ESKF::variance_from_element(0.2),
+            variance: eskf::ESKF::variance_from_element(0.5),
             robot_element: tag.robot_element,
         },
     ));
