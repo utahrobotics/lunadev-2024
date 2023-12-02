@@ -2,7 +2,10 @@
 //! of spatial input to determine where an object (presumably a
 //! robot) is in global space.
 
-use std::{time::{Duration, Instant}, f64::consts::TAU};
+use std::{
+    f64::consts::TAU,
+    time::{Duration, Instant},
+};
 
 pub use eskf;
 use nalgebra::{Isometry3, Matrix3, Point3, Quaternion, UnitQuaternion, Vector3};
@@ -17,7 +20,7 @@ use unros_core::{
 pub struct PositionFrame {
     pub position: Point3<f64>,
     pub variance: Matrix3<f64>,
-    
+
     pub velocity: Option<Vector3<f64>>,
 
     pub robot_element: RobotElementRef,

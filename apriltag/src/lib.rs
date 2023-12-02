@@ -4,7 +4,8 @@
 use std::{
     f64::consts::PI,
     fmt::{Debug, Display},
-    sync::{mpsc::sync_channel, Arc}, time::Instant,
+    sync::{mpsc::sync_channel, Arc},
+    time::Instant,
 };
 
 use apriltag::{families::Tag16h5, DetectorBuilder, Image, TagParams};
@@ -72,7 +73,7 @@ pub struct AprilTagDetector {
     image_width: u32,
     image_height: u32,
     robot_element: RobotElementRef,
-    pub velocity_window: usize
+    pub velocity_window: usize,
 }
 
 impl AprilTagDetector {
@@ -100,7 +101,7 @@ impl AprilTagDetector {
             image_width,
             image_height,
             robot_element,
-            velocity_window: 200
+            velocity_window: 200,
         }
     }
 
@@ -211,8 +212,10 @@ impl Node for AprilTagDetector {
                     tag_quaternion =
                         UnitQuaternion::from_euler_angles(tag_orientation_euler.0, 0.0, 0.0)
                             * tag_quaternion;
-                    
-                    let position: Point3<f64> = (known.position.coords - known.orientation * tag_pose.rotation * tag_pose.translation.vector).into();
+
+                    let position: Point3<f64> = (known.position.coords
+                        - known.orientation * tag_pose.rotation * tag_pose.translation.vector)
+                        .into();
                     let velocity;
 
                     if let Some((time, old_pos)) = seen.get_mut(&detection.id()) {
@@ -220,7 +223,9 @@ impl Node for AprilTagDetector {
 
                         if elapsed >= 100 {
                             if elapsed <= self.velocity_window as u128 {
-                                velocity = Some((position.coords - old_pos.coords) * (1000.0 / elapsed as f64));
+                                velocity = Some(
+                                    (position.coords - old_pos.coords) * (1000.0 / elapsed as f64),
+                                );
                             } else {
                                 velocity = None;
                             }

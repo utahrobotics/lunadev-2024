@@ -245,7 +245,7 @@ impl Node for RealSenseCamera {
 
                     last_accel *= accel_scale;
                 }
-                
+
                 if calibrating {
                     if start.elapsed() >= self.calibration_time {
                         calibrating = false;
