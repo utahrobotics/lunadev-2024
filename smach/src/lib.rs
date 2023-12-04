@@ -2,12 +2,6 @@ use std::{future::Future, pin::Pin};
 
 use tokio::sync::{broadcast, mpsc};
 
-// impl<'a, B: AsMut<T>, T> FromBlackboard<'a, B> for &'a mut T {
-//     fn from_bb(bb: &'a mut B) -> Self {
-//         bb.as_mut()
-//     }
-// }
-
 pub struct TransitionInit<B> {
     sender: mpsc::Sender<B>,
     alive_recv: broadcast::Receiver<()>,

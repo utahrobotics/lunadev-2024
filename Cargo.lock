@@ -1521,9 +1521,11 @@ name = "localization"
 version = "0.1.0"
 dependencies = [
  "eskf",
+ "fxhash",
  "nalgebra",
  "quaternion-core",
  "rig",
+ "smach",
  "unros-core",
 ]
 

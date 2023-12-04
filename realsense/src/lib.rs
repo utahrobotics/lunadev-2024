@@ -12,7 +12,6 @@ use std::{
     os::unix::ffi::OsStrExt,
     path::Path,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
 };
 
 use bytemuck::cast_slice;
@@ -60,14 +59,6 @@ pub struct RealSenseCamera {
     point_cloud_received: Signal<PointCloud>,
     imu_frame_received: Signal<IMUFrame>,
     robot_element: Option<RobotElementRef>,
-    /// How much to spend at startup calibrating the
-    /// camera.
-    ///
-    /// For now, only the acceleration is calibrated.
-    /// It is assumed that the camera is not moving
-    /// at startup, and the only acceleration occuring
-    /// is from gravity, which has a magnitude of 9.81 m/s^2.
-    pub calibration_time: Duration,
     pub focal_length_frac: f32,
 }
 
@@ -83,7 +74,6 @@ impl RealSenseCamera {
             point_cloud_received: Default::default(),
             imu_frame_received: Default::default(),
             robot_element: None,
-            calibration_time: Duration::from_secs(3),
             focal_length_frac: 0.5,
         })
     }
@@ -170,16 +160,6 @@ impl Node for RealSenseCamera {
 
         // Change pipeline's type from InactivePipeline -> ActivePipeline
         let mut pipeline = pipeline.start(Some(config))?;
-        let mut calibrating = true;
-        let start = Instant::now();
-
-        let mut accel_sum = Vector3::default();
-        let mut accel_scale = 1.0;
-        let mut accel_count = 0usize;
-
-        let mut ang_vel_sum = Vector3::default();
-        let mut ang_vel_bias = Vector3::default();
-        let mut ang_vel_count = 0usize;
 
         let drop_check = DropCheck::default();
         let _outer_drop_check = drop_check.clone();
@@ -224,35 +204,11 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<GyroFrame>() {
                     last_ang_vel = nalgebra::convert(Vector3::from(*frame.rotational_velocity()));
-                    // last_ang_vel.z *= -1.0;
-
-                    if calibrating {
-                        ang_vel_sum += last_ang_vel;
-                        ang_vel_count += 1;
-                    }
-
-                    last_ang_vel -= ang_vel_bias;
                 }
 
                 for frame in frames.frames_of_type::<AccelFrame>() {
                     last_accel = nalgebra::convert(Vector3::from(*frame.acceleration()));
                     last_accel *= -1.0;
-
-                    if calibrating {
-                        accel_sum += last_accel;
-                        accel_count += 1;
-                    }
-
-                    last_accel *= accel_scale;
-                }
-
-                if calibrating {
-                    if start.elapsed() >= self.calibration_time {
-                        calibrating = false;
-                        accel_scale = 9.81 / accel_sum.magnitude() * accel_count as f64;
-                        ang_vel_bias = ang_vel_sum / ang_vel_count as f64;
-                        info!("Realsense calibrated");
-                    }
                 }
 
                 self.imu_frame_received.set(IMUFrame {
@@ -405,7 +361,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         point_cloud_received: Default::default(),
         imu_frame_received: Default::default(),
         robot_element: None,
-        calibration_time: Duration::from_secs(5),
         focal_length_frac: 0.5,
     }))
 }

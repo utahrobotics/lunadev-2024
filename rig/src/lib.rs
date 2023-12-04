@@ -3,7 +3,11 @@
 //! This library is being actively developed based on current needs, so it
 //! will never be a complete match to `tf2`.
 
-use std::{collections::HashMap, hash::BuildHasher, sync::Arc};
+use std::{
+    collections::HashMap,
+    hash::{BuildHasher, Hash},
+    sync::Arc,
+};
 
 use crossbeam::atomic::AtomicCell;
 use fxhash::FxHashMap;
@@ -232,12 +236,52 @@ struct RobotElementInner {
 // pub struct RobotElement(Arc<[Arc<RobotElementInner>]>, RobotBaseRef);
 pub struct RobotElement(Arc<RobotElementInner>);
 
+impl Hash for RobotElement {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state)
+    }
+}
+
+impl PartialEq for RobotElement {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl PartialEq<RobotElementRef> for RobotElement {
+    fn eq(&self, other: &RobotElementRef) -> bool {
+        Arc::ptr_eq(&self.0, &other.0 .0)
+    }
+}
+
+impl Eq for RobotElement {}
+
 /// An immutable reference to an element of a robot.
 ///
 /// Changes may only be observed through this reference,
 /// never written. If the original `RobotElement` has been dropped,
 /// changes will never be made.
 pub struct RobotElementRef(RobotElement);
+
+impl Hash for RobotElementRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0 .0).hash(state)
+    }
+}
+
+impl PartialEq for RobotElementRef {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0 .0, &other.0 .0)
+    }
+}
+
+impl PartialEq<RobotElement> for RobotElementRef {
+    fn eq(&self, other: &RobotElement) -> bool {
+        Arc::ptr_eq(&self.0 .0, &other.0)
+    }
+}
+
+impl Eq for RobotElementRef {}
 
 impl Clone for RobotElementRef {
     fn clone(&self) -> Self {
