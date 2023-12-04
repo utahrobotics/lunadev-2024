@@ -1,7 +1,6 @@
 use std::{future::Future, pin::Pin};
 
-use tokio::sync::{mpsc, broadcast};
-
+use tokio::sync::{broadcast, mpsc};
 
 // impl<'a, B: AsMut<T>, T> FromBlackboard<'a, B> for &'a mut T {
 //     fn from_bb(bb: &'a mut B) -> Self {
@@ -9,30 +8,34 @@ use tokio::sync::{mpsc, broadcast};
 //     }
 // }
 
-
 pub struct TransitionInit<B> {
     sender: mpsc::Sender<B>,
-    alive_recv: broadcast::Receiver<()>
+    alive_recv: broadcast::Receiver<()>,
 }
-
 
 pub struct Transitioned {
     fut: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
 }
 
-
 impl<B> TransitionInit<B> {
     pub fn next_state<T, R, Fut>(mut self, blackboard: B, state: fn(B) -> Fut) -> Transitioned
     where
         B: Send + 'static,
-        Fut: Future<Output=(B, R)> + Send + 'static,
-        T: Transition<R, B>
+        Fut: Future<Output = (B, R)> + Send + 'static,
+        T: Transition<R, B>,
     {
         Transitioned {
             fut: Some(Box::pin(async move {
                 let (blackboard, output) = state(blackboard).await;
 
-                let trans = T::transition(output, blackboard, TransitionInit { sender: self.sender.clone(), alive_recv: self.alive_recv.resubscribe() });
+                let trans = T::transition(
+                    output,
+                    blackboard,
+                    TransitionInit {
+                        sender: self.sender.clone(),
+                        alive_recv: self.alive_recv.resubscribe(),
+                    },
+                );
                 let Some(fut) = trans.fut else {
                     return;
                 };
@@ -42,29 +45,25 @@ impl<B> TransitionInit<B> {
                         () = fut => { }
                     }
                 });
-            }))
+            })),
         }
     }
 
     pub fn exit_machine(self, blackboard: B) -> Transitioned {
         self.sender.try_send(blackboard).unwrap();
-        Transitioned {
-            fut: None
-        }
+        Transitioned { fut: None }
     }
 }
-
 
 pub trait Transition<T, B> {
     fn transition(input: T, blackboard: B, init: TransitionInit<B>) -> Transitioned;
 }
 
-
 pub async fn start_machine<T, B, R, Fut>(blackboard: B, init_state: fn(B) -> Fut) -> B
 where
     B: Send + 'static,
-    Fut: Future<Output=(B, R)> + Send,
-    T: Transition<R, B>
+    Fut: Future<Output = (B, R)> + Send,
+    T: Transition<R, B>,
 {
     let (blackboard, output) = init_state(blackboard).await;
     let (sender, mut receiver) = mpsc::channel(1);
@@ -77,20 +76,23 @@ where
     fut.await;
     receiver.recv().await.expect("State has panicked")
 }
-    
 
 #[cfg(test)]
 mod tests {
     use crate::{start_machine, Transition};
 
     struct SumBlackboard {
-        sum: usize
+        sum: usize,
     }
 
     struct SumTransition;
 
     impl Transition<(), SumBlackboard> for SumTransition {
-        fn transition(_: (), blackboard: SumBlackboard, init: crate::TransitionInit<SumBlackboard>) -> crate::Transitioned {
+        fn transition(
+            _: (),
+            blackboard: SumBlackboard,
+            init: crate::TransitionInit<SumBlackboard>,
+        ) -> crate::Transitioned {
             init.next_state::<CheckTransition, _, _>(blackboard, check_state)
         }
     }
@@ -98,7 +100,11 @@ mod tests {
     struct CheckTransition;
 
     impl Transition<bool, SumBlackboard> for CheckTransition {
-        fn transition(input: bool, blackboard: SumBlackboard, init: crate::TransitionInit<SumBlackboard>) -> crate::Transitioned {
+        fn transition(
+            input: bool,
+            blackboard: SumBlackboard,
+            init: crate::TransitionInit<SumBlackboard>,
+        ) -> crate::Transitioned {
             if input {
                 init.exit_machine(blackboard)
             } else {
