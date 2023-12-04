@@ -18,8 +18,6 @@ Before connecting for your first time, provide me with your preferred username a
 
 After connecting, VSCode may ask you to type in your password very frequently. Since Lunaserver is exposed to the internet, I do want to enforce some cybersecurity. As such, you will have strong passwords that should not be convenient to type frequently. Thus, you should use SSH keys. Here is a [guide for how you can set that up](https://www.digitalocean.com/community/tutorials/how-to-configure-ssh-key-based-authentication-on-a-linux-server). You must already have an account to do this. Refer back to the first guide on SSH in VSCode to see how to add this key to your SSH config file. Do note that using SSH keys does not eliminate the need for a password; Lunaserver may still ask you to provide a password occasionally, but less often.
 
-If you use the VSCode SSH extension, you can then follow the first set of steps with DevContainers just like normal. Only this time, your Dev Container will have access to all the sensors we will use.
-
 ## Cargo
 
 Every external dependency needed to run the code in lunadev-2024 on Lunaserver is already installed globally, with the exception of Rust itself, as it can only be installed for individual users. To install Rust, run the following command in Lunaserver:  
