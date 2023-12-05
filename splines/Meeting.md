@@ -3,7 +3,7 @@ Here are the things I want to talk about in this meeting
 ## What I did in robotics previously and how things here differ for what we are doing for colloboration
 In robotics our rules for development looked like this:
 1. Our master/main branch was protected. Whatever is on master is guaranteed to work (or have bugs that we know about 
-but cannot do anything about them). Also, the master branch should always compile and have no runtime errors.
+but cannot do anything about them). Also, the master branch should always compile and have no runtime errors. All of our code therefore was written on branches that were merged into master. Because of our rules of what can be one master, the code on the branch must of have been verified to work properly
 2. Never wrap anything in a try/catch (for the most part with some caveats). If we have to wrapped something in a try/catch, 
 that means our code did something wrong. If we continue like nothing happened, most likely our code is in an invalid 
 "state" which is dangerous for the robot and those operating it.
