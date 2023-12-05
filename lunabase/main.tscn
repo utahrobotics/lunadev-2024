@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=28 format=3 uid="uid://b8qgudi6vkflb"]
 
 [ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_1xyvq"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="1_hl7kb"]
@@ -177,7 +177,7 @@ func _update() -> void:
 script/source = "extends VBoxContainer
 
 
-const DATA_STRIDE := 16
+const DATA_STRIDE := 17
 
 var data: PackedFloat32Array
 var data_index := 0
@@ -262,8 +262,8 @@ func _on_play_toggled(button_pressed: bool) -> void:
 func _process(delta: float) -> void:
 	elapsed += delta
 	while elapsed >= target_elapsed:
-		robot.rotation = Vector3(data[data_index + DATA_STRIDE - 3], data[data_index + DATA_STRIDE - 2], data[data_index + DATA_STRIDE - 4])
-		robot.position = Vector3(data[data_index + DATA_STRIDE - 7], data[data_index + DATA_STRIDE - 6], data[data_index + DATA_STRIDE - 5])
+		robot.quaternion = Quaternion(data[data_index + DATA_STRIDE - 4], data[data_index + DATA_STRIDE - 3], data[data_index + DATA_STRIDE - 2], data[data_index + DATA_STRIDE - 5]).normalized()
+		robot.position = Vector3(data[data_index + DATA_STRIDE - 8], data[data_index + DATA_STRIDE - 7], data[data_index + DATA_STRIDE - 6])
 		data_index += DATA_STRIDE
 		if data_index >= data.size():
 			elapsed = 0
@@ -310,6 +310,10 @@ func _gui_input(event: InputEvent) -> void:
 "
 
 [sub_resource type="BoxMesh" id="BoxMesh_0laka"]
+size = Vector3(0.15, 0.15, 0.15)
+
+[sub_resource type="PrismMesh" id="PrismMesh_8ty6s"]
+size = Vector3(0.15, 0.15, 0.15)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7fexe"]
 albedo_color = Color(0.027451, 0.0235294, 0.0627451, 1)
@@ -321,6 +325,36 @@ size = Vector2(20, 20)
 [sub_resource type="Environment" id="Environment_bvywr"]
 background_mode = 1
 background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_51jn0"]
+shading_mode = 0
+albedo_color = Color(0, 1, 0, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_ounod"]
+material = SubResource("StandardMaterial3D_51jn0")
+top_radius = 0.02
+bottom_radius = 0.02
+height = 0.1
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hv5tc"]
+shading_mode = 0
+albedo_color = Color(1, 0, 0, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_7c1fb"]
+material = SubResource("StandardMaterial3D_hv5tc")
+top_radius = 0.02
+bottom_radius = 0.02
+height = 0.1
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jlfhp"]
+shading_mode = 0
+albedo_color = Color(0, 0, 1, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_826py"]
+material = SubResource("StandardMaterial3D_jlfhp")
+top_radius = 0.02
+bottom_radius = 0.02
+height = 0.1
 
 [node name="Main" type="TabContainer"]
 anchors_preset = 15
@@ -430,7 +464,6 @@ ratio = 1.8
 
 [node name="SubViewportContainer" type="SubViewportContainer" parent="3D Player/AspectRatioContainer"]
 layout_mode = 2
-focus_mode = 1
 stretch = true
 script = SubResource("GDScript_mnw3m")
 
@@ -441,7 +474,8 @@ size = Vector2i(2, 2)
 render_target_update_mode = 0
 
 [node name="Robot" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
-rotation_order = 4
+rotation_edit_mode = 1
+top_level = true
 mesh = SubResource("BoxMesh_0laka")
 
 [node name="RemoteTransform3D" type="RemoteTransform3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/Robot"]
@@ -449,19 +483,25 @@ remote_path = NodePath("../../Node3D")
 update_rotation = false
 update_scale = false
 
+[node name="MeshInstance3D" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/Robot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.148285)
+mesh = SubResource("PrismMesh_8ty6s")
+
 [node name="Node3D" type="Node3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
 transform = Transform3D(0.747033, -0.309606, 0.588291, 0, 0.884931, 0.465723, -0.664787, -0.34791, 0.661072, 0, 0, 0)
 
 [node name="Camera3D" type="Camera3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 2.80699)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1.202)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.81442, 0)
+layers = 2
 mesh = SubResource("PlaneMesh_hrbaw")
 
 [node name="Decal" type="Decal" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/MeshInstance3D"]
 size = Vector3(15, 1, 15)
 texture_albedo = ExtResource("1_1xyvq")
+cull_mask = 1048574
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
 transform = Transform3D(0.243107, -0.860673, 0.44737, 3.6215e-11, 0.461207, 0.887293, -0.969999, -0.215707, 0.112123, 0, 1.80059, 0)
@@ -470,6 +510,23 @@ directional_shadow_mode = 1
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
 environment = SubResource("Environment_bvywr")
+
+[node name="Origin" type="Node3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport"]
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/Origin"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+mesh = SubResource("CylinderMesh_ounod")
+skeleton = NodePath("../..")
+
+[node name="MeshInstance3D3" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/Origin"]
+transform = Transform3D(-4.37114e-08, 1, 4.37114e-08, 0, -4.37114e-08, 1, 1, 4.37114e-08, 1.91069e-15, 0.05, 0, 0)
+mesh = SubResource("CylinderMesh_7c1fb")
+skeleton = NodePath("../..")
+
+[node name="MeshInstance3D4" type="MeshInstance3D" parent="3D Player/AspectRatioContainer/SubViewportContainer/SubViewport/Origin"]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 0, 0.05)
+mesh = SubResource("CylinderMesh_826py")
+skeleton = NodePath("../..")
 
 [node name="HBoxContainer" type="HBoxContainer" parent="3D Player"]
 layout_mode = 2
