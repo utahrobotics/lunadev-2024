@@ -20,7 +20,7 @@ Last year, we needed interaction among the many subsystems (all the ones above a
 subsystem communicate to each other, we had a super subsystem called the GrabAndGo. We treated it like an orchestrator. 
 Each individual subsystem was like an instrument. They did not have to know about how what they did would impact the 
 "entire piece." They just followed the orchestrator who knew what they "entire piece" is. The GrabAndGo controlled the 
-interactions among the subsystem to automate the task of placing a game piece. The subsystem also didn't know all the positions 
+interactions among the subsystem to automate the task of placing a game piece. The subsystems also didn't know all the positions 
 they were supposed to go to. Instead, we had a GrabAndGoConstants class that held the vector position of the arm. Then 
 when we had to go the position, we gave the Arm Rotation the theta position and the Arm Extension the magnitude. 
 Let's run through a quick, simplified example of how a piece went from being on the ground to being placed:
