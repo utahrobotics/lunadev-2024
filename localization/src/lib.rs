@@ -178,7 +178,11 @@ async fn calibrate_localizer(
                 calibrating.accel.angle(&total_gravity),
             );
 
-            if accel_correction.w.is_nan() || accel_correction.i.is_nan() || accel_correction.j.is_nan() || accel_correction.k.is_nan() {
+            if accel_correction.w.is_nan()
+                || accel_correction.i.is_nan()
+                || accel_correction.j.is_nan()
+                || accel_correction.k.is_nan()
+            {
                 accel_correction = Default::default();
             }
 
@@ -187,7 +191,7 @@ async fn calibrate_localizer(
                 accel_correction,
                 angular_velocity_bias: calibrating.angular_velocity / calibrating.count as f64,
             };
-            
+
             (robot_element, calibrated)
         })
         .collect();

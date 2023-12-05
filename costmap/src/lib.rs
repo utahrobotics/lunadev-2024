@@ -1,7 +1,22 @@
-use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use nalgebra::{Point3, Matrix, Dyn, VecStorage};
-use unros_core::{Node, async_trait, RuntimeContext, anyhow, signal::unbounded::UnboundedSubscription, setup_logging, rayon::{self, iter::{IntoParallelRefIterator, ParallelIterator, IntoParallelIterator}}, tokio};
+use nalgebra::{Dyn, Matrix, Point3, VecStorage};
+use unros_core::{
+    anyhow, async_trait,
+    rayon::{
+        self,
+        iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    },
+    setup_logging,
+    signal::unbounded::UnboundedSubscription,
+    tokio, Node, RuntimeContext,
+};
 
 pub struct Costmap {
     pub window_duration: Duration,
@@ -11,12 +26,17 @@ pub struct Costmap {
     x_offset: f32,
     y_offset: f32,
     points_sub: UnboundedSubscription<Arc<[usize]>>,
-    points: Arc<[AtomicUsize]>
+    points: Arc<[AtomicUsize]>,
 }
 
-
 impl Costmap {
-    pub fn new(area_width: usize, area_length: usize, cell_width: f32, x_offset: f32, y_offset: f32) -> Self {
+    pub fn new(
+        area_width: usize,
+        area_length: usize,
+        cell_width: f32,
+        x_offset: f32,
+        y_offset: f32,
+    ) -> Self {
         Self {
             window_duration: Duration::from_secs(5),
             area_width,
@@ -25,11 +45,16 @@ impl Costmap {
             x_offset,
             y_offset,
             points_sub: UnboundedSubscription::none(),
-            points: (0..(area_length * area_width)).map(|_| Default::default()).collect(),
+            points: (0..(area_length * area_width))
+                .map(|_| Default::default())
+                .collect(),
         }
     }
 
-    pub fn add_points_sub<T: Send + IntoParallelIterator<Item=Point3<f32>> + 'static>(&mut self, sub: UnboundedSubscription<T>) {
+    pub fn add_points_sub<T: Send + IntoParallelIterator<Item = Point3<f32>> + 'static>(
+        &mut self,
+        sub: UnboundedSubscription<T>,
+    ) {
         let cell_width = self.cell_width;
         let area_width = self.area_width;
         let area_length = self.area_length;
@@ -64,27 +89,32 @@ impl Costmap {
     }
 
     pub fn get_ref(&self) -> CostmapRef {
-        CostmapRef { points: self.points.clone(), area_length: self.area_length, area_width: self.area_width }
+        CostmapRef {
+            points: self.points.clone(),
+            area_length: self.area_length,
+            area_width: self.area_width,
+        }
     }
 }
-
 
 pub struct CostmapRef {
     area_width: usize,
     area_length: usize,
-    points: Arc<[AtomicUsize]>
+    points: Arc<[AtomicUsize]>,
 }
-
 
 impl CostmapRef {
     pub fn get_costmap(&self) -> Matrix<usize, Dyn, Dyn, VecStorage<usize, Dyn, Dyn>> {
-        let data = self.points
+        let data = self
+            .points
             .par_iter()
-            .map(|x|
-                x.load(Ordering::Relaxed)
-            )
+            .map(|x| x.load(Ordering::Relaxed))
             .collect();
-        Matrix::from_data(VecStorage::new(Dyn(self.area_length), Dyn(self.area_width), data))
+        Matrix::from_data(VecStorage::new(
+            Dyn(self.area_length),
+            Dyn(self.area_width),
+            data,
+        ))
     }
 
     // #[cfg(feature = "image")]
@@ -93,18 +123,18 @@ impl CostmapRef {
 
         let max = *costmap.data.as_slice().into_iter().max().unwrap() as f32;
 
-        let buf = costmap.row_iter()
-            .flat_map(|x|
-                x.column_iter().map(|x| {
-                    (x[0] as f32 / max * 255.0) as u8
-                }).collect::<Vec<_>>()
-            )
+        let buf = costmap
+            .row_iter()
+            .flat_map(|x| {
+                x.column_iter()
+                    .map(|x| (x[0] as f32 / max * 255.0) as u8)
+                    .collect::<Vec<_>>()
+            })
             .collect();
 
         image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf).unwrap()
     }
 }
-
 
 #[async_trait]
 impl Node for Costmap {
@@ -122,17 +152,15 @@ impl Node for Costmap {
             tokio::spawn(async move {
                 tokio::time::sleep(self.window_duration).await;
                 rayon::spawn(move || {
-                    new_points.par_iter()
-                        .for_each(|i| {
-                            points[*i].fetch_sub(1, Ordering::Relaxed);
-                        });
+                    new_points.par_iter().for_each(|i| {
+                        points[*i].fetch_sub(1, Ordering::Relaxed);
+                    });
                 });
             });
             rayon::spawn(move || {
-                new_points2.par_iter()
-                    .for_each(|i| {
-                        points2[*i].fetch_add(1, Ordering::Relaxed);
-                    });
+                new_points2.par_iter().for_each(|i| {
+                    points2[*i].fetch_add(1, Ordering::Relaxed);
+                });
             });
         }
     }

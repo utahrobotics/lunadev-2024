@@ -10,12 +10,13 @@ use nalgebra::Isometry;
 // use navigator::{pid, WaypointDriver};
 use localization::{eskf, Localizer, OrientationFrame, PositionFrame};
 use navigator::{pid, WaypointDriver};
-use realsense::{discover_all_realsense, PointCloud};
+use realsense::discover_all_realsense;
 use rig::Robot;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
-    logging::{dump::DataDump, init_logger, rate::RateLogger},
-    tokio, tokio_rayon, rayon::iter::{IntoParallelRefIterator, ParallelIterator, IntoParallelIterator},
+    logging::{dump::{DataDump, VideoDataDump}, init_logger},
+    rayon::iter::{IntoParallelIterator, ParallelIterator},
+    tokio,
 };
 
 #[tokio::main]
@@ -35,13 +36,21 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
 
     camera.set_robot_element_ref(camera_element.get_ref());
-    costmap.add_points_sub(camera.point_cloud_received_signal().subscribe_unbounded().map(|x| x.points.into_par_iter().map(|x| x.0).collect::<Vec<_>>()));
+    costmap.add_points_sub(
+        camera
+            .point_cloud_received_signal()
+            .subscribe_unbounded()
+            .map(|x| x.points.into_par_iter().map(|x| x.0).collect::<Vec<_>>()),
+    );
     let costmap_ref = costmap.get_ref();
 
+    let mut costmap_writer = VideoDataDump::new(40, 40, "costmap.mkv")?;
+
     tokio::spawn(async move {
-        for i in 1..100 {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            costmap_ref.get_costmap_img().save(format!("costmap{i}.png")).unwrap();
+        loop {
+            tokio::time::sleep(Duration::from_millis(42)).await;
+            costmap_writer.write_frame(costmap_ref
+                .get_costmap_img().into()).unwrap();
         }
     });
 
@@ -160,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
             apriltag.into(),
             // positioning.into(),
             navigator.into(),
-            costmap.into()
+            costmap.into(),
         ],
         run_options,
     )

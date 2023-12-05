@@ -7,11 +7,15 @@
 //! as the current program is not forcefully terminated.
 
 use std::{
+    fmt::Display,
+    error::Error,
     io::Write,
     net::SocketAddr,
     path::{Path, PathBuf},
+    sync::OnceLock, time::{Instant, Duration},
 };
 
+use image::DynamicImage;
 use log::error;
 use tokio::{
     fs::File,
@@ -19,6 +23,7 @@ use tokio::{
     net::TcpStream,
     sync::mpsc,
 };
+use video_rs::{Encoder, EncoderSettings, Locator, ffmpeg::{format::Pixel, ffi::{av_image_fill_arrays, AVPixelFormat}}, RawFrame, Time, PixelFormat, Options};
 
 use super::SUB_LOGGING_DIR;
 
@@ -57,8 +62,7 @@ impl DataDump {
             let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
                 return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`"));
             };
-            let filename = PathBuf::from(path.as_ref());
-            File::create(PathBuf::from(sub_log_dir).join(&filename)).await?
+            File::create(PathBuf::from(sub_log_dir).join(path.as_ref())).await?
         };
         Self::new(BufWriter::new(file), path.as_ref().to_string_lossy())
     }
@@ -140,5 +144,113 @@ impl Write for DataDump {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct VideoWriteError;
+
+impl Display for VideoWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "The video writing thread has failed for some reason")
+    }
+}
+impl Error for VideoWriteError {}
+
+pub struct VideoDataDump {
+    writer: std::sync::mpsc::Sender<(DynamicImage, Time)>,
+    start: Instant,
+    elapsed: Duration
+}
+
+#[derive(Debug)]
+pub enum VideoDumpInitError {
+    VideoError(video_rs::Error),
+    LoggingError(anyhow::Error),
+}
+
+
+impl Error for VideoDumpInitError {}
+impl Display for VideoDumpInitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VideoDumpInitError::VideoError(e) => write!(f, "Faced an error initializing the video encoder: {e}"),
+            VideoDumpInitError::LoggingError(e) => write!(f, "Faced an error setting up the logging for the video encoder: {e}"),
+        }
+    }
+}
+
+
+static VIDEO_INIT: OnceLock<()> = OnceLock::new();
+
+impl VideoDataDump {
+    pub fn new(
+        width: u32,
+        height: u32,
+        path: impl AsRef<Path>,
+    ) -> Result<Self, VideoDumpInitError> {
+        VIDEO_INIT.get_or_try_init(|| {
+            video_rs::init()
+                .map_err(|e| VideoDumpInitError::LoggingError(anyhow::anyhow!(e.to_string())))
+        })?;
+
+        let path = if path.as_ref().is_absolute() {
+            Locator::Path(path.as_ref().into())
+        } else {
+            let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
+                return Err(VideoDumpInitError::LoggingError(anyhow::anyhow!("Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`")));
+            };
+            Locator::Path(PathBuf::from(sub_log_dir).join(path.as_ref()))
+        };
+
+        let settings = EncoderSettings::for_h264_custom(width as usize, height as usize, PixelFormat::RGB24, Options::new_h264());
+        let mut encoder =
+            Encoder::new(&path, settings).map_err(|e| VideoDumpInitError::VideoError(e))?;
+        let (writer, receiver) = std::sync::mpsc::channel::<(DynamicImage, Time)>();
+
+        std::thread::spawn(move || loop {
+            let Ok((frame, time)) = receiver.recv() else {
+                if let Err(e) = encoder.finish() {
+                    error!("Failed to close encoder: {e}");
+                }
+                break;
+            };
+            let frame = frame.into_rgb8().into_vec();
+            let mut raw = RawFrame::new(Pixel::RGB24, width, height);
+            unsafe {
+                let raw = raw.as_mut_ptr();
+                let err = av_image_fill_arrays(
+                    (*raw).data.as_mut_ptr(),
+                    (*raw).linesize.as_mut_ptr(),
+                    frame.as_ptr(),
+                    AVPixelFormat::AV_PIX_FMT_RGB24,
+                    width as i32,
+                    height as i32,
+                    1
+                );
+                if err < 0 {
+                    error!("Internal error: unable to fill raw image: {err}");
+                    break;
+                }
+                if err as u32 / width / height != 3 {
+                    error!("Internal error: size mismatch: {err}");
+                    break;
+                }
+                (*raw).pts = time.with_time_base(encoder.time_base()).into_value().unwrap();
+            }
+
+            if let Err(e) = encoder.encode_raw(raw) {
+                error!("Failed to write to encoder: {e}");
+                break;
+            }
+        });
+
+        Ok(Self { writer, start: Instant::now(), elapsed: Duration::ZERO })
+    }
+
+    pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
+        let time = Time::from_secs_f64(self.elapsed.as_secs_f64());
+        self.elapsed = self.start.elapsed();
+        self.writer.send((frame, time)).map_err(|_| VideoWriteError)
     }
 }
