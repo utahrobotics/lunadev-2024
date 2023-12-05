@@ -208,7 +208,6 @@ impl Node for RealSenseCamera {
 
                 for frame in frames.frames_of_type::<AccelFrame>() {
                     last_accel = nalgebra::convert(Vector3::from(*frame.acceleration()));
-                    last_accel *= -1.0;
                 }
 
                 self.imu_frame_received.set(IMUFrame {
@@ -217,7 +216,7 @@ impl Node for RealSenseCamera {
                     rotation_sequence: rig::RotationSequence::XYZ,
                     rotation_type: rig::RotationType::Intrinsic,
                     acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.65,
-                    angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 0.65,
+                    angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 1.5,
                     robot_element: robot_element.clone(),
                 });
 

@@ -4,7 +4,6 @@
 
 use std::{
     collections::hash_map::Entry,
-    f64::consts::PI,
     time::{Duration, Instant},
 };
 
@@ -155,11 +154,13 @@ async fn calibrate_localizer(
             let (imu, n) = bb.imu_sub.wait_for_change().await;
             bb.imu_recv_counter = n + 1;
             total_gravity += imu.acceleration;
+            let isometry = imu.robot_element.get_isometry_from_base();
+
             match imu_map.entry(imu.robot_element) {
                 Entry::Occupied(mut x) => {
                     let x = x.get_mut();
                     x.count += 1;
-                    x.accel += imu.acceleration;
+                    x.accel += isometry * imu.acceleration;
                     x.angular_velocity += imu.angular_velocity;
                 }
                 Entry::Vacant(x) => {
@@ -168,45 +169,44 @@ async fn calibrate_localizer(
             }
         }} => {}
     }
-    let total_gravity = UnitVector3::new_normalize(total_gravity);
 
     bb.calibrations = imu_map
         .into_iter()
         .map(|(robot_element, calibrating)| {
-            let accel_norm = UnitVector3::new_normalize(calibrating.accel);
+            let mut accel_correction = UnitQuaternion::from_axis_angle(
+                &UnitVector3::new_normalize(calibrating.accel.cross(&total_gravity)),
+                calibrating.accel.angle(&total_gravity),
+            );
 
-            let accel_correction = {
-                let angle = accel_norm.angle(&total_gravity);
-                if angle < 1.0 / 180.0 * PI {
-                    UnitQuaternion::default()
-                } else {
-                    UnitQuaternion::from_axis_angle(
-                        &UnitVector3::new_normalize(accel_norm.cross(&total_gravity)),
-                        angle,
-                    )
-                }
-            };
+            if accel_correction.w.is_nan() || accel_correction.i.is_nan() || accel_correction.j.is_nan() || accel_correction.k.is_nan() {
+                accel_correction = Default::default();
+            }
 
             let calibrated = CalibratedImu {
                 accel_scale: 9.81 / calibrating.accel.magnitude() * calibrating.count as f64,
                 accel_correction,
                 angular_velocity_bias: calibrating.angular_velocity / calibrating.count as f64,
             };
+            
             (robot_element, calibrated)
         })
         .collect();
 
     let mut eskf = bb.builder.clone().build();
-    if let Err(e) = eskf.observe_orientation(
-        UnitQuaternion::from_axis_angle(
-            &UnitVector3::new_normalize(total_gravity.cross(&-Vector3::y_axis())),
-            total_gravity.angle(&-Vector3::y_axis()),
-        ),
-        ESKF::variance_from_element(0.01),
-    ) {
-        error!("Failed to initialize orientation: {e:?}");
-    }
-    eskf.gravity = Vector3::y_axis().into_inner() * -9.81;
+    eskf.orientation = UnitQuaternion::from_axis_angle(
+        &UnitVector3::new_normalize(total_gravity.cross(&-Vector3::y_axis())),
+        total_gravity.angle(&-Vector3::y_axis()),
+    );
+    // if let Err(e) = eskf.observe_orientation(
+    //     UnitQuaternion::from_axis_angle(
+    //         &UnitVector3::new_normalize(total_gravity.cross(&-Vector3::y_axis())),
+    //         total_gravity.angle(&-Vector3::y_axis()),
+    //     ),
+    //     ESKF::variance_from_element(0.00001),
+    // ) {
+    //     error!("Failed to initialize orientation: {e:?}");
+    // }
+    eskf.gravity = Vector3::y_axis().into_inner() * 9.81;
     bb.recalibrate_sub.get_or_empty();
     ((bb, context, eskf), ())
 }
@@ -241,11 +241,12 @@ async fn run_localizer(
                     eskf.set_acceleration_variance(frame.acceleration_variance * calibration.accel_scale);
                     // println!("{}", eskf.orientation * frame.acceleration);
 
-                    frame.angular_velocity_variance -= calibration.angular_velocity_bias;
+                    frame.angular_velocity -= calibration.angular_velocity_bias;
+
+                    frame.acceleration = frame.robot_element.get_global_isometry() * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
+                    info!("{}", frame.acceleration);
 
                     let isometry = frame.robot_element.get_isometry_from_base();
-
-                    frame.acceleration = isometry * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
 
                     let (w, [i, j, k]) = quaternion_core::from_euler_angles(frame.rotation_type.into(), frame.rotation_sequence.into(), [frame.angular_velocity_variance.x, frame.angular_velocity_variance.y, frame.angular_velocity_variance.z]);
                     let angular_velocity_variance_quat = isometry.rotation * UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k));
