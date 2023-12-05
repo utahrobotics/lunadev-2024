@@ -7,16 +7,16 @@ pub struct Costmap {
     pub window_duration: Duration,
     area_width: usize,
     area_length: usize,
-    cell_width: f64,
-    x_offset: f64,
-    y_offset: f64,
+    cell_width: f32,
+    x_offset: f32,
+    y_offset: f32,
     points_sub: UnboundedSubscription<Arc<[usize]>>,
     points: Arc<[AtomicUsize]>
 }
 
 
 impl Costmap {
-    pub fn new(area_width: usize, area_length: usize, cell_width: f64, x_offset: f64, y_offset: f64) -> Self {
+    pub fn new(area_width: usize, area_length: usize, cell_width: f32, x_offset: f32, y_offset: f32) -> Self {
         Self {
             window_duration: Duration::from_secs(5),
             area_width,
@@ -29,7 +29,7 @@ impl Costmap {
         }
     }
 
-    pub fn add_points_sub<T: Send + IntoParallelIterator<Item=Point3<f64>> + 'static>(&mut self, sub: UnboundedSubscription<T>) {
+    pub fn add_points_sub<T: Send + IntoParallelIterator<Item=Point3<f32>> + 'static>(&mut self, sub: UnboundedSubscription<T>) {
         let cell_width = self.cell_width;
         let area_width = self.area_width;
         let area_length = self.area_length;
@@ -85,6 +85,23 @@ impl CostmapRef {
             )
             .collect();
         Matrix::from_data(VecStorage::new(Dyn(self.area_length), Dyn(self.area_width), data))
+    }
+
+    // #[cfg(feature = "image")]
+    pub fn get_costmap_img(&self) -> image::GrayImage {
+        let costmap = self.get_costmap();
+
+        let max = *costmap.data.as_slice().into_iter().max().unwrap() as f32;
+
+        let buf = costmap.row_iter()
+            .flat_map(|x|
+                x.column_iter().map(|x| {
+                    (x[0] as f32 / max * 255.0) as u8
+                }).collect::<Vec<_>>()
+            )
+            .collect();
+
+        image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf).unwrap()
     }
 }
 

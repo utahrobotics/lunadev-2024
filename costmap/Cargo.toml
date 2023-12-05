@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 unros-core = { path = "../unros-core" }
 nalgebra = { workspace = true }
+# image = { workspace = true, optional = true }
+image = { workspace = true }

@@ -43,3 +43,6 @@ opt-level = 3
 
 [profile.dev.package.camera]
 opt-level = 3
+
+[profile.dev.package.lunabot]
+opt-level = 3

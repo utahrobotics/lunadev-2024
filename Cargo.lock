@@ -762,6 +762,7 @@ dependencies = [
 name = "costmap"
 version = "0.1.0"
 dependencies = [
+ "image",
  "nalgebra",
  "unros-core",
 ]
@@ -1558,6 +1559,7 @@ name = "lunabot"
 version = "0.1.0"
 dependencies = [
  "apriltag 0.1.0",
+ "costmap",
  "fxhash",
  "las",
  "localization",

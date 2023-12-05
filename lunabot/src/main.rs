@@ -4,6 +4,7 @@ use std::{
 };
 
 use apriltag::AprilTagDetector;
+use costmap::Costmap;
 use fxhash::FxBuildHasher;
 use nalgebra::Isometry;
 // use navigator::{pid, WaypointDriver};
@@ -14,7 +15,7 @@ use rig::Robot;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
     logging::{dump::DataDump, init_logger, rate::RateLogger},
-    tokio, tokio_rayon,
+    tokio, tokio_rayon, rayon::iter::{IntoParallelRefIterator, ParallelIterator, IntoParallelIterator},
 };
 
 #[tokio::main]
@@ -27,11 +28,22 @@ async fn main() -> anyhow::Result<()> {
     let run_options = default_run_options!();
     init_logger(&run_options)?;
 
+    let mut costmap = Costmap::new(40, 40, 0.05, 1.0, 1.0);
+
     let mut camera = discover_all_realsense()?
         .next()
         .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
 
     camera.set_robot_element_ref(camera_element.get_ref());
+    costmap.add_points_sub(camera.point_cloud_received_signal().subscribe_unbounded().map(|x| x.points.into_par_iter().map(|x| x.0).collect::<Vec<_>>()));
+    let costmap_ref = costmap.get_ref();
+
+    tokio::spawn(async move {
+        for i in 1..100 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            costmap_ref.get_costmap_img().save(format!("costmap{i}.png")).unwrap();
+        }
+    });
 
     let mut apriltag = AprilTagDetector::new(
         640.0,
@@ -146,8 +158,9 @@ async fn main() -> anyhow::Result<()> {
         [
             camera.into(),
             apriltag.into(),
-            positioning.into(),
+            // positioning.into(),
             navigator.into(),
+            costmap.into()
         ],
         run_options,
     )

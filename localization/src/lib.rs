@@ -244,7 +244,7 @@ async fn run_localizer(
                     frame.angular_velocity -= calibration.angular_velocity_bias;
 
                     frame.acceleration = frame.robot_element.get_global_isometry() * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
-                    info!("{}", frame.acceleration);
+                    // info!("{}", frame.acceleration);
 
                     let isometry = frame.robot_element.get_isometry_from_base();
 
