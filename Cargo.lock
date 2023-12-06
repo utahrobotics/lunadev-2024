@@ -3148,6 +3148,8 @@ dependencies = [
  "bytes",
  "chrono",
  "console-subscriber",
+ "crossbeam",
+ "fast_image_resize",
  "fern",
  "futures",
  "fxhash",

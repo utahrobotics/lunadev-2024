@@ -16,7 +16,7 @@ use unros_core::{
     anyhow, async_run_all, default_run_options,
     logging::{dump::{DataDump, VideoDataDump}, init_logger},
     rayon::iter::{IntoParallelIterator, ParallelIterator},
-    tokio,
+    tokio, FnNode,
 };
 
 #[tokio::main]
@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     let run_options = default_run_options!();
     init_logger(&run_options)?;
 
-    let mut costmap = Costmap::new(40, 40, 0.05, 1.0, 1.0);
+    let mut costmap = Costmap::new(40, 40, 0.05, 1.9, 0.0);
 
     let mut camera = discover_all_realsense()?
         .next()
@@ -44,13 +44,12 @@ async fn main() -> anyhow::Result<()> {
     );
     let costmap_ref = costmap.get_ref();
 
-    let mut costmap_writer = VideoDataDump::new(40, 40, "costmap.mkv")?;
+    let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
 
-    tokio::spawn(async move {
+    let video_maker = FnNode::new(|_| async move {
         loop {
             tokio::time::sleep(Duration::from_millis(42)).await;
-            costmap_writer.write_frame(costmap_ref
-                .get_costmap_img().into()).unwrap();
+            costmap_writer.write_frame(costmap_ref.get_costmap_img().into()).unwrap();
         }
     });
 
@@ -114,13 +113,6 @@ async fn main() -> anyhow::Result<()> {
         },
     ));
     positioning.add_imu_sub(camera.imu_frame_received().subscribe_unbounded());
-    // let mut pos = positioning.get_position_signal().watch();
-    // tokio::spawn(async move {
-    //     loop {
-    //         let pos = pos.wait_for_change().await;
-    //         println!("{:.2}, {:.2}, {:.2}", pos.x, pos.y, pos.z);
-    //     }
-    // });
 
     let mut pid = pid::Pid::new(0.0, 100.0);
     pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);
@@ -133,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .unwrap();
     let mut imu_sub = camera.imu_frame_received().watch();
-    tokio::spawn(async move {
+    let dumper = FnNode::new(|_| async move {
         let start = Instant::now();
         let mut elapsed = Duration::ZERO;
 
@@ -168,8 +160,10 @@ async fn main() -> anyhow::Result<()> {
             camera.into(),
             apriltag.into(),
             // positioning.into(),
+            video_maker.into(),
             navigator.into(),
             costmap.into(),
+            dumper.into(),
         ],
         run_options,
     )

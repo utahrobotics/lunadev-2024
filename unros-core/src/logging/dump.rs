@@ -12,7 +12,7 @@ use std::{
     io::Write,
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::OnceLock, time::{Instant, Duration},
+    sync::OnceLock, time::{Instant, Duration}, num::NonZeroU32,
 };
 
 use image::DynamicImage;
@@ -24,6 +24,8 @@ use tokio::{
     sync::mpsc,
 };
 use video_rs::{Encoder, EncoderSettings, Locator, ffmpeg::{format::Pixel, ffi::{av_image_fill_arrays, AVPixelFormat}}, RawFrame, Time, PixelFormat, Options};
+
+use crate::spawn_persistent_thread;
 
 use super::SUB_LOGGING_DIR;
 
@@ -85,7 +87,7 @@ impl DataDump {
         let name = name.into();
         let (empty_vecs_sender, empty_vecs) = mpsc::unbounded_channel();
         let (writer_sender, mut reader) = mpsc::unbounded_channel::<Vec<_>>();
-        std::thread::spawn(move || {
+        spawn_persistent_thread(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_io()
                 .build()
@@ -203,19 +205,42 @@ impl VideoDataDump {
             Locator::Path(PathBuf::from(sub_log_dir).join(path.as_ref()))
         };
 
-        let settings = EncoderSettings::for_h264_custom(width as usize, height as usize, PixelFormat::RGB24, Options::new_h264());
+        let settings = EncoderSettings::for_h264_custom(width as usize, height as usize, PixelFormat::YUV420P, Options::new_h264());
         let mut encoder =
             Encoder::new(&path, settings).map_err(|e| VideoDumpInitError::VideoError(e))?;
         let (writer, receiver) = std::sync::mpsc::channel::<(DynamicImage, Time)>();
+        
+        let mut resizer =
+            fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(
+                fast_image_resize::FilterType::Box,
+            ));
 
-        std::thread::spawn(move || loop {
+        let mut dst_image = fast_image_resize::Image::new(
+            NonZeroU32::new(width).unwrap(),
+            NonZeroU32::new(height).unwrap(),
+            fast_image_resize::PixelType::U8x3,
+        );
+
+        spawn_persistent_thread(move || loop {
             let Ok((frame, time)) = receiver.recv() else {
                 if let Err(e) = encoder.finish() {
                     error!("Failed to close encoder: {e}");
                 }
                 break;
             };
-            let frame = frame.into_rgb8().into_vec();
+            let src_image = fast_image_resize::Image::from_vec_u8(
+                NonZeroU32::new(frame.width()).expect("incoming image width should be non-zero"),
+                NonZeroU32::new(frame.height()).expect("incoming image height should be non-zero"),
+                frame.into_rgb8().into_vec(),
+                fast_image_resize::PixelType::U8x3,
+            )
+            .unwrap();
+
+            // Get mutable view of destination image data
+            let mut dst_view = dst_image.view_mut();
+            resizer.resize(&src_image.view(), &mut dst_view).unwrap();
+
+            let frame = dst_image.buffer();
             let mut raw = RawFrame::new(Pixel::RGB24, width, height);
             unsafe {
                 let raw = raw.as_mut_ptr();
@@ -234,6 +259,10 @@ impl VideoDataDump {
                 }
                 if err as u32 / width / height != 3 {
                     error!("Internal error: size mismatch: {err}");
+                    break;
+                }
+                if frame.len() != err as usize {
+                    error!("Internal error: frame not of correct size, expected: {err}, got: {}", frame.len());
                     break;
                 }
                 (*raw).pts = time.with_time_base(encoder.time_base()).into_value().unwrap();

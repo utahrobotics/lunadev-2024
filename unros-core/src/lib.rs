@@ -22,7 +22,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    },
+    }, thread::JoinHandle,
 };
 
 pub mod logging;
@@ -32,6 +32,7 @@ pub mod task;
 pub use anyhow;
 pub use async_trait::async_trait;
 pub use bytes;
+use crossbeam::queue::SegQueue;
 use fxhash::FxHashMap;
 pub use log;
 use log::{debug, error, info, warn};
@@ -344,6 +345,26 @@ macro_rules! default_run_options {
     };
 }
 
+
+static THREADS: SegQueue<JoinHandle<()>> = SegQueue::new();
+
+
+/// Spawns a thread that is guaranteed to run the given closure to completion.
+/// 
+/// There is a caveat, and that is if the program is forcefully exited, this
+/// function cannot do anything.
+/// 
+/// Functionally, this just spawns a thread that will always be joined before the
+/// main thread exits, *assuming* that you call `async_run_all` or `run_all`.
+pub fn spawn_persistent_thread<F>(f: F)
+where
+    F: FnOnce(),
+    F: Send + 'static,
+{
+    THREADS.push(std::thread::spawn(f));
+}
+
+
 /// The entry point of the runtime itself.
 ///
 /// This function automatically starts up a `tokio` runtime.
@@ -538,7 +559,16 @@ pub async fn async_run_all(
     drop(abort_sender);
     tokio::select! {
         () = async {
-            while let Some(_) = tasks.join_next().await {}
+            tokio::join!(
+                async { if let Err(e) = tokio::task::spawn_blocking(|| {
+                    while let Some(x) = THREADS.pop() {
+                        if let Err(e) = x.join() {
+                            error!("Failed to join thread: {e:?}");
+                        }
+                    }
+                }).await { error!("Failed to wait on persistent threads: {e}"); }},
+                async {while let Some(_) = tasks.join_next().await {}}
+            );
         } => {}
         () = async {
             if tokio::signal::ctrl_c().await.is_err() {
