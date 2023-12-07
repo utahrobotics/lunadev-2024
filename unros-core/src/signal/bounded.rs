@@ -1,9 +1,14 @@
-use std::ops::{Add, AddAssign};
+use std::{
+    ops::{Add, AddAssign},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use futures::{stream::FuturesUnordered, StreamExt};
 use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
+use spin_sleep::SpinSleeper;
 use tokio::sync::broadcast;
+use tokio_rayon::rayon;
 
 use super::{watched::WatchedSubscription, ChannelTrait, MappedChannel, Signal};
 
@@ -25,6 +30,24 @@ impl<T: Send + 'static, const SIZE: u32> BoundedSubscription<T, SIZE> {
             receivers: vec![],
             rng: SmallRng::from_entropy(),
         }
+    }
+
+    pub fn repeat(value: T, duration: Duration) -> Self
+    where
+        T: Clone + Sync,
+    {
+        let mut signal = Signal::<T>::default();
+        let sub = signal.get_ref().subscribe_bounded();
+
+        rayon::spawn(move || {
+            let sleeper = SpinSleeper::default();
+            loop {
+                sleeper.sleep(duration);
+                signal.set(value.clone());
+            }
+        });
+
+        sub
     }
 
     /// Waits for a message to be sent, unless the `Signal` has been dropped.

@@ -54,13 +54,11 @@ pub struct PointCloud {
     pub points: Arc<[(Point3<f32>, image::Rgb<u8>)]>,
 }
 
-
 impl PointCloud {
     pub fn par_iter(&self) -> ArcIter<(Point3<f32>, image::Rgb<u8>)> {
         ArcIter::new(self.points.clone())
     }
 }
-
 
 /// A connection to a RealSense Camera.
 pub struct RealSenseCamera {
@@ -87,7 +85,7 @@ impl RealSenseCamera {
             imu_frame_received: Default::default(),
             robot_element: None,
             focal_length_frac: 0.5,
-            min_distance: 0.4
+            min_distance: 0.4,
         })
     }
 
@@ -184,11 +182,10 @@ impl Node for RealSenseCamera {
 
             // Create Resizer instance and resize source image
             // into buffer of destination image
-            let mut resizer =
-                fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(
-                    fast_image_resize::FilterType::Hamming,
-                ));
-            
+            let mut resizer = fast_image_resize::Resizer::new(
+                fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Hamming),
+            );
+
             loop {
                 let frames = pipeline.wait(None)?;
                 if drop_check.has_dropped() {
@@ -305,13 +302,11 @@ impl Node for RealSenseCamera {
                                 }),
                                 ExtrinsicParameters::from_pose(&nalgebra::convert(global_isometry)),
                             );
-                            let pixel_coords = (0..frame_height / 4)
-                                .into_iter()
-                                .flat_map(|y| {
-                                    (0..frame_width / 4)
-                                        .into_iter()
-                                        .flat_map(move |x| [x as f32, y as f32])
-                                });
+                            let pixel_coords = (0..frame_height / 4).into_iter().flat_map(|y| {
+                                (0..frame_width / 4)
+                                    .into_iter()
+                                    .flat_map(move |x| [x as f32, y as f32])
+                            });
 
                             let pixel_coords = Pixels::new(Matrix::<
                                 f32,
@@ -329,7 +324,7 @@ impl Node for RealSenseCamera {
                     let scale = frame.depth_units().unwrap();
                     let origin: Vector3<f32> =
                         nalgebra::convert(global_isometry.translation.vector);
-                    
+
                     let points: Arc<[_]> = cast_slice::<_, u16>(&frame_bytes)
                         .into_par_iter()
                         .enumerate()
@@ -376,6 +371,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         imu_frame_received: Default::default(),
         robot_element: None,
         focal_length_frac: 0.5,
-        min_distance: 0.4
+        min_distance: 0.4,
     }))
 }

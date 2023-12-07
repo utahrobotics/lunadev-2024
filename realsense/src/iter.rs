@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use unros_core::rayon::iter::{ParallelIterator, plumbing::{UnindexedConsumer, bridge, Consumer, ProducerCallback, Producer}, IndexedParallelIterator};
+use unros_core::rayon::iter::{
+    plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer},
+    IndexedParallelIterator, ParallelIterator,
+};
 
 #[derive(Debug)]
 pub struct ArcIter<T> {
@@ -15,7 +18,9 @@ impl<T> ArcIter<T> {
 
 impl<T> Clone for ArcIter<T> {
     fn clone(&self) -> Self {
-        ArcIter { slice: self.slice.clone() }
+        ArcIter {
+            slice: self.slice.clone(),
+        }
     }
 }
 
@@ -50,10 +55,13 @@ impl<T: Sync + Send + Copy> IndexedParallelIterator for ArcIter<T> {
     where
         CB: ProducerCallback<Self::Item>,
     {
-        callback.callback(IterProducer { slice: self.slice.clone(), index: 0, end_index: self.slice.len() - 1 })
+        callback.callback(IterProducer {
+            slice: self.slice.clone(),
+            index: 0,
+            end_index: self.slice.len() - 1,
+        })
     }
 }
-
 
 struct IterProducer<T> {
     slice: Arc<[T]>,
@@ -61,14 +69,12 @@ struct IterProducer<T> {
     end_index: usize,
 }
 
-
 struct SyncArcIter<T> {
     slice: Arc<[T]>,
     index: usize,
     end_index: usize,
-    done: bool
+    done: bool,
 }
-
 
 impl<T: Copy> Iterator for SyncArcIter<T> {
     type Item = T;
@@ -81,7 +87,6 @@ impl<T: Copy> Iterator for SyncArcIter<T> {
         self.slice.get(self.index - 1).copied()
     }
 }
-
 
 impl<T: Copy> ExactSizeIterator for SyncArcIter<T> {}
 impl<T: Copy> DoubleEndedIterator for SyncArcIter<T> {
@@ -103,7 +108,6 @@ impl<T: Copy> DoubleEndedIterator for SyncArcIter<T> {
     }
 }
 
-
 impl<T: Sync + Send + Copy> Producer for IterProducer<T> {
     type Item = T;
     type IntoIter = SyncArcIter<T>;
@@ -113,19 +117,29 @@ impl<T: Sync + Send + Copy> Producer for IterProducer<T> {
             slice: self.slice.clone(),
             index: self.index,
             end_index: self.end_index,
-            done: false
+            done: false,
         }
     }
 
     fn split_at(self, midpoint: usize) -> (Self, Self) {
-        (IterProducer { slice: self.slice.clone(), index: self.index, end_index: midpoint }, IterProducer { slice: self.slice.clone(), index: midpoint, end_index: self.end_index })
+        (
+            IterProducer {
+                slice: self.slice.clone(),
+                index: self.index,
+                end_index: midpoint,
+            },
+            IterProducer {
+                slice: self.slice.clone(),
+                index: midpoint,
+                end_index: self.end_index,
+            },
+        )
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, collections::HashSet};
+    use std::{collections::HashSet, sync::Arc};
 
     use unros_core::rayon::iter::{IntoParallelIterator, ParallelIterator};
 

@@ -1,7 +1,8 @@
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, mpsc::channel,
+        mpsc::channel,
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -139,7 +140,7 @@ impl CostmapRef {
 
 #[async_trait]
 impl Node for Costmap {
-    const DEFAULT_NAME: &'static str = "points-filter";
+    const DEFAULT_NAME: &'static str = "costmap";
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
@@ -152,7 +153,9 @@ impl Node for Costmap {
         rayon::spawn(move || {
             let sleeper = SpinSleeper::default();
             loop {
-                let Ok((next_duration, new_points)) = del_recv.recv() else { break; };
+                let Ok((next_duration, new_points)) = del_recv.recv() else {
+                    break;
+                };
                 sleeper.sleep(next_duration - start2.elapsed());
                 new_points.par_iter().for_each(|i| {
                     points2[*i].fetch_sub(1, Ordering::Relaxed);
@@ -166,7 +169,7 @@ impl Node for Costmap {
             let points = self.points.clone();
 
             let _ = del_sender.send((start.elapsed() + self.window_duration, new_points2));
-            
+
             rayon::spawn(move || {
                 new_points.par_iter().for_each(|i| {
                     points[*i].fetch_add(1, Ordering::Relaxed);

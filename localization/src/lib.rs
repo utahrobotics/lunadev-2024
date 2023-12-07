@@ -4,6 +4,7 @@
 
 use std::{
     collections::hash_map::Entry,
+    f64::consts::PI,
     time::{Duration, Instant},
 };
 
@@ -76,7 +77,7 @@ impl Localizer {
     pub fn new(robot_base: RobotBase) -> Self {
         Self {
             builder: Default::default(),
-            calibration_duration: Duration::from_secs(5),
+            calibration_duration: Duration::from_secs(3),
             recalibrate_sub: WatchedSubscription::none(),
             imu_sub: UnboundedSubscription::none(),
             position_sub: UnboundedSubscription::none(),
@@ -201,15 +202,6 @@ async fn calibrate_localizer(
         &UnitVector3::new_normalize(total_gravity.cross(&-Vector3::y_axis())),
         total_gravity.angle(&-Vector3::y_axis()),
     );
-    // if let Err(e) = eskf.observe_orientation(
-    //     UnitQuaternion::from_axis_angle(
-    //         &UnitVector3::new_normalize(total_gravity.cross(&-Vector3::y_axis())),
-    //         total_gravity.angle(&-Vector3::y_axis()),
-    //     ),
-    //     ESKF::variance_from_element(0.00001),
-    // ) {
-    //     error!("Failed to initialize orientation: {e:?}");
-    // }
     eskf.gravity = Vector3::y_axis().into_inner() * 9.81;
     bb.recalibrate_sub.get_or_empty();
     ((bb, context, eskf), ())
@@ -223,6 +215,8 @@ async fn run_localizer(
 
     let start = Instant::now();
     let mut last_elapsed = Duration::ZERO;
+    let mut sum = Vector3::default();
+    let mut count = 0usize;
 
     tokio::select! {
         () = bb.recalibrate_sub.wait_for_change() => {}
@@ -265,7 +259,11 @@ async fn run_localizer(
 
                     let now = start.elapsed();
                     let delta = now - last_elapsed;
-                    // info!("accel: {:?}", frame.acceleration);
+                    count += 1;
+                    // sum += frame.acceleration + eskf.gravity;
+                    let new_sum = frame.acceleration;
+                    // info!("{:?} {:?}", new_sum.angle(&sum) / delta.as_secs_f64() / PI * 180.0, new_sum.cross(&sum).normalize());
+                    sum = new_sum;
                     // info!("ang_vel: {:?}", frame.angular_velocity);
                     // info!("delta: {:.4}", delta.as_secs_f32());
                     // info!("{}", eskf.orientation);
@@ -407,12 +405,12 @@ impl Node for Localizer {
             orientation_recv_counter: 0,
             robot_base: self.robot_base,
         };
+
         start_machine::<CalibrateTransition, _, _, _>(
             (bb, context, self.builder.build()),
             calibrate_localizer,
         )
         .await;
-
         unreachable!()
     }
 }

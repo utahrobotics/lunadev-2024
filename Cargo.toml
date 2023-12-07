@@ -30,6 +30,7 @@ quaternion-core = "0.4"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 fast_image_resize = "2"
+spin_sleep = "1"
 
 # The following crates need to run at full power
 # in most contexts to be effective.

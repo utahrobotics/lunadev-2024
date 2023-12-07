@@ -6,28 +6,32 @@ use std::{
 use apriltag::AprilTagDetector;
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use nalgebra::Isometry;
-// use navigator::{pid, WaypointDriver};
-use localization::{eskf, Localizer, OrientationFrame, PositionFrame};
+use localization::{eskf, IMUFrame, Localizer, OrientationFrame, PositionFrame};
+use nalgebra::{Isometry, Vector3};
 use navigator::{pid, WaypointDriver};
-use realsense::{discover_all_realsense, PointCloud};
+use realsense::discover_all_realsense;
 use rig::Robot;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
-    logging::{dump::{DataDump, VideoDataDump}, init_logger},
+    logging::{
+        dump::{DataDump, VideoDataDump},
+        init_logger,
+    },
     rayon::iter::ParallelIterator,
-    tokio, FnNode, tokio_rayon,
+    signal::unbounded::UnboundedSubscription,
+    tokio, FnNode,
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
-    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera"])?;
-    let camera_element = elements.remove("camera").unwrap();
-    let robot_base_ref = robot_base.get_ref();
-
     let run_options = default_run_options!();
     init_logger(&run_options)?;
+
+    let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
+    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "debug"])?;
+    let camera_element = elements.remove("camera").unwrap();
+    let debug_element = elements.remove("debug").unwrap();
+    let robot_base_ref = robot_base.get_ref();
 
     let mut costmap = Costmap::new(40, 40, 0.05, 1.9, 0.0);
 
@@ -106,6 +110,16 @@ async fn main() -> anyhow::Result<()> {
     ));
     positioning.add_imu_sub(camera.imu_frame_received().subscribe_unbounded());
 
+    positioning.add_imu_sub(UnboundedSubscription::repeat(IMUFrame {
+        acceleration: Vector3::new(0.0, -9.81, 0.0),
+        angular_velocity: Default::default(),
+        rotation_sequence: Default::default(),
+        rotation_type: Default::default(),
+        acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.25,
+        angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 0.25,
+        robot_element: debug_element.get_ref(),
+    }, Duration::from_millis(10)));
+
     let mut pid = pid::Pid::new(0.0, 100.0);
     pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);
     let navigator = WaypointDriver::new(robot_base_ref.clone(), pid);
@@ -151,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
         [
             camera.into(),
             apriltag.into(),
-            // positioning.into(),
+            positioning.into(),
             video_maker.into(),
             navigator.into(),
             costmap.into(),

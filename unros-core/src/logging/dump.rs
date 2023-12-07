@@ -7,12 +7,14 @@
 //! as the current program is not forcefully terminated.
 
 use std::{
-    fmt::Display,
     error::Error,
+    fmt::Display,
     io::Write,
     net::SocketAddr,
+    num::NonZeroU32,
     path::{Path, PathBuf},
-    sync::OnceLock, time::{Instant, Duration}, num::NonZeroU32,
+    sync::OnceLock,
+    time::{Duration, Instant},
 };
 
 use image::DynamicImage;
@@ -23,7 +25,13 @@ use tokio::{
     net::TcpStream,
     sync::mpsc,
 };
-use video_rs::{Encoder, EncoderSettings, Locator, ffmpeg::{format::Pixel, ffi::{av_image_fill_arrays, AVPixelFormat}}, RawFrame, Time, PixelFormat, Options};
+use video_rs::{
+    ffmpeg::{
+        ffi::{av_image_fill_arrays, AVPixelFormat},
+        format::Pixel,
+    },
+    Encoder, EncoderSettings, Locator, Options, PixelFormat, RawFrame, Time,
+};
 
 use crate::spawn_persistent_thread;
 
@@ -162,7 +170,7 @@ impl Error for VideoWriteError {}
 pub struct VideoDataDump {
     writer: std::sync::mpsc::Sender<(DynamicImage, Time)>,
     start: Instant,
-    elapsed: Duration
+    elapsed: Duration,
 }
 
 #[derive(Debug)]
@@ -171,17 +179,20 @@ pub enum VideoDumpInitError {
     LoggingError(anyhow::Error),
 }
 
-
 impl Error for VideoDumpInitError {}
 impl Display for VideoDumpInitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VideoDumpInitError::VideoError(e) => write!(f, "Faced an error initializing the video encoder: {e}"),
-            VideoDumpInitError::LoggingError(e) => write!(f, "Faced an error setting up the logging for the video encoder: {e}"),
+            VideoDumpInitError::VideoError(e) => {
+                write!(f, "Faced an error initializing the video encoder: {e}")
+            }
+            VideoDumpInitError::LoggingError(e) => write!(
+                f,
+                "Faced an error setting up the logging for the video encoder: {e}"
+            ),
         }
     }
 }
-
 
 static VIDEO_INIT: OnceLock<()> = OnceLock::new();
 
@@ -205,15 +216,19 @@ impl VideoDataDump {
             Locator::Path(PathBuf::from(sub_log_dir).join(path.as_ref()))
         };
 
-        let settings = EncoderSettings::for_h264_custom(width as usize, height as usize, PixelFormat::YUV420P, Options::new_h264());
+        let settings = EncoderSettings::for_h264_custom(
+            width as usize,
+            height as usize,
+            PixelFormat::YUV420P,
+            Options::new_h264(),
+        );
         let mut encoder =
             Encoder::new(&path, settings).map_err(|e| VideoDumpInitError::VideoError(e))?;
         let (writer, receiver) = std::sync::mpsc::channel::<(DynamicImage, Time)>();
-        
-        let mut resizer =
-            fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(
-                fast_image_resize::FilterType::Box,
-            ));
+
+        let mut resizer = fast_image_resize::Resizer::new(
+            fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Box),
+        );
 
         let mut dst_image = fast_image_resize::Image::new(
             NonZeroU32::new(width).unwrap(),
@@ -251,7 +266,7 @@ impl VideoDataDump {
                     AVPixelFormat::AV_PIX_FMT_RGB24,
                     width as i32,
                     height as i32,
-                    1
+                    1,
                 );
                 if err < 0 {
                     error!("Internal error: unable to fill raw image: {err}");
@@ -262,10 +277,16 @@ impl VideoDataDump {
                     break;
                 }
                 if frame.len() != err as usize {
-                    error!("Internal error: frame not of correct size, expected: {err}, got: {}", frame.len());
+                    error!(
+                        "Internal error: frame not of correct size, expected: {err}, got: {}",
+                        frame.len()
+                    );
                     break;
                 }
-                (*raw).pts = time.with_time_base(encoder.time_base()).into_value().unwrap();
+                (*raw).pts = time
+                    .with_time_base(encoder.time_base())
+                    .into_value()
+                    .unwrap();
             }
 
             if let Err(e) = encoder.encode_raw(raw) {
@@ -274,7 +295,11 @@ impl VideoDataDump {
             }
         });
 
-        Ok(Self { writer, start: Instant::now(), elapsed: Duration::ZERO })
+        Ok(Self {
+            writer,
+            start: Instant::now(),
+            elapsed: Duration::ZERO,
+        })
     }
 
     pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {

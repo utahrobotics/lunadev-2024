@@ -3168,6 +3168,7 @@ dependencies = [
  "log",
  "rand",
  "serde",
+ "spin_sleep",
  "static_assertions",
  "tokio",
  "tokio-rayon",

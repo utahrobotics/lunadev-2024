@@ -22,7 +22,8 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    }, thread::JoinHandle,
+    },
+    thread::JoinHandle,
 };
 
 pub mod logging;
@@ -345,15 +346,13 @@ macro_rules! default_run_options {
     };
 }
 
-
 static THREADS: SegQueue<JoinHandle<()>> = SegQueue::new();
 
-
 /// Spawns a thread that is guaranteed to run the given closure to completion.
-/// 
+///
 /// There is a caveat, and that is if the program is forcefully exited, this
 /// function cannot do anything.
-/// 
+///
 /// Functionally, this just spawns a thread that will always be joined before the
 /// main thread exits, *assuming* that you call `async_run_all` or `run_all`.
 pub fn spawn_persistent_thread<F>(f: F)
@@ -363,7 +362,6 @@ where
 {
     THREADS.push(std::thread::spawn(f));
 }
-
 
 /// The entry point of the runtime itself.
 ///

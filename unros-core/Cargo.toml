@@ -24,3 +24,4 @@ anyhow = { workspace = true }
 video-rs = { version = "0.5", optional = false }
 image = { workspace = true, optional = false }
 fast_image_resize = { workspace = true }
+spin_sleep = { workspace = true }
