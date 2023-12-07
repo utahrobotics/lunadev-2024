@@ -17,6 +17,7 @@ use std::{
 use bytemuck::cast_slice;
 use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
 use image::{DynamicImage, ImageBuffer, Luma, Rgb};
+use iter::ArcIter;
 use localization::IMUFrame;
 use nalgebra::{Dyn, Matrix, Point3, VecStorage, Vector3, U2};
 use realsense_rust::{
@@ -39,6 +40,8 @@ use unros_core::{
     tokio_rayon, DropCheck, Node, RuntimeContext,
 };
 
+pub mod iter;
+
 #[derive(Clone)]
 pub struct PointCloud {
     /// An array of points in *global* space.
@@ -50,6 +53,14 @@ pub struct PointCloud {
     /// about.
     pub points: Arc<[(Point3<f32>, image::Rgb<u8>)]>,
 }
+
+
+impl PointCloud {
+    pub fn par_iter(&self) -> ArcIter<(Point3<f32>, image::Rgb<u8>)> {
+        ArcIter::new(self.points.clone())
+    }
+}
+
 
 /// A connection to a RealSense Camera.
 pub struct RealSenseCamera {
@@ -325,7 +336,8 @@ impl Node for RealSenseCamera {
                             if *depth == 0 {
                                 return None;
                             }
-                            let depth = *depth as f32 * scale;
+                            // let depth = *depth as f32 * scale;
+                            let depth = 1.0 * scale;
                             let ray = raw_rays.data.row(i).transpose().normalize();
                             // assert_eq!(ray.magnitude(), 1.0);
                             // let ray = Vector3::new(ray[0], ray[1], ray[2]).normalize();
