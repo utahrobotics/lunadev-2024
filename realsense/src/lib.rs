@@ -71,6 +71,7 @@ pub struct RealSenseCamera {
     imu_frame_received: Signal<IMUFrame>,
     robot_element: Option<RobotElementRef>,
     pub focal_length_frac: f32,
+    pub min_distance: f32,
 }
 
 impl RealSenseCamera {
@@ -86,6 +87,7 @@ impl RealSenseCamera {
             imu_frame_received: Default::default(),
             robot_element: None,
             focal_length_frac: 0.5,
+            min_distance: 0.4
         })
     }
 
@@ -179,6 +181,14 @@ impl Node for RealSenseCamera {
         tokio_rayon::spawn(move || {
             let mut last_accel: Vector3<f64> = Default::default();
             let mut last_ang_vel: Vector3<f64> = Default::default();
+
+            // Create Resizer instance and resize source image
+            // into buffer of destination image
+            let mut resizer =
+                fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(
+                    fast_image_resize::FilterType::Hamming,
+                ));
+            
             loop {
                 let frames = pipeline.wait(None)?;
                 if drop_check.has_dropped() {
@@ -235,13 +245,6 @@ impl Node for RealSenseCamera {
                     continue;
                 };
 
-                // Create Resizer instance and resize source image
-                // into buffer of destination image
-                let mut resizer =
-                    fast_image_resize::Resizer::new(fast_image_resize::ResizeAlg::Convolution(
-                        fast_image_resize::FilterType::Hamming,
-                    ));
-
                 for frame in frames.frames_of_type::<DepthFrame>() {
                     let Some(img) = ImageBuffer::<Luma<u16>, Vec<_>>::from_raw(
                         frame.width() as u32,
@@ -264,6 +267,7 @@ impl Node for RealSenseCamera {
                     let global_isometry = robot_element.get_global_isometry();
                     let frame_width = frame.width() as u32;
                     let frame_height = frame.height() as u32;
+                    let min_distance = self.min_distance;
 
                     let (frame_bytes, raw_rays) = join(
                         || {
@@ -282,7 +286,7 @@ impl Node for RealSenseCamera {
                             let mut dst_image = fast_image_resize::Image::new(
                                 dst_width,
                                 dst_height,
-                                src_image.pixel_type(),
+                                fast_image_resize::PixelType::U16,
                             );
 
                             // Get mutable view of destination image data
@@ -296,20 +300,18 @@ impl Node for RealSenseCamera {
                                     fx: focal_length,
                                     fy: focal_length,
                                     skew: 0.0,
-                                    cx: frame_width as f32 / 4.0,
-                                    cy: frame_height as f32 / 4.0,
+                                    cx: frame_width as f32 / 8.0,
+                                    cy: frame_height as f32 / 8.0,
                                 }),
                                 ExtrinsicParameters::from_pose(&nalgebra::convert(global_isometry)),
                             );
                             let pixel_coords = (0..frame_height / 4)
                                 .into_iter()
-                                .map(|y| {
+                                .flat_map(|y| {
                                     (0..frame_width / 4)
                                         .into_iter()
-                                        .map(move |x| [x as f32, y as f32])
-                                        .flatten()
-                                })
-                                .flatten();
+                                        .flat_map(move |x| [x as f32, y as f32])
+                                });
 
                             let pixel_coords = Pixels::new(Matrix::<
                                 f32,
@@ -325,10 +327,9 @@ impl Node for RealSenseCamera {
                     );
 
                     let scale = frame.depth_units().unwrap();
-                    // println!("{scale}");
                     let origin: Vector3<f32> =
                         nalgebra::convert(global_isometry.translation.vector);
-
+                    
                     let points: Arc<[_]> = cast_slice::<_, u16>(&frame_bytes)
                         .into_par_iter()
                         .enumerate()
@@ -336,11 +337,14 @@ impl Node for RealSenseCamera {
                             if *depth == 0 {
                                 return None;
                             }
-                            // let depth = *depth as f32 * scale;
-                            let depth = 1.0 * scale;
+                            let depth = *depth as f32 * scale;
+
+                            if depth < min_distance {
+                                return None;
+                            }
+
                             let ray = raw_rays.data.row(i).transpose().normalize();
-                            // assert_eq!(ray.magnitude(), 1.0);
-                            // let ray = Vector3::new(ray[0], ray[1], ray[2]).normalize();
+
                             Some((
                                 Point3::from(ray * depth + origin),
                                 *last_img.get_pixel(
@@ -350,7 +354,6 @@ impl Node for RealSenseCamera {
                             ))
                         })
                         .collect();
-                    // let points: Arc<[_]> = raw_rays.data.row_iter().map(|x| x.transpose().into()).collect();
                     self.point_cloud_received.set(PointCloud { points });
                 }
             }
@@ -373,5 +376,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         imu_frame_received: Default::default(),
         robot_element: None,
         focal_length_frac: 0.5,
+        min_distance: 0.4
     }))
 }

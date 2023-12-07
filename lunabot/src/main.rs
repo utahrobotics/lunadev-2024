@@ -61,37 +61,29 @@ async fn main() -> anyhow::Result<()> {
         camera_element.get_ref(),
     );
     apriltag.add_tag(Default::default(), Default::default(), 0.134, 0);
-    let mut pc_sub = camera.point_cloud_received_signal().watch();
-    // let mut data_dump = DataDump::new_file("points.dat").await?;
-    let las_node = FnNode::new(|_| async move {
-        // let mut rate_logger = RateLogger::default();
-        let mut i = 0;
-        loop {
-            let PointCloud { points } = pc_sub.wait_for_change().await;
-            tokio_rayon::spawn(move || {
-                let mut header = las::Builder::default();
-                header.point_format = las::point::Format {
-                    has_color: true,
-                    ..Default::default()
-                };
-                let mut writer = las::Writer::from_path(format!("{i}.las"), header.into_header().unwrap()).unwrap();
-                use las::Write;
-                for (point, color) in points.iter() {
-                    let mut point = las::Point { x: point.x as f64, y: point.y as f64, z: point.z as f64, ..Default::default() };
-                    point.color = Some(las::Color { red: color.0[0] as u16 * 255, green: color.0[1] as u16 * 255, blue: color.0[2] as u16 * 255 });
-                    writer.write(point).unwrap();
-                }
-            }).await;
-            i += 1;
-            // rate_logger.increment();
-            // data_dump.write_all(&points.len().to_be_bytes()).unwrap();
-            // for point in points.iter() {
-            //     data_dump.write_all(&point.x.to_be_bytes()).unwrap();
-            //     data_dump.write_all(&point.y.to_be_bytes()).unwrap();
-            //     data_dump.write_all(&point.z.to_be_bytes()).unwrap();
-            // }
-        }
-    });
+    // let mut pc_sub = camera.point_cloud_received_signal().watch();
+
+    // let las_node = FnNode::new(|_| async move {
+    //     let mut i = 0;
+    //     loop {
+    //         let PointCloud { points } = pc_sub.wait_for_change().await;
+    //         tokio_rayon::spawn(move || {
+    //             let mut header = las::Builder::default();
+    //             header.point_format = las::point::Format {
+    //                 has_color: true,
+    //                 ..Default::default()
+    //             };
+    //             let mut writer = las::Writer::from_path(format!("{i}.las"), header.into_header().unwrap()).unwrap();
+    //             use las::Write;
+    //             for (point, color) in points.iter() {
+    //                 let mut point = las::Point { x: point.x as f64, y: point.y as f64, z: point.z as f64, ..Default::default() };
+    //                 point.color = Some(las::Color { red: color.0[0] as u16 * 255, green: color.0[1] as u16 * 255, blue: color.0[2] as u16 * 255 });
+    //                 writer.write(point).unwrap();
+    //             }
+    //         }).await;
+    //         i += 1;
+    //     }
+    // });
 
     let mut positioning = Localizer::new(robot_base);
     positioning.add_position_sub(
@@ -159,12 +151,12 @@ async fn main() -> anyhow::Result<()> {
         [
             camera.into(),
             apriltag.into(),
-            positioning.into(),
+            // positioning.into(),
             video_maker.into(),
             navigator.into(),
             costmap.into(),
             dumper.into(),
-            las_node.into()
+            // las_node.into()
         ],
         run_options,
     )

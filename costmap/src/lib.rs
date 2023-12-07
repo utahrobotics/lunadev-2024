@@ -1,12 +1,13 @@
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, mpsc::channel,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use nalgebra::{Dyn, Matrix, Point3, VecStorage};
+use spin_sleep::SpinSleeper;
 use unros_core::{
     anyhow, async_trait,
     rayon::{
@@ -15,7 +16,7 @@ use unros_core::{
     },
     setup_logging,
     signal::unbounded::UnboundedSubscription,
-    tokio, Node, RuntimeContext,
+    Node, RuntimeContext,
 };
 
 pub struct Costmap {
@@ -143,23 +144,32 @@ impl Node for Costmap {
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
+        let (del_sender, del_recv) = channel::<(Duration, Arc<[usize]>)>();
+        let start = Instant::now();
+        let start2 = start.clone();
+        let points2 = self.points.clone();
+
+        rayon::spawn(move || {
+            let sleeper = SpinSleeper::default();
+            loop {
+                let Ok((next_duration, new_points)) = del_recv.recv() else { break; };
+                sleeper.sleep(next_duration - start2.elapsed());
+                new_points.par_iter().for_each(|i| {
+                    points2[*i].fetch_sub(1, Ordering::Relaxed);
+                });
+            }
+        });
+
         loop {
             let new_points = self.points_sub.recv().await;
             let new_points2 = new_points.clone();
             let points = self.points.clone();
-            let points2 = points.clone();
 
-            tokio::spawn(async move {
-                tokio::time::sleep(self.window_duration).await;
-                rayon::spawn(move || {
-                    new_points.par_iter().for_each(|i| {
-                        points[*i].fetch_sub(1, Ordering::Relaxed);
-                    });
-                });
-            });
+            let _ = del_sender.send((start.elapsed() + self.window_duration, new_points2));
+            
             rayon::spawn(move || {
-                new_points2.par_iter().for_each(|i| {
-                    points2[*i].fetch_add(1, Ordering::Relaxed);
+                new_points.par_iter().for_each(|i| {
+                    points[*i].fetch_add(1, Ordering::Relaxed);
                 });
             });
         }
