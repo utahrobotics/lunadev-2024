@@ -53,7 +53,9 @@ async fn main() -> anyhow::Result<()> {
     let video_maker = FnNode::new(|_| async move {
         loop {
             tokio::time::sleep(Duration::from_millis(42)).await;
-            costmap_writer.write_frame(costmap_ref.get_costmap_img().into()).unwrap();
+            costmap_writer
+                .write_frame(costmap_ref.get_costmap_img().into())
+                .unwrap();
         }
     });
 
@@ -110,15 +112,18 @@ async fn main() -> anyhow::Result<()> {
     ));
     positioning.add_imu_sub(camera.imu_frame_received().subscribe_unbounded());
 
-    positioning.add_imu_sub(UnboundedSubscription::repeat(IMUFrame {
-        acceleration: Vector3::new(0.0, -9.81, 0.0),
-        angular_velocity: Default::default(),
-        rotation_sequence: Default::default(),
-        rotation_type: Default::default(),
-        acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.25,
-        angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 0.25,
-        robot_element: debug_element.get_ref(),
-    }, Duration::from_millis(10)));
+    positioning.add_imu_sub(UnboundedSubscription::repeat(
+        IMUFrame {
+            acceleration: Vector3::new(0.0, -9.81, 0.0),
+            angular_velocity: Default::default(),
+            rotation_sequence: Default::default(),
+            rotation_type: Default::default(),
+            acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.25,
+            angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 0.25,
+            robot_element: debug_element.get_ref(),
+        },
+        Duration::from_millis(10),
+    ));
 
     let mut pid = pid::Pid::new(0.0, 100.0);
     pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);

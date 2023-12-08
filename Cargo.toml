@@ -12,7 +12,7 @@ members = [
     "localization",
     "serial",
     "navigator",
-    "rig", "tools", "smach", "costmap",
+    "rig", "tools", "smach", "costmap", "smooth-diff-drive",
 ]
 resolver = "2"
 
@@ -31,6 +31,11 @@ tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 fast_image_resize = "2"
 spin_sleep = "1"
+burn = { version = "0.11.1", features=["train", "wgpu"]}
+rand = { version = "0.8", features = ["small_rng"] }
+tokio-rayon = "2"
+serde-big-array = "0.5.1"
+rand_distr = "0.4.3"
 
 # The following crates need to run at full power
 # in most contexts to be effective.

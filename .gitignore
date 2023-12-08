@@ -3,3 +3,5 @@ logs*
 .vscode
 rustc-ice-*.txt
 *.las
+train.json
+test.json

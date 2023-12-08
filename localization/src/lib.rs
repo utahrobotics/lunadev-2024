@@ -4,7 +4,6 @@
 
 use std::{
     collections::hash_map::Entry,
-    f64::consts::PI,
     time::{Duration, Instant},
 };
 
