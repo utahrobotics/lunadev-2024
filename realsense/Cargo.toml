@@ -15,4 +15,4 @@ nalgebra = { workspace = true }
 quaternion-core = { workspace = true }
 cam-geom = "0.14"
 fast_image_resize = { workspace = true }
-bytemuck = "1"
+bytemuck = { workspace = true }

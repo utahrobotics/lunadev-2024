@@ -1,4 +1,4 @@
-#![feature(array_chunks, iterator_try_collect)]
+#![feature(iter_array_chunks)]
 
 pub mod drive;
 
@@ -6,74 +6,110 @@ use std::{
     collections::VecDeque,
     fs::File,
     io::{BufReader, BufWriter},
-    path::Path,
+    path::Path, sync::mpsc::channel,
 };
 
 use burn::{
     config::Config,
     data::{
         dataloader::{batcher::Batcher, DataLoaderBuilder},
-        dataset::InMemDataset,
+        dataset::{InMemDataset, SqliteDataset},
     },
     module::Module,
     nn::{
         loss::{MSELoss, Reduction},
-        Dropout, DropoutConfig, Linear, LinearConfig, Lstm, LstmConfig,
+        Dropout, DropoutConfig, Linear, LinearConfig, Lstm, LstmConfig, LayerNorm, LayerNormConfig, gru::{Gru, GruConfig},
     },
     optim::AdamConfig,
-    record::CompactRecorder,
+    record::{CompactRecorder, Recorder},
     tensor::{
-        activation::sigmoid,
+        activation::gelu,
         backend::{AutodiffBackend, Backend},
         Data, Tensor,
     },
     train::{
-        metric::LossMetric, LearnerBuilder, RegressionOutput, TrainOutput, TrainStep, ValidStep,
+        metric::{LossMetric, store::{Aggregate, Direction, Split}}, LearnerBuilder, RegressionOutput, TrainOutput, TrainStep, ValidStep, MetricEarlyStoppingStrategy, StoppingCondition,
     },
 };
+use bytemuck::{cast_slice, cast_vec};
 use crossbeam::queue::SegQueue;
 use rand::{
     distributions::{Bernoulli, Distribution},
     rngs::SmallRng,
     Rng, SeedableRng,
 };
-use rand_distr::Normal;
+use rand_distr::{Normal, num_traits::ToBytes};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
-use tokio_rayon::rayon::iter::{IntoParallelIterator, ParallelIterator};
+// use serde_big_array::BigArray;
+use tokio_rayon::rayon::{iter::{IntoParallelIterator, ParallelIterator}, self};
 
 #[derive(Module, Debug)]
 pub struct Model<B: Backend> {
     // input: Linear<B>,
-    lstm1: Lstm<B>,
-    lstm2: Lstm<B>,
-    lstm3: Lstm<B>,
+    lstm1: Gru<B>,
+    norm1: LayerNorm<B>,
+    // lstm2: Gru<B>,
+    // norm2: LayerNorm<B>,
+    // lstm3: Gru<B>,
+    // norm3: LayerNorm<B>,
     linear1: Linear<B>,
+    norm4: LayerNorm<B>,
     linear2: Linear<B>,
+    norm5: LayerNorm<B>,
+    linear3: Linear<B>,
+    norm6: LayerNorm<B>,
     dropout: Dropout,
     hidden_size: usize,
 }
 
 #[derive(Config, Debug)]
 pub struct ModelConfig {
-    // num_classes: usize,
-    hidden_size: usize,
-    #[config(default = "0.3")]
-    dropout: f64,
+    pub hidden_size: usize,
+    #[config(default = "0.5")]
+    pub dropout: f64,
 }
 
 impl ModelConfig {
     /// Returns the initialized model.
     pub fn init<B: Backend>(&self) -> Model<B> {
         Model {
-            lstm1: LstmConfig::new(4, self.hidden_size, true).init(),
-            lstm2: LstmConfig::new(self.hidden_size, self.hidden_size, true).init(),
-            lstm3: LstmConfig::new(self.hidden_size, self.hidden_size, true).init(),
+            lstm1: GruConfig::new(4, self.hidden_size, false).init(),
+            norm1: LayerNormConfig::new(self.hidden_size).init(),
+
+            // lstm2: GruConfig::new(self.hidden_size, self.hidden_size, false).init(),
+            // norm2: LayerNormConfig::new(self.hidden_size).init(),
+
+            // lstm3: GruConfig::new(self.hidden_size, self.hidden_size, false).init(),
+            // norm3: LayerNormConfig::new(self.hidden_size).init(),
+
             linear1: LinearConfig::new(self.hidden_size, self.hidden_size).init(),
-            linear2: LinearConfig::new(self.hidden_size, 2).init(),
+            norm4: LayerNormConfig::new(self.hidden_size).init(),
+
+            linear2: LinearConfig::new(self.hidden_size, self.hidden_size).init(),
+            norm5: LayerNormConfig::new(self.hidden_size).init(),
+
+            linear3: LinearConfig::new(self.hidden_size, 2).init(),
+            norm6: LayerNormConfig::new(2).init(),
+
             dropout: DropoutConfig::new(self.dropout).init(),
+            
             hidden_size: self.hidden_size,
         }
+    }
+
+    pub fn init_with<B>(&self, _record: ModelRecord<B>) -> Model<B> where B: Backend {
+        todo!()
+        // Model {
+        //     lstm1: LstmConfig::new(4, self.hidden_size, true).init_with(record.lstm1),
+        //     lstm2: LstmConfig::new(self.hidden_size, self.hidden_size, true).init_with(record.lstm2),
+        //     lstm3: LstmConfig::new(self.hidden_size, self.hidden_size, true).init_with(record.lstm3),
+        //     linear1: LinearConfig::new(self.hidden_size, self.hidden_size).init_with(record.linear1),
+        //     linear2: LinearConfig::new(self.hidden_size, self.hidden_size).init_with(record.linear2),
+        //     linear3: LinearConfig::new(self.hidden_size, 2).init_with(record.linear3),
+        //     dropout: DropoutConfig::new(self.dropout).init(),
+        //     hidden_size: self.hidden_size,
+        // }
     }
 }
 
@@ -81,39 +117,50 @@ impl<B: Backend> Model<B> {
     /// # Shapes
     ///   - Input [batch_size, seq_length, 2]
     ///   - Output [batch_size]
-    pub fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 2> {
+    fn forward(&self, input: Tensor<B, 3>) -> Tensor<B, 2> {
         let [batch_size, seq_length, 4] = input.dims() else {
             panic!("Invalid size")
         };
 
         // cell_states: [batch_size, sequence_length, hidden_size]
         // hidden_states: [batch_size, sequence_length, hidden_size]
-        let (_cell_states, hidden_states) = self.lstm1.forward(input, None);
-        let x = self.dropout.forward(hidden_states);
-
-        let (_cell_states, hidden_states) = self.lstm2.forward(x, None);
-        let x = self.dropout.forward(hidden_states);
-
-        let (_cell_states, mut hidden_states) = self.lstm3.forward(x, None);
-
-        hidden_states = hidden_states.slice([
-            0..batch_size,
-            (seq_length - 1)..seq_length,
-            0..self.hidden_size,
-        ]);
-        let x = hidden_states.reshape([batch_size, self.hidden_size]);
+        let x = self.lstm1.forward(input, None);
+        let x = self.norm1.forward(x);
+        let x = gelu(x);
         let x = self.dropout.forward(x);
+
+        // let x = self.lstm2.forward(x, None);
+        // let x = self.norm2.forward(x);
+        // let x = gelu(x);
+        // let x = self.dropout.forward(x);
+
+        // let x = self.lstm3.forward(x, None);
+        // let x = self.norm3.forward(x);
+        // let x = gelu(x);
+        // let x = self.dropout.forward(x);
+
+        let x = x.slice([0..batch_size, (seq_length - 1)..seq_length, 0..self.hidden_size]);
+        let x = x.reshape([batch_size, self.hidden_size]);
 
         let x = self.linear1.forward(x);
-        let x = self.dropout.forward(x);
-        let x = self.linear2.forward(x);
-        let x = x.reshape([batch_size, 2]);
+        let x = self.norm4.forward(x);
+        let x = gelu(x);
         let x = self.dropout.forward(x);
 
-        sigmoid(x)
+        let x = self.linear2.forward(x);
+        let x = self.norm5.forward(x);
+        let x = gelu(x);
+        let x = self.dropout.forward(x);
+
+        let x = self.linear3.forward(x);
+        let x = self.norm6.forward(x);
+        let x = gelu(x);
+        let x = self.dropout.forward(x);
+
+        x
     }
 
-    pub fn forward_regression(
+    fn forward_regression(
         &self,
         inputs: Tensor<B, 3>,
         targets: Tensor<B, 2>,
@@ -121,21 +168,17 @@ impl<B: Backend> Model<B> {
         let output = self.forward(inputs);
         let loss = MSELoss::new().forward(output.clone(), targets.clone(), Reduction::Auto);
 
-        // let dims = output.dims();
-        // let output = output.reshape([dims[0], 1]);
-        // let dims = targets.dims();
-        // let targets = targets.reshape([dims[0], 1]);
         RegressionOutput::new(loss, output, targets)
     }
 }
 
 const SEQ_LENGTH: usize = 150;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct ModelItem {
-    #[serde(with = "BigArray")]
-    input: [[f32; 4]; SEQ_LENGTH],
-    target: [f32; 2],
+    input: Vec<u8>,
+    target_left: f32,
+    target_right: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -172,14 +215,15 @@ impl<B: Backend> Batcher<ModelItem, ModelBatch<B>> for ModelBatcher<B> {
     fn batch(&self, items: Vec<ModelItem>) -> ModelBatch<B> {
         let inputs = items
             .iter()
-            .map(|item| Data::<f32, 2>::from(item.input))
+            // .map(|item| Data::<f32, 2>::from(<[[f32; 4]; SEQ_LENGTH]>::try_from(item.input.drain(..).array_chunks::<4>().map(|bytes| f32::from_ne_bytes(bytes)).array_chunks::<4>().collect::<Vec<_>>()).unwrap()))
+            .map(|item| Data::<f32, 2>::from(<[[f32; 4]; SEQ_LENGTH]>::try_from(cast_slice::<_, [f32; 4]>(&item.input)).unwrap()))
             .map(|data| Tensor::<B, 2>::from_data(data.convert()))
             .map(|tensor| tensor.reshape([1, SEQ_LENGTH, 4]))
             .collect();
 
         let targets = items
             .iter()
-            .map(|item| Tensor::<B, 2>::from_data(Data::<f32, 2>::from([item.target]).convert()))
+            .map(|item| Tensor::<B, 2>::from_data(Data::<f32, 2>::from([[item.target_left, item.target_right]]).convert()))
             .collect();
 
         let inputs = Tensor::cat(inputs, 0).to_device(&self.device);
@@ -197,11 +241,11 @@ pub struct TrainingConfig {
     pub num_epochs: usize,
     #[config(default = 64)]
     pub batch_size: usize,
-    #[config(default = 4)]
+    #[config(default = 16)]
     pub num_workers: usize,
     #[config(default = 42)]
     pub seed: u64,
-    #[config(default = 1.0e-4)]
+    #[config(default = 1.0e-3)]
     pub learning_rate: f64,
 }
 
@@ -213,15 +257,6 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
 
     B::seed(config.seed);
 
-    let train_data = serde_json::from_reader(BufReader::new(
-        File::open("train.json").expect("train.json should have opened successfully"),
-    ))
-    .expect("train.json should be valid");
-    let test_data = serde_json::from_reader(BufReader::new(
-        File::open("test.json").expect("test.json should have opened successfully"),
-    ))
-    .expect("test.json should be valid");
-
     let batcher_train = ModelBatcher::<B>::new(device.clone());
     let batcher_valid = ModelBatcher::<B::InnerBackend>::new(device.clone());
 
@@ -229,15 +264,16 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(InMemDataset::new(train_data));
+        .build(SqliteDataset::from_db_file("data.sqlite", "train").expect("data.sqlite should be readable"));
 
     let dataloader_test = DataLoaderBuilder::new(batcher_valid)
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(InMemDataset::new(test_data));
+        .build(SqliteDataset::from_db_file("data.sqlite", "test").expect("data.sqlite should be readable"));
 
     let learner = LearnerBuilder::new(artifact_dir)
+        .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(Aggregate::Mean, Direction::Lowest, Split::Train, StoppingCondition::NoImprovementSince { n_epochs: 3 }))
         .metric_train_numeric(LossMetric::new())
         .metric_valid_numeric(LossMetric::new())
         .with_file_checkpointer(CompactRecorder::new())
@@ -256,27 +292,75 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
         .expect("Trained model should be saved successfully");
 }
 
-const MAX_DELAY: f32 = 1.0;
+pub fn test<B: Backend>(_artifact_dir: &str, _device: B::Device) {
+    // let config = TrainingConfig::load(format!("{artifact_dir}/config.json"))
+    //     .expect("Config should exist for the model");
+    // let record = CompactRecorder::new()
+    //     .load(format!("{artifact_dir}/model").into())
+    //     .expect("Trained model should exist");
+
+    // let model = config.model.init_with::<B>(record).to_device(&device);
+    
+    // // let test_data = serde_json::from_reader(BufReader::new(
+    // //     File::open("test.json").expect("test.json should have opened successfully"),
+    // // ))
+    // // .expect("test.json should be valid");
+
+    // let batcher = ModelBatcher::new(device);
+    // let batch = batcher.batch(SqliteDataset::from_db_file("data.sqlite", "test").expect("data.sqlite should be readable"));
+    // let output = model.forward(batch.inputs);
+    // let output = output.into_data();
+    // let targets = batch.targets.into_data();
+    // assert_eq!(output.value.len(), targets.value.len());
+    // // let predicted = output.flatten::<1>(0, 1).into_scalar();
+    
+    // for (x, y) in output.value.into_iter().zip(targets.value) {
+    //     println!("Predicted {:.2} Expected {:.2}", x, y);
+    // }
+
+}
+
+const MAX_DELAY: f32 = 0.5;
 const RESAMPLE_PROB: f64 = 0.01;
 const DELTA: f32 = 0.02;
 const MAX_CONTROL_DRIFT: f32 = 1.0;
 const MAX_CONTROL_STD_DEV: f32 = 1.0;
-const MAX_MEASUREMENT_STD_DEV: f32 = 0.25;
-const MAX_SLOWDOWN_STD_DEV: f32 = 0.5;
+const MAX_MEASUREMENT_STD_DEV: f32 = 0.1;
+const MAX_SLOWDOWN_STD_DEV: f32 = 0.1;
 
-pub fn create_dataset(len: usize, file: impl AsRef<Path> + Send + 'static) {
+
+pub fn create_dataset(len: usize, table: &'static str) {
     let rands = SegQueue::new();
-    let file = File::create(file).expect("File should have been writable");
-    let file = BufWriter::new(file);
+    let (sender, receiver) = channel::<ModelItem>();
+    let mut db = Connection::open("data.sqlite").expect("data.sqlite should have been writable");
+    let res = db.execute(&format!("DROP TABLE {table};"), params![]);
+    if let Err(e) = res {
+        eprintln!("Failed to delete: {table}: {e}");
+    }
+    db.execute(&format!("CREATE TABLE {table} (row_id INTEGER, input BLOB, target_left REAL, target_right REAL);"), params![]).expect("Table should have been created");
+    
+    let handle = std::thread::spawn(move || {
+        let mut i = 0usize;
+        loop {
+            let mut tx = db.transaction().expect("Transaction should have been created");
+            tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
+            for _ in 0..1000 {
+                let Ok(item) = receiver.recv() else { return; };
+                i += 1;
+                tx.execute(&format!("INSERT INTO {table} (row_id, input, target_left, target_right) VALUES (?1, ?2, ?3, ?4);"), params![i, item.input, item.target_left, item.target_right]).expect("Item should have been inserted");
+            }
+        }
+    });
 
-    let items: Vec<_> = (0..len)
+    (0..len)
         .into_par_iter()
-        .map(|_| {
+        .for_each(move |_| {
             let mut rng = rands.pop().unwrap_or_else(|| SmallRng::from_entropy());
 
             let mut item = ModelItem {
-                input: [[0.0; 4]; SEQ_LENGTH],
-                target: [0.0; 2],
+                input: vec![],
+                target_left: 0.0,
+                target_right: 0.0,
             };
 
             let mut left_drive;
@@ -334,7 +418,7 @@ pub fn create_dataset(len: usize, file: impl AsRef<Path> + Send + 'static) {
             // Either side can be up to 100% slowed, meaning that it is stationary
             let left_slowdown = rng.gen_range(0.0..1.0);
             let right_slowdown = rng.gen_range(0.0..1.0);
-            // It can take up to 1 second for a drive strength to be changed
+            // It can take up to MAX_DELAY seconds for a drive strength to be changed
             let left_delay = rng.gen_range(DELTA..MAX_DELAY);
             let right_delay = rng.gen_range(DELTA..MAX_DELAY);
             // A side can accelerate anywhere from 10%/sec to 1000%/sec
@@ -358,7 +442,7 @@ pub fn create_dataset(len: usize, file: impl AsRef<Path> + Send + 'static) {
 
             let resample_rng = Bernoulli::new(RESAMPLE_PROB).unwrap();
 
-            for i in 0..SEQ_LENGTH {
+            for _ in 0..SEQ_LENGTH {
                 if resample_rng.sample(&mut rng) {
                     resample!();
                 }
@@ -403,13 +487,12 @@ pub fn create_dataset(len: usize, file: impl AsRef<Path> + Send + 'static) {
                     right_measured = -1.0;
                 }
 
-                item.input[i] = [
-                    left_drive,
-                    right_drive,
-                    left_measured,
-                    right_measured,
-                ];
-                item.target = [left_slowdown, right_slowdown];
+                item.input.extend_from_slice(&left_drive.to_ne_bytes());
+                item.input.extend_from_slice(&right_drive.to_ne_bytes());
+                item.input.extend_from_slice(&left_measured.to_ne_bytes());
+                item.input.extend_from_slice(&right_measured.to_ne_bytes());
+                item.target_left = left_slowdown;
+                item.target_right = right_slowdown;
             }
 
             // 10% chance of resampling the rng
@@ -418,9 +501,9 @@ pub fn create_dataset(len: usize, file: impl AsRef<Path> + Send + 'static) {
             }
 
             rands.push(rng);
-            item
-        })
-        .collect();
 
-    serde_json::to_writer(file, &items).expect("serialization should have succeeded");
+            sender.send(item).unwrap();
+        });
+    
+    handle.join().unwrap();
 }

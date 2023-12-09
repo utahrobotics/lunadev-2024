@@ -1,8 +1,8 @@
 use burn::backend::{wgpu::AutoGraphicsApi, Autodiff, Wgpu};
+use burn::grad_clipping::GradientClippingConfig;
 use burn::optim::AdamConfig;
 use clap::{command, Parser, Subcommand};
 use smooth_diff_drive::{create_dataset, train, ModelConfig, TrainingConfig};
-use tokio_rayon::rayon::join;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -14,9 +14,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Gen {
-        #[arg(short, long)]
         train_len: usize,
-        #[arg(short, long)]
         test_len: usize,
     },
     Train,
@@ -34,25 +32,23 @@ fn main() {
             train_len,
             test_len,
         } => {
-            join(
-                || {
-                    create_dataset(train_len, "train.json");
-                },
-                || {
-                    create_dataset(test_len, "test.json");
-                },
-            );
+            create_dataset(train_len, "train");
+            create_dataset(test_len, "test");
         }
         Commands::Train => {
             let device = burn::backend::wgpu::WgpuDevice::default();
             train::<MyAutodiffBackend>(
                 "/tmp/smooth_diff_drive",
-                TrainingConfig::new(ModelConfig::new(8), AdamConfig::new()),
+                TrainingConfig::new(ModelConfig::new(12), AdamConfig::new().with_grad_clipping(Some(GradientClippingConfig::Value(0.25)))),
                 device,
             );
         }
         Commands::Test => {
-            todo!()
+            let device = burn::backend::wgpu::WgpuDevice::default();
+            smooth_diff_drive::test::<MyAutodiffBackend>(
+                "/tmp/smooth_diff_drive",
+                device,
+            );
         }
     }
 }

@@ -13,6 +13,8 @@ tokio-rayon = { workspace = true }
 crossbeam = { workspace = true }
 rand = { workspace = true }
 clap = { workspace = true }
-serde-big-array = { workspace = true }
-serde_json = "1"
+# serde-big-array = { workspace = true }
+# serde_json = "1"
 rand_distr = { workspace = true }
+rusqlite = "0.30"
+bytemuck = { workspace = true }
