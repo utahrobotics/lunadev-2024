@@ -287,3 +287,9 @@ impl<T, B: AutodiffBackend> AutodiffModule<B> for PhantomModule<T> {
         *self
     }
 }
+
+impl<T> Default for PhantomModule<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}

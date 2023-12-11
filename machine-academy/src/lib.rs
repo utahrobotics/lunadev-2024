@@ -1,15 +1,15 @@
 use std::{
     fmt::{Debug, Display},
     marker::PhantomData,
-    path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, path::PathBuf,
 };
 
 use burn::{
-    config::Config,
-    data::dataloader::{batcher::Batcher, DataLoaderBuilder},
+    data::
+        dataloader::{batcher::Batcher, DataLoaderBuilder}
+    ,
     lr_scheduler::noam::NoamLrSchedulerConfig,
-    module::AutodiffModule,
+    module::{AutodiffModule, Module},
     optim::AdamConfig,
     record::CompactRecorder,
     tensor::{
@@ -25,26 +25,29 @@ use burn::{
         },
         ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, RegressionOutput,
         StoppingCondition, TrainOutput, TrainStep, ValidStep,
-    },
+    }, config::Config,
 };
 use data::AcademyDataset;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub use burn;
 
 pub mod common;
 pub mod data;
 
-pub trait Model<B: AutodiffBackend>: AutodiffModule<B> + Display {
+pub trait Model<B: AutodiffBackend>: AutodiffModule<B> + Display + 'static {
     type Input;
     type Output;
     type LossOutput;
-    type Batch;
+    type Batch: Send;
+    type Config: Config;
 
+    fn from_config(config: Self::Config) -> Self;
     fn forward(&self, input: Self::Input) -> Self::Output;
     fn forward_training(&self, batch: Self::Batch) -> Self::LossOutput;
 }
 
+#[derive(Clone)]
 pub struct TrainingModel<M: Model<B>, B: AutodiffBackend>(pub M, PhantomData<B>);
 
 impl<B: AutodiffBackend, M: Model<B, LossOutput = RegressionOutput<B>>>
@@ -80,6 +83,77 @@ impl<B: AutodiffBackend, M: Model<B, LossOutput = ClassificationOutput<B>>>
         self.0.forward_training(batch)
     }
 }
+
+impl<B: AutodiffBackend, M: Model<B>>
+    Module<B> for TrainingModel<M, B>
+{
+    type Record = M::Record;
+
+    fn collect_devices(&self, devices: burn::module::Devices<B>) -> burn::module::Devices<B> {
+        self.0.collect_devices(devices)
+    }
+
+    fn fork(mut self, device: &<B as Backend>::Device) -> Self {
+        self.0 = self.0.fork(device);
+        self
+    }
+
+    fn to_device(mut self, device: &<B as Backend>::Device) -> Self {
+        self.0 = self.0.to_device(device);
+        self
+    }
+
+    fn visit<V: burn::module::ModuleVisitor<B>>(&self, visitor: &mut V) {
+        self.0.visit(visitor);
+    }
+
+    fn map<MM: burn::module::ModuleMapper<B>>(mut self, mapper: &mut MM) -> Self {
+        self.0 = self.0.map(mapper);
+        self
+    }
+
+    fn load_record(mut self, record: Self::Record) -> Self {
+        self.0 = self.0.load_record(record);
+        self
+    }
+
+    fn into_record(self) -> Self::Record {
+        self.0.into_record()
+    }
+}
+
+impl<B: AutodiffBackend, M: Model<B>>
+    AutodiffModule<B> for TrainingModel<M, B>
+{
+    type InnerModule = M::InnerModule;
+
+    fn valid(&self) -> Self::InnerModule {
+        self.0.valid()
+    }
+}
+
+impl<B: AutodiffBackend, M: Model<B>>
+    Debug for TrainingModel<M, B>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl<B: AutodiffBackend, M: Model<B>>
+    Display for TrainingModel<M, B>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl<M: Model<B>, B: AutodiffBackend> TrainingModel<M, B> {
+    pub fn new(model: M) -> Self {
+        Self(model, PhantomData)
+    }
+}
+
 
 #[derive(Clone, Debug)]
 pub struct RegressionBatch<B: Backend, const I: usize, const T: usize> {
@@ -118,22 +192,27 @@ impl<B: Backend, const T: usize, Item: Into<(Tensor<B, 2>, Tensor<B, T>)>>
     }
 }
 
-#[derive(Config)]
-pub struct TrainingConfig {
+#[derive(Serialize, Deserialize)]
+pub struct TrainingConfig<T> {
+    pub model_config: T,
     pub optimizer: AdamConfig,
-    #[config(default = 10)]
+    // #[config(default = 10)]
     pub num_epochs: usize,
-    #[config(default = 128)]
+    // #[config(default = 128)]
     pub batch_size: usize,
-    #[config(default = 4)]
+    // #[config(default = 4)]
     pub num_workers: usize,
-    #[config(default = 1342)]
+    // #[config(default = 1342)]
     pub seed: u64,
-    #[config(default = 1.0e-3)]
+    // #[config(default = 1.0e-3)]
     pub init_learning_rate: f64,
-    #[config(default = 2)]
+    // #[config(default = 2)]
     pub stop_condition_epochs: usize,
 }
+
+
+impl<T: Serialize + DeserializeOwned> Config for TrainingConfig<T> {}
+
 
 /// The loss metric.
 pub struct TrackedLossMetric<B: Backend> {
@@ -190,16 +269,12 @@ pub fn train_regression<B, const TN: usize, T, I>(
     training_data_path: PathBuf,
     testing_data_path: PathBuf,
     max_memory_usage: usize,
-    config: TrainingConfig,
-    model: T,
+    config: TrainingConfig<T::Config>,
     device: B::Device,
 ) -> f64
 where
     B: AutodiffBackend,
-    T: AutodiffModule<B>
-        + Display
-        + TrainStep<RegressionBatch<B, 3, TN>, RegressionOutput<B>>
-        + 'static,
+    T: Model<B, LossOutput = RegressionOutput<B>, Batch = RegressionBatch<B, 3, TN>>,
     T::InnerModule:
         ValidStep<RegressionBatch<B::InnerBackend, 3, TN>, RegressionOutput<B::InnerBackend>>,
     I: Send
@@ -225,22 +300,28 @@ where
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(AcademyDataset::new(training_data_path, max_memory_usage));
+        .build(
+            AcademyDataset::new(training_data_path, max_memory_usage)
+        );
 
     let dataloader_test = DataLoaderBuilder::<I, _>::new(batcher_valid)
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(AcademyDataset::new(testing_data_path, max_memory_usage));
+        .build(
+            AcademyDataset::new(testing_data_path, max_memory_usage)
+        );
 
+    let model = T::from_config(config.model_config);
     let num_params = model.num_params();
 
     let loss_state: Arc<Mutex<NumericMetricState>> = Default::default();
     let learner = LearnerBuilder::new(artifact_dir)
-        .metric_train_numeric(TrackedLossMetric {
+        .metric_valid_numeric(TrackedLossMetric {
             state: loss_state.clone(),
             _b: Default::default(),
         })
+        .metric_train_numeric(LossMetric::new())
         .metric_train_numeric(LearningRateMetric::new())
         .metric_train_numeric(CpuTemperature::new())
         .metric_train_numeric(CpuUse::new())
@@ -256,7 +337,7 @@ where
         .devices(vec![device])
         .num_epochs(config.num_epochs)
         .build(
-            model,
+            TrainingModel::new(model),
             config.optimizer.init(),
             NoamLrSchedulerConfig::new(config.init_learning_rate)
                 .with_model_size(num_params)
