@@ -2,10 +2,7 @@
 
 pub mod drive;
 
-use std::{
-    collections::VecDeque,
-    sync::mpsc::channel,
-};
+use std::{collections::VecDeque, sync::mpsc::channel};
 
 use burn::{
     config::Config,
@@ -15,8 +12,9 @@ use burn::{
     },
     module::Module,
     nn::{
+        gru::{Gru, GruConfig},
         loss::{MSELoss, Reduction},
-        Dropout, DropoutConfig, Linear, LinearConfig, LayerNorm, LayerNormConfig, gru::{GruConfig, Gru},
+        Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
     },
     optim::AdamConfig,
     record::{CompactRecorder, Recorder},
@@ -26,7 +24,12 @@ use burn::{
         Data, Tensor,
     },
     train::{
-        metric::{LossMetric, store::{Aggregate, Direction, Split}, CpuUse, CpuTemperature}, LearnerBuilder, RegressionOutput, TrainOutput, TrainStep, ValidStep, MetricEarlyStoppingStrategy, StoppingCondition,
+        metric::{
+            store::{Aggregate, Direction, Split},
+            CpuTemperature, CpuUse, LossMetric,
+        },
+        LearnerBuilder, MetricEarlyStoppingStrategy, RegressionOutput, StoppingCondition,
+        TrainOutput, TrainStep, ValidStep,
     },
 };
 use bytemuck::cast_slice;
@@ -37,7 +40,7 @@ use rand::{
     Rng, SeedableRng,
 };
 use rand_distr::Normal;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 // use serde_big_array::BigArray;
 use tokio_rayon::rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -64,7 +67,7 @@ pub struct Model<B: Backend> {
 #[derive(Config, Debug)]
 pub struct ModelConfig {
     pub hidden_size: usize,
-    #[config(default = "0.1")]
+    #[config(default = "0.5")]
     pub dropout: f64,
 }
 
@@ -80,7 +83,6 @@ impl ModelConfig {
 
             // lstm3: GruConfig::new(self.hidden_size, self.hidden_size, false).init(),
             // norm3: LayerNormConfig::new(self.hidden_size).init(),
-
             linear1: LinearConfig::new(self.hidden_size, self.hidden_size).init(),
             norm4: LayerNormConfig::new(self.hidden_size).init(),
 
@@ -91,12 +93,15 @@ impl ModelConfig {
             norm6: LayerNormConfig::new(1).init(),
 
             dropout: DropoutConfig::new(self.dropout).init(),
-            
+
             hidden_size: self.hidden_size,
         }
     }
 
-    pub fn init_with<B>(&self, record: ModelRecord<B>) -> Model<B> where B: Backend {
+    pub fn init_with<B>(&self, record: ModelRecord<B>) -> Model<B>
+    where
+        B: Backend,
+    {
         Model {
             gru1: GruConfig::new(2, self.hidden_size, true).init_with(record.gru1),
             norm1: LayerNormConfig::new(self.hidden_size).init_with(record.norm1),
@@ -106,18 +111,19 @@ impl ModelConfig {
 
             // lstm3: GruConfig::new(self.hidden_size, self.hidden_size, false).init(),
             // norm3: LayerNormConfig::new(self.hidden_size).init(),
-
-            linear1: LinearConfig::new(self.hidden_size, self.hidden_size).init_with(record.linear1),
+            linear1: LinearConfig::new(self.hidden_size, self.hidden_size)
+                .init_with(record.linear1),
             norm4: LayerNormConfig::new(self.hidden_size).init_with(record.norm4),
 
-            linear2: LinearConfig::new(self.hidden_size, self.hidden_size).init_with(record.linear2),
+            linear2: LinearConfig::new(self.hidden_size, self.hidden_size)
+                .init_with(record.linear2),
             norm5: LayerNormConfig::new(self.hidden_size).init_with(record.norm5),
 
             linear3: LinearConfig::new(self.hidden_size, 2).init_with(record.linear3),
             norm6: LayerNormConfig::new(2).init_with(record.norm6),
 
             dropout: DropoutConfig::new(self.dropout).init(),
-            
+
             hidden_size: self.hidden_size,
         }
     }
@@ -146,7 +152,11 @@ impl<B: Backend> Model<B> {
         // let x = gelu(x);
         // let x = self.dropout.forward(x);
 
-        let x = x.slice([0..batch_size, (seq_length - 1)..seq_length, 0..self.hidden_size]);
+        let x = x.slice([
+            0..batch_size,
+            (seq_length - 1)..seq_length,
+            0..self.hidden_size,
+        ]);
         let x = x.reshape([batch_size, self.hidden_size]);
         let x = self.norm2.forward(x);
         let x = gelu(x);
@@ -169,11 +179,15 @@ impl<B: Backend> Model<B> {
 
         x
     }
-    
+
     /// # Shapes
     ///   - Input [batch_size, 2]
     ///   - Output [batch_size]
-    fn forward_once(&self, input: Tensor<B, 1>, state: Option<(Tensor<B, 3>, Tensor<B, 3>)>) -> (Tensor<B, 2>, (Tensor<B, 3>, Tensor<B, 3>)) {
+    fn forward_once(
+        &self,
+        input: Tensor<B, 1>,
+        state: Option<(Tensor<B, 3>, Tensor<B, 3>)>,
+    ) -> (Tensor<B, 2>, (Tensor<B, 3>, Tensor<B, 3>)) {
         let [2] = input.dims() else {
             panic!("Invalid size")
         };
@@ -274,7 +288,12 @@ impl<B: Backend> Batcher<ModelItem, ModelBatch<B>> for ModelBatcher<B> {
     fn batch(&self, items: Vec<ModelItem>) -> ModelBatch<B> {
         let inputs = items
             .iter()
-            .map(|item| Data::<f32, 2>::from(<[[f32; 2]; SEQ_LENGTH]>::try_from(cast_slice::<_, [f32; 2]>(&item.input)).unwrap()))
+            .map(|item| {
+                Data::<f32, 2>::from(
+                    <[[f32; 2]; SEQ_LENGTH]>::try_from(cast_slice::<_, [f32; 2]>(&item.input))
+                        .unwrap(),
+                )
+            })
             .map(|data| Tensor::<B, 2>::from_data(data.convert()))
             .map(|tensor| tensor.reshape([1, SEQ_LENGTH, 2]))
             .collect();
@@ -322,13 +341,19 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(SqliteDataset::from_db_file("data.sqlite", "train").expect("data.sqlite should be readable"));
+        .build(
+            SqliteDataset::from_db_file("data.sqlite", "train")
+                .expect("data.sqlite should be readable"),
+        );
 
     let dataloader_test = DataLoaderBuilder::new(batcher_valid)
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(SqliteDataset::from_db_file("data.sqlite", "test").expect("data.sqlite should be readable"));
+        .build(
+            SqliteDataset::from_db_file("data.sqlite", "test")
+                .expect("data.sqlite should be readable"),
+        );
 
     let learner = LearnerBuilder::new(artifact_dir)
         .metric_train_numeric(LossMetric::new())
@@ -336,7 +361,12 @@ pub fn train<B: AutodiffBackend>(artifact_dir: &str, config: TrainingConfig, dev
         .metric_train_numeric(CpuTemperature::new())
         .metric_train_numeric(CpuUse::new())
         .metric_valid_numeric(LossMetric::new())
-        .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(Aggregate::Mean, Direction::Lowest, Split::Valid, StoppingCondition::NoImprovementSince { n_epochs: 2 }))
+        .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
+            Aggregate::Mean,
+            Direction::Lowest,
+            Split::Valid,
+            StoppingCondition::NoImprovementSince { n_epochs: 2 },
+        ))
         .with_file_checkpointer(CompactRecorder::new())
         .devices(vec![device])
         .num_epochs(config.num_epochs)
@@ -361,22 +391,25 @@ pub fn test<B: Backend>(artifact_dir: &str, device: B::Device) {
         .expect("Trained model should exist");
 
     let model = config.model.init_with::<B>(record).to_device(&device);
-    
-    let db = Connection::open("data.sqlite").expect("data.sqlite should have been readable");
-    let item = db.query_row("SELECT * FROM train ORDER BY RANDOM() LIMIT 1;", (), |row| {
-        let input: Vec<u8> = row.get("input").unwrap();
-        let target: f32 = row.get("target").unwrap();
-        for [a, b] in cast_slice::<_, [f32; 2]>(&input) {
-            println!("[{a:.2}] [{b:.2}]");
-        }
-        println!("-----------");
-        println!("{target:.2}");
 
-        Ok(ModelItem {
-            input,
-            target
-        })
-    }).expect("SELECT should have succeeded");
+    let db = Connection::open("data.sqlite").expect("data.sqlite should have been readable");
+    let item = db
+        .query_row(
+            "SELECT * FROM train ORDER BY RANDOM() LIMIT 1;",
+            (),
+            |row| {
+                let input: Vec<u8> = row.get("input").unwrap();
+                let target: f32 = row.get("target").unwrap();
+                for [a, b] in cast_slice::<_, [f32; 2]>(&input) {
+                    println!("[{a:.2}] [{b:.2}]");
+                }
+                println!("-----------");
+                println!("{target:.2}");
+
+                Ok(ModelItem { input, target })
+            },
+        )
+        .expect("SELECT should have succeeded");
 
     // let batcher = ModelBatcher::new(device);
     // let batch = batcher.batch(vec![item]);
@@ -384,15 +417,21 @@ pub fn test<B: Backend>(artifact_dir: &str, device: B::Device) {
     // let predicted = output.flatten::<1>(0, 1).into_scalar();
     let input = cast_slice::<_, [f32; 2]>(&item.input);
 
-    let (_, mut state) = model.forward_once(Tensor::from_data(Data::<f32, 1>::from(input[0]).convert()), None);
+    let (_, mut state) = model.forward_once(
+        Tensor::from_data(Data::<f32, 1>::from(input[0]).convert()),
+        None,
+    );
     let mut output = None;
 
     for input in input.split_at(1).1 {
-        let (new_output, new_state) = model.forward_once(Tensor::from_data(Data::<f32, 1>::from(*input).convert()), Some(state));
+        let (new_output, new_state) = model.forward_once(
+            Tensor::from_data(Data::<f32, 1>::from(*input).convert()),
+            Some(state),
+        );
         state = new_state;
         output = Some(new_output.into_data().value[0]);
     }
-    
+
     println!("{:.2}", output.unwrap());
 }
 
@@ -404,7 +443,6 @@ const MAX_CONTROL_STD_DEV: f32 = 1.0;
 const MAX_MEASUREMENT_STD_DEV: f32 = 0.1;
 const MAX_SLOWDOWN_STD_DEV: f32 = 0.1;
 
-
 pub fn create_dataset(len: usize, table: &'static str) {
     let rands = SegQueue::new();
     let (sender, receiver) = channel::<ModelItem>();
@@ -413,120 +451,131 @@ pub fn create_dataset(len: usize, table: &'static str) {
     if let Err(e) = res {
         eprintln!("Failed to delete: {table}: {e}");
     }
-    db.execute(&format!("CREATE TABLE {table} (row_id INTEGER, input BLOB, target REAL);"), params![]).expect("Table should have been created");
-    
+    db.execute(
+        &format!("CREATE TABLE {table} (row_id INTEGER, input BLOB, target REAL);"),
+        params![],
+    )
+    .expect("Table should have been created");
+
     let handle = std::thread::spawn(move || {
         let mut i = 0usize;
         loop {
-            let mut tx = db.transaction().expect("Transaction should have been created");
+            let mut tx = db
+                .transaction()
+                .expect("Transaction should have been created");
             tx.set_drop_behavior(rusqlite::DropBehavior::Commit);
             for _ in 0..1000 {
-                let Ok(item) = receiver.recv() else { return; };
+                let Ok(item) = receiver.recv() else {
+                    return;
+                };
                 i += 1;
-                tx.execute(&format!("INSERT INTO {table} (row_id, input, target) VALUES (?1, ?2, ?3);"), params![i, item.input, item.target]).expect("Item should have been inserted");
+                tx.execute(
+                    &format!("INSERT INTO {table} (row_id, input, target) VALUES (?1, ?2, ?3);"),
+                    params![i, item.input, item.target],
+                )
+                .expect("Item should have been inserted");
             }
         }
     });
 
-    (0..len)
-        .into_par_iter()
-        .for_each(move |_| {
-            let mut rng = rands.pop().unwrap_or_else(|| SmallRng::from_entropy());
+    (0..len).into_par_iter().for_each(move |_| {
+        let mut rng = rands.pop().unwrap_or_else(|| SmallRng::from_entropy());
 
-            let mut item = ModelItem {
-                input: vec![],
-                target: 0.0,
+        let mut item = ModelItem {
+            input: vec![],
+            target: 0.0,
+        };
+
+        let mut left_drive;
+        let mut left_control_drift;
+        let mut left_control_rng;
+        let measurement_rng =
+            Normal::new(0.0, rng.gen_range(0.0..MAX_MEASUREMENT_STD_DEV)).unwrap();
+        let slowdown_rng = Normal::new(0.0, rng.gen_range(0.0..MAX_SLOWDOWN_STD_DEV)).unwrap();
+
+        macro_rules! resample {
+            () => {
+                left_control_drift = rng.gen_range(0.0..MAX_CONTROL_DRIFT);
+                left_control_rng =
+                    Normal::new(0.0, rng.gen_range(0.0..MAX_CONTROL_STD_DEV)).unwrap();
+
+                left_drive = rng.gen_range(-1.0..1.0);
             };
+        }
 
-            let mut left_drive;
-            let mut left_control_drift;
-            let mut left_control_rng;
-            let measurement_rng =
-                Normal::new(0.0, rng.gen_range(0.0..MAX_MEASUREMENT_STD_DEV)).unwrap();
-            let slowdown_rng = Normal::new(0.0, rng.gen_range(0.0..MAX_SLOWDOWN_STD_DEV)).unwrap();
-
-            macro_rules! resample {
-                () => {
-                    left_control_drift = rng.gen_range(0.0..MAX_CONTROL_DRIFT);
-                    left_control_rng =
-                        Normal::new(0.0, rng.gen_range(0.0..MAX_CONTROL_STD_DEV)).unwrap();
-
-                    left_drive = rng.gen_range(-1.0..1.0);
-                };
-            }
-
-            macro_rules! next_drive {
-                ($drive: expr, $drift: ident, $rng: ident) => {{
-                    let val = $drive + $drift * DELTA + $rng.sample(&mut rng) * DELTA;
-                    if val > 1.0 {
-                        1.0
-                    } else if val < -1.0 {
-                        -1.0
-                    } else {
-                        val
-                    }
-                }};
-            }
-
-            resample!();
-
-            // Either side can be up to 100% slowed, meaning that it is stationary
-            let left_slowdown = rng.gen_range(0.0..1.0);
-            // It can take up to MAX_DELAY seconds for a drive strength to be changed
-            let left_delay = rng.gen_range(DELTA..MAX_DELAY);
-            // A side can accelerate anywhere from 10%/sec to 1000%/sec
-            let left_accel = rng.gen_range(0.1..10.0);
-
-            let mut true_left_drive = left_drive;
-
-            let mut left_delay_queue = VecDeque::new();
-            for _ in 0..((left_delay / DELTA).round() as usize) {
-                left_drive = next_drive!(left_drive, left_control_drift, left_control_rng);
-                left_delay_queue.push_back(left_drive);
-            }
-
-            let resample_rng = Bernoulli::new(RESAMPLE_PROB).unwrap();
-
-            for _ in 0..SEQ_LENGTH {
-                if resample_rng.sample(&mut rng) {
-                    resample!();
-                }
-
-                let target_left_drive = left_delay_queue.pop_front().unwrap();
-
-                if (target_left_drive - true_left_drive).abs() < left_accel * DELTA {
-                    true_left_drive = target_left_drive;
+        macro_rules! next_drive {
+            ($drive: expr, $drift: ident, $rng: ident) => {{
+                let val = $drive + $drift * DELTA + $rng.sample(&mut rng) * DELTA;
+                if val > 1.0 {
+                    1.0
+                } else if val < -1.0 {
+                    -1.0
                 } else {
-                    true_left_drive +=
-                        (target_left_drive - true_left_drive).signum() * left_accel * DELTA;
+                    val
                 }
+            }};
+        }
 
-                left_drive = next_drive!(left_drive, left_control_drift, left_control_rng);
-                left_delay_queue.push_back(left_drive);
+        resample!();
 
-                let mut left_measured = true_left_drive * (left_slowdown + slowdown_rng.sample(&mut rng))
+        // Either side can be up to 100% slowed, meaning that it is stationary
+        let left_slowdown = rng.gen_range(0.0..1.0);
+        // It can take up to MAX_DELAY seconds for a drive strength to be changed
+        let left_delay = rng.gen_range(DELTA..MAX_DELAY);
+        // A side can accelerate anywhere from 10%/sec to 1000%/sec
+        let left_accel = rng.gen_range(0.1..10.0);
+
+        let mut true_left_drive = left_drive;
+
+        let mut left_delay_queue = VecDeque::new();
+        for _ in 0..((left_delay / DELTA).round() as usize) {
+            left_drive = next_drive!(left_drive, left_control_drift, left_control_rng);
+            left_delay_queue.push_back(left_drive);
+        }
+
+        let resample_rng = Bernoulli::new(RESAMPLE_PROB).unwrap();
+
+        for _ in 0..SEQ_LENGTH {
+            if resample_rng.sample(&mut rng) {
+                resample!();
+            }
+
+            let target_left_drive = left_delay_queue.pop_front().unwrap();
+
+            if (target_left_drive - true_left_drive).abs() < left_accel * DELTA {
+                true_left_drive = target_left_drive;
+            } else {
+                true_left_drive +=
+                    (target_left_drive - true_left_drive).signum() * left_accel * DELTA;
+            }
+
+            left_drive = next_drive!(left_drive, left_control_drift, left_control_rng);
+            left_delay_queue.push_back(left_drive);
+
+            let mut left_measured = true_left_drive
+                * (left_slowdown + slowdown_rng.sample(&mut rng))
                 + measurement_rng.sample(&mut rng);
 
-                if left_measured > 1.0 {
-                    left_measured = 1.0;
-                } else if left_measured < -1.0 {
-                    left_measured = -1.0;
-                }
-
-                item.input.extend_from_slice(&left_drive.to_ne_bytes());
-                item.input.extend_from_slice(&left_measured.to_ne_bytes());
-                item.target = left_slowdown;
+            if left_measured > 1.0 {
+                left_measured = 1.0;
+            } else if left_measured < -1.0 {
+                left_measured = -1.0;
             }
 
-            // 10% chance of resampling the rng
-            if rng.gen_bool(0.1) {
-                rng = SmallRng::from_entropy();
-            }
+            item.input.extend_from_slice(&left_drive.to_ne_bytes());
+            item.input.extend_from_slice(&left_measured.to_ne_bytes());
+            item.target = left_slowdown;
+        }
 
-            rands.push(rng);
+        // 10% chance of resampling the rng
+        if rng.gen_bool(0.1) {
+            rng = SmallRng::from_entropy();
+        }
 
-            sender.send(item).unwrap();
-        });
-    
+        rands.push(rng);
+
+        sender.send(item).unwrap();
+    });
+
     handle.join().unwrap();
 }

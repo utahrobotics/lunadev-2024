@@ -1,0 +1,15 @@
+[package]
+name = "machine-academy"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+burn = { workspace = true }
+serde = { workspace = true }
+tokio-rayon = { workspace = true }
+crossbeam = { workspace = true }
+rand = { workspace = true }
+rusqlite = "0.30"
+toml = { workspace = true }
