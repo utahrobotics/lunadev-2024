@@ -1,34 +1,39 @@
 use std::{
     fmt::{Debug, Display},
     marker::PhantomData,
+    path::PathBuf,
+    sync::{Arc, Mutex},
 };
 
 use burn::{
     config::Config,
-    data::{
-        dataloader::{batcher::Batcher, DataLoaderBuilder},
-        dataset::SqliteDataset,
-    },
+    data::dataloader::{batcher::Batcher, DataLoaderBuilder},
     lr_scheduler::noam::NoamLrSchedulerConfig,
     module::AutodiffModule,
     optim::AdamConfig,
     record::CompactRecorder,
     tensor::{
         backend::{AutodiffBackend, Backend},
-        Tensor,
+        ElementConversion, Tensor,
     },
     train::{
         metric::{
+            state::{FormatOptions, NumericMetricState},
             store::{Aggregate, Direction, Split},
-            CpuTemperature, CpuUse, LossMetric,
+            Adaptor, CpuTemperature, CpuUse, LearningRateMetric, LossMetric, Metric, MetricEntry,
+            MetricMetadata, Numeric,
         },
         ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, RegressionOutput,
         StoppingCondition, TrainOutput, TrainStep, ValidStep,
     },
 };
+use data::AcademyDataset;
 use serde::de::DeserializeOwned;
 
+pub use burn;
+
 pub mod common;
+pub mod data;
 
 pub trait Model<B: AutodiffBackend>: AutodiffModule<B> + Display {
     type Input;
@@ -118,9 +123,9 @@ pub struct TrainingConfig {
     pub optimizer: AdamConfig,
     #[config(default = 10)]
     pub num_epochs: usize,
-    #[config(default = 500)]
+    #[config(default = 128)]
     pub batch_size: usize,
-    #[config(default = 16)]
+    #[config(default = 4)]
     pub num_workers: usize,
     #[config(default = 1342)]
     pub seed: u64,
@@ -130,12 +135,66 @@ pub struct TrainingConfig {
     pub stop_condition_epochs: usize,
 }
 
+/// The loss metric.
+pub struct TrackedLossMetric<B: Backend> {
+    state: Arc<Mutex<NumericMetricState>>,
+    _b: B,
+}
+
+/// The [loss metric](LossMetric) input type.
+pub struct LossInput<B: Backend> {
+    tensor: Tensor<B, 1>,
+}
+impl<B: Backend> Adaptor<LossInput<B>> for ClassificationOutput<B> {
+    fn adapt(&self) -> LossInput<B> {
+        LossInput {
+            tensor: self.loss.clone(),
+        }
+    }
+}
+impl<B: Backend> Adaptor<LossInput<B>> for RegressionOutput<B> {
+    fn adapt(&self) -> LossInput<B> {
+        LossInput {
+            tensor: self.loss.clone(),
+        }
+    }
+}
+
+impl<B: Backend> Metric for TrackedLossMetric<B> {
+    const NAME: &'static str = "Loss";
+
+    type Input = LossInput<B>;
+
+    fn update(&mut self, loss: &Self::Input, _metadata: &MetricMetadata) -> MetricEntry {
+        let loss = f64::from_elem(loss.tensor.clone().mean().into_data().value[0]);
+
+        self.state
+            .lock()
+            .unwrap()
+            .update(loss, 1, FormatOptions::new(Self::NAME).precision(2))
+    }
+
+    fn clear(&mut self) {
+        self.state.lock().unwrap().reset()
+    }
+}
+
+impl<B: Backend> Numeric for TrackedLossMetric<B> {
+    fn value(&self) -> f64 {
+        self.state.lock().unwrap().value()
+    }
+}
+
 pub fn train_regression<B, const TN: usize, T, I>(
     artifact_dir: &str,
+    training_data_path: PathBuf,
+    testing_data_path: PathBuf,
+    max_memory_usage: usize,
     config: TrainingConfig,
     model: T,
     device: B::Device,
-) where
+) -> f64
+where
     B: AutodiffBackend,
     T: AutodiffModule<B>
         + Display
@@ -166,28 +225,25 @@ pub fn train_regression<B, const TN: usize, T, I>(
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(
-            SqliteDataset::from_db_file("data.sqlite", "train")
-                .expect("data.sqlite should be readable"),
-        );
+        .build(AcademyDataset::new(training_data_path, max_memory_usage));
 
     let dataloader_test = DataLoaderBuilder::<I, _>::new(batcher_valid)
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(
-            SqliteDataset::from_db_file("data.sqlite", "test")
-                .expect("data.sqlite should be readable"),
-        );
+        .build(AcademyDataset::new(testing_data_path, max_memory_usage));
 
     let num_params = model.num_params();
 
+    let loss_state: Arc<Mutex<NumericMetricState>> = Default::default();
     let learner = LearnerBuilder::new(artifact_dir)
-        .metric_train_numeric(LossMetric::new())
-        // .metric_train_numeric(LearningRateMetric::new())
+        .metric_train_numeric(TrackedLossMetric {
+            state: loss_state.clone(),
+            _b: Default::default(),
+        })
+        .metric_train_numeric(LearningRateMetric::new())
         .metric_train_numeric(CpuTemperature::new())
         .metric_train_numeric(CpuUse::new())
-        .metric_valid_numeric(LossMetric::new())
         .early_stopping(MetricEarlyStoppingStrategy::new::<LossMetric<B>>(
             Aggregate::Mean,
             Direction::Lowest,
@@ -212,4 +268,7 @@ pub fn train_regression<B, const TN: usize, T, I>(
     model_trained
         .save_file(format!("{artifact_dir}/model"), &CompactRecorder::new())
         .expect("Trained model should be saved successfully");
+
+    let loss = loss_state.lock().unwrap().value();
+    loss
 }

@@ -11,5 +11,6 @@ serde = { workspace = true }
 tokio-rayon = { workspace = true }
 crossbeam = { workspace = true }
 rand = { workspace = true }
-rusqlite = "0.30"
 toml = { workspace = true }
+# fxhash = { workspace = true }
+bincode = "1"
