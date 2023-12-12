@@ -1,24 +1,23 @@
 use std::fmt::Debug;
 
 use burn::{
+    config::Config,
     module::Module,
     nn::{
         gru::{Gru, GruConfig},
         loss::{MSELoss, Reduction},
-        Dropout, LayerNorm, Linear, DropoutConfig, LinearConfig, LayerNormConfig,
+        Dropout, DropoutConfig, LayerNorm, LayerNormConfig, Linear, LinearConfig,
     },
     tensor::{
         backend::{AutodiffBackend, Backend},
         Tensor,
     },
     train::RegressionOutput,
-    config::Config,
 };
 
 use crate::{Model, RegressionBatch};
 
 use super::{Activation, PhantomModule, ThreeTuple};
-
 
 #[derive(Config)]
 pub struct GruNetworkConfig {
@@ -26,7 +25,6 @@ pub struct GruNetworkConfig {
     pub linears: Vec<(LinearConfig, Option<LayerNormConfig>, Activation)>,
     pub dropout: DropoutConfig,
 }
-
 
 #[derive(Module)]
 pub struct GruNetwork<B: Backend, T, O> {
@@ -86,10 +84,18 @@ impl<B: AutodiffBackend> Model<B> for GruNetwork<B, RegressionBatch<B, 3, 2>, Re
 
     fn from_config(config: Self::Config) -> Self {
         Self {
-            grus: config.grus.into_iter().map(|(a, b, c)| ThreeTuple(a.init(), b.map(|x| x.init()), c)).collect(),
-            linears: config.linears.into_iter().map(|(a, b, c)| ThreeTuple(a.init(), b.map(|x| x.init()), c)).collect(),
+            grus: config
+                .grus
+                .into_iter()
+                .map(|(a, b, c)| ThreeTuple(a.init(), b.map(|x| x.init()), c))
+                .collect(),
+            linears: config
+                .linears
+                .into_iter()
+                .map(|(a, b, c)| ThreeTuple(a.init(), b.map(|x| x.init()), c))
+                .collect(),
             dropout: config.dropout.init(),
-            _phantom: Default::default()
+            _phantom: Default::default(),
         }
     }
 }

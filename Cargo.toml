@@ -18,6 +18,7 @@ resolver = "2"
 
 [workspace.dependencies]
 fxhash = "0.2"
+chrono = "0.4"
 static_assertions = "1"
 image = "0.24"
 ordered-float = "4"

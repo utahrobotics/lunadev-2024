@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 fern = "0.6"
-chrono = "0.4"
+chrono = { workspace = true }
 log = "0.4"
 tokio = { workspace = true }
 fxhash = { workspace = true }

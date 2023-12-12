@@ -1,13 +1,14 @@
 use std::{
     fmt::{Debug, Display},
     marker::PhantomData,
-    sync::{Arc, Mutex}, path::PathBuf,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex}, fs::File,
+    io::Write, time::Instant
 };
 
 use burn::{
-    data::
-        dataloader::{batcher::Batcher, DataLoaderBuilder}
-    ,
+    config::Config,
+    data::dataloader::{batcher::Batcher, DataLoaderBuilder},
     lr_scheduler::noam::NoamLrSchedulerConfig,
     module::{AutodiffModule, Module},
     optim::AdamConfig,
@@ -25,9 +26,11 @@ use burn::{
         },
         ClassificationOutput, LearnerBuilder, MetricEarlyStoppingStrategy, RegressionOutput,
         StoppingCondition, TrainOutput, TrainStep, ValidStep,
-    }, config::Config,
+    },
 };
+use chrono::{Datelike, Timelike};
 use data::AcademyDataset;
+use rand::{rngs::SmallRng, RngCore, SeedableRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub use burn;
@@ -84,9 +87,7 @@ impl<B: AutodiffBackend, M: Model<B, LossOutput = ClassificationOutput<B>>>
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B>>
-    Module<B> for TrainingModel<M, B>
-{
+impl<B: AutodiffBackend, M: Model<B>> Module<B> for TrainingModel<M, B> {
     type Record = M::Record;
 
     fn collect_devices(&self, devices: burn::module::Devices<B>) -> burn::module::Devices<B> {
@@ -122,9 +123,7 @@ impl<B: AutodiffBackend, M: Model<B>>
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B>>
-    AutodiffModule<B> for TrainingModel<M, B>
-{
+impl<B: AutodiffBackend, M: Model<B>> AutodiffModule<B> for TrainingModel<M, B> {
     type InnerModule = M::InnerModule;
 
     fn valid(&self) -> Self::InnerModule {
@@ -132,17 +131,13 @@ impl<B: AutodiffBackend, M: Model<B>>
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B>>
-    Debug for TrainingModel<M, B>
-{
+impl<B: AutodiffBackend, M: Model<B>> Debug for TrainingModel<M, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.0, f)
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B>>
-    Display for TrainingModel<M, B>
-{
+impl<B: AutodiffBackend, M: Model<B>> Display for TrainingModel<M, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&self.0, f)
     }
@@ -153,7 +148,6 @@ impl<M: Model<B>, B: AutodiffBackend> TrainingModel<M, B> {
         Self(model, PhantomData)
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub struct RegressionBatch<B: Backend, const I: usize, const T: usize> {
@@ -196,23 +190,60 @@ impl<B: Backend, const T: usize, Item: Into<(Tensor<B, 2>, Tensor<B, T>)>>
 pub struct TrainingConfig<T> {
     pub model_config: T,
     pub optimizer: AdamConfig,
-    // #[config(default = 10)]
+    #[serde(default = "default_num_epochs")]
     pub num_epochs: usize,
-    // #[config(default = 128)]
+    #[serde(default = "default_batch_size")]
     pub batch_size: usize,
-    // #[config(default = 4)]
+    #[serde(default = "default_num_workers")]
     pub num_workers: usize,
-    // #[config(default = 1342)]
+    #[serde(default = "default_seed")]
     pub seed: u64,
-    // #[config(default = 1.0e-3)]
+    #[serde(default = "default_init_learning_rate")]
     pub init_learning_rate: f64,
-    // #[config(default = 2)]
+    #[serde(default = "default_stop_condition_epochs")]
     pub stop_condition_epochs: usize,
 }
 
+fn default_num_epochs() -> usize {
+    10
+}
+
+fn default_batch_size() -> usize {
+    128
+}
+
+fn default_num_workers() -> usize {
+    4
+}
+
+fn default_seed() -> u64 {
+    8000
+}
+
+fn default_init_learning_rate() -> f64 {
+    0.001
+}
+
+fn default_stop_condition_epochs() -> usize {
+    2
+}
 
 impl<T: Serialize + DeserializeOwned> Config for TrainingConfig<T> {}
 
+impl<T> TrainingConfig<T> {
+    pub fn new(model_config: T) -> Self {
+        Self {
+            model_config,
+            optimizer: AdamConfig::new(),
+            num_epochs: default_num_epochs(),
+            batch_size: default_batch_size(),
+            num_workers: default_num_workers(),
+            seed: default_seed(),
+            init_learning_rate: default_init_learning_rate(),
+            stop_condition_epochs: default_stop_condition_epochs(),
+        }
+    }
+}
 
 /// The loss metric.
 pub struct TrackedLossMetric<B: Backend> {
@@ -264,6 +295,11 @@ impl<B: Backend> Numeric for TrackedLossMetric<B> {
     }
 }
 
+#[derive(Config)]
+pub struct Statistics {
+    loss: f64
+}
+
 pub fn train_regression<B, const TN: usize, T, I>(
     artifact_dir: &str,
     training_data_path: PathBuf,
@@ -271,7 +307,7 @@ pub fn train_regression<B, const TN: usize, T, I>(
     max_memory_usage: usize,
     config: TrainingConfig<T::Config>,
     device: B::Device,
-) -> f64
+) -> Statistics
 where
     B: AutodiffBackend,
     T: Model<B, LossOutput = RegressionOutput<B>, Batch = RegressionBatch<B, 3, TN>>,
@@ -286,9 +322,9 @@ where
         + DeserializeOwned
         + 'static,
 {
-    std::fs::create_dir_all(artifact_dir).ok();
+    std::fs::create_dir_all(artifact_dir).expect("artifact dir should be creatable");
     config
-        .save(format!("{artifact_dir}/config.json"))
+        .save(Path::new(artifact_dir).join("config.json"))
         .expect("Config should be saved successfully");
 
     B::seed(config.seed);
@@ -300,17 +336,13 @@ where
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(
-            AcademyDataset::new(training_data_path, max_memory_usage)
-        );
+        .build(AcademyDataset::new(training_data_path, max_memory_usage));
 
     let dataloader_test = DataLoaderBuilder::<I, _>::new(batcher_valid)
         .batch_size(config.batch_size)
         .shuffle(config.seed)
         .num_workers(config.num_workers)
-        .build(
-            AcademyDataset::new(testing_data_path, max_memory_usage)
-        );
+        .build(AcademyDataset::new(testing_data_path, max_memory_usage));
 
     let model = T::from_config(config.model_config);
     let num_params = model.num_params();
@@ -347,9 +379,178 @@ where
     let model_trained = learner.fit(dataloader_train, dataloader_test);
 
     model_trained
-        .save_file(format!("{artifact_dir}/model"), &CompactRecorder::new())
+        .save_file(
+            Path::new(artifact_dir).join("model"),
+            &CompactRecorder::new(),
+        )
         .expect("Trained model should be saved successfully");
 
     let loss = loss_state.lock().unwrap().value();
-    loss
+    let stats = Statistics {
+        loss
+    };
+    stats.save(Path::new(artifact_dir).join("statistics.json")).expect("Statistics file should be creatable");
+    stats
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SuperTrainingConfig<T> {
+    pub model_config: T,
+    pub optimizer: AdamConfig,
+    #[serde(default = "default_num_epochs")]
+    pub num_epochs: usize,
+    #[serde(default = "default_min_batch_pow")]
+    pub min_batch_pow: u32,
+    #[serde(default = "default_max_batch_pow")]
+    pub max_batch_pow: u32,
+    #[serde(default = "default_num_workers")]
+    pub num_workers: usize,
+    #[serde(default = "default_seed")]
+    pub seed: u64,
+    #[serde(default = "default_seed_count")]
+    pub seed_count: usize,
+    #[serde(default = "default_init_learning_rate_min_pow")]
+    pub init_learning_rate_min_pow: i32,
+    #[serde(default = "default_init_learning_rate_max_pow")]
+    pub init_learning_rate_max_pow: i32,
+    #[serde(default = "default_stop_condition_epochs")]
+    pub stop_condition_epochs: usize,
+    #[serde(default = "default_min_grad_clipping_step")]
+    pub min_grad_clipping_step: usize,
+    #[serde(default = "default_max_grad_clipping_step")]
+    pub max_grad_clipping_step: usize,
+    #[serde(default = "default_grad_clipping_step_size")]
+    pub grad_clipping_step_size: f32,
+}
+
+fn default_min_batch_pow() -> u32 {
+    5
+}
+
+fn default_max_batch_pow() -> u32 {
+    9
+}
+
+fn default_seed_count() -> usize {
+    5
+}
+
+fn default_init_learning_rate_min_pow() -> i32 {
+    -4
+}
+
+fn default_init_learning_rate_max_pow() -> i32 {
+    -1
+}
+
+fn default_min_grad_clipping_step() -> usize {
+    2
+}
+
+fn default_max_grad_clipping_step() -> usize {
+    10
+}
+
+fn default_grad_clipping_step_size() -> f32 {
+    0.1
+}
+
+pub fn super_train_regression<B, const TN: usize, T, I, TC, TCI>(
+    mut super_dir: String,
+    max_memory_usage: usize,
+    config: SuperTrainingConfig<TC>,
+    training_data_path: PathBuf,
+    testing_data_path: PathBuf,
+    device: B::Device,
+) where
+    B: AutodiffBackend,
+    T: Model<B, LossOutput = RegressionOutput<B>, Batch = RegressionBatch<B, 3, TN>>,
+    T::InnerModule:
+        ValidStep<RegressionBatch<B::InnerBackend, 3, TN>, RegressionOutput<B::InnerBackend>>,
+    I: Send
+        + Sync
+        + Clone
+        + Debug
+        + Into<(Tensor<B, 2>, Tensor<B, TN>)>
+        + Into<(Tensor<B::InnerBackend, 2>, Tensor<B::InnerBackend, TN>)>
+        + DeserializeOwned
+        + 'static,
+    TC: IntoIterator<IntoIter = TCI>,
+    TCI: ExactSizeIterator + Iterator<Item = T::Config>,
+    T::Config: Clone,
+{
+    let datetime = chrono::Local::now();
+    let start = Instant::now();
+    let log_folder_name = format!(
+        "{}-{:0>2}-{:0>2}={:0>2}-{:0>2}",
+        datetime.year(),
+        datetime.month(),
+        datetime.day(),
+        datetime.hour(),
+        datetime.minute()
+    );
+
+    super_dir += "/";
+    super_dir += &log_folder_name;
+    std::fs::create_dir_all(&super_dir).expect("super dir should be creatable");
+    let mut log_file = File::create(Path::new(&super_dir).join("path")).expect("log file should be creatable");
+
+    let model_config = config.model_config.into_iter();
+    let max_i = model_config.len()
+        * (config.max_batch_pow - config.min_batch_pow + 1) as usize
+        * config.seed_count
+        * (config.init_learning_rate_max_pow - config.init_learning_rate_min_pow + 1) as usize
+        * (config.max_grad_clipping_step - config.min_grad_clipping_step + 1);
+    let mut i = 0usize;
+
+    model_config.for_each(|model_config| {
+        (config.min_batch_pow..=config.max_batch_pow)
+            .into_iter()
+            .for_each(|batch_pow| {
+                let mut rng = SmallRng::seed_from_u64(config.seed);
+                (0..config.seed_count).into_iter().for_each(|_| {
+                    let seed = rng.next_u64();
+                    (config.init_learning_rate_min_pow..=config.init_learning_rate_max_pow)
+                        .into_iter()
+                        .for_each(|init_learning_rate_pow| {
+                            (config.min_grad_clipping_step..=config.max_grad_clipping_step)
+                                .into_iter()
+                                .for_each(|grad_clipping_step| {
+                                    let config = TrainingConfig {
+                                        model_config: model_config.clone(),
+                                        optimizer: config.optimizer.clone().with_grad_clipping(
+                                            Some(
+                                                burn::grad_clipping::GradientClippingConfig::Value(
+                                                    grad_clipping_step as f32
+                                                        * config.grad_clipping_step_size,
+                                                ),
+                                            ),
+                                        ),
+                                        num_epochs: config.num_epochs,
+                                        batch_size: 2usize.pow(batch_pow),
+                                        num_workers: config.num_workers,
+                                        seed,
+                                        init_learning_rate: 10.0f64.powi(init_learning_rate_pow),
+                                        stop_condition_epochs: config.stop_condition_epochs,
+                                    };
+                                    let elapsed = start.elapsed().as_secs();
+                                    let hours = elapsed / 3600;
+                                    let mins = elapsed % 3600 / 60;
+                                    let secs = elapsed % 3600 % 60;
+                                    i += 1;
+                                    let progress = i as f32 / max_i as f32 * 100.0;
+                                    writeln!(log_file, "[{hours}:{mins}:{secs}] Running iter {i} of {max_i}. {progress:.2}%").expect("log file should be writable");
+                                    train_regression::<B, TN, T, I>(
+                                        &format!("{super_dir}/iter_{i}"),
+                                        training_data_path.clone(),
+                                        testing_data_path.clone(),
+                                        max_memory_usage,
+                                        config,
+                                        device.clone(),
+                                    );
+                                });
+                        });
+                });
+            });
+    });
 }
