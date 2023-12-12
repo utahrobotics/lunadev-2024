@@ -4071,6 +4071,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-big-array"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11fc7cc2c76d73e0f27ee52abbd64eec84d46f370c88371120433196934e4b7f"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.193"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4266,15 +4275,12 @@ checksum = "4dccd0940a2dcdf68d092b8cbab7dc0ad8fa938bf95787e1b916b0e3d0e8e970"
 name = "smooth-diff-drive"
 version = "0.1.0"
 dependencies = [
- "burn",
- "bytemuck",
  "clap 4.4.8",
- "crossbeam",
+ "machine-academy",
  "rand",
  "rand_distr",
- "rusqlite",
  "serde",
- "tokio-rayon",
+ "serde-big-array",
  "unros-core",
 ]
 

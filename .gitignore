@@ -5,3 +5,4 @@ rustc-ice-*.txt
 *.las
 *.sqlite*
 *.mpk.gz
+smooth-diff-drive-academy/

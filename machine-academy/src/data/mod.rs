@@ -126,6 +126,18 @@ where
     .expect("Database slice should be writable, and the type T should be serializable");
 
     if block_size >= length {
+        let config = AcademyDatasetConfig {
+            block_memory_size,
+            block_count: 1,
+            block_size,
+            length,
+        };
+    
+        bincode::serialize_into(
+            File::create(data_path.join("config.dat")).expect("Database config should be creatable"),
+            &config,
+        )
+        .expect("Database config should be writable");
         return;
     }
 

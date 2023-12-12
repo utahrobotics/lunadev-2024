@@ -7,14 +7,9 @@ edition = "2021"
 
 [dependencies]
 unros-core = { path = "../unros-core" }
+machine-academy = { path = "../machine-academy" }
 serde = { workspace = true }
-burn = { workspace = true }
-tokio-rayon = { workspace = true }
-crossbeam = { workspace = true }
 rand = { workspace = true }
 clap = { workspace = true }
-# serde-big-array = { workspace = true }
-# serde_json = "1"
 rand_distr = { workspace = true }
-rusqlite = "0.30"
-bytemuck = { workspace = true }
+serde-big-array = { workspace = true }

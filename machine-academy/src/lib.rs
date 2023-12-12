@@ -38,56 +38,59 @@ pub use burn;
 pub mod common;
 pub mod data;
 
-pub trait Model<B: AutodiffBackend>: AutodiffModule<B> + Display + 'static {
+pub trait Model<B: Backend>: Module<B> + Display + Debug + 'static {
     type Input;
     type Output;
-    type LossOutput;
-    type Batch: Send;
     type Config: Config;
 
     fn from_config(config: Self::Config) -> Self;
     fn forward(&self, input: Self::Input) -> Self::Output;
-    fn forward_training(&self, batch: Self::Batch) -> Self::LossOutput;
+}
+
+pub trait TrainableModel<B: Backend, O>: Model<B> {
+    type Batch: Send;
+
+    fn forward_training(&self, batch: Self::Batch) -> O;
 }
 
 #[derive(Clone)]
-pub struct TrainingModel<M: Model<B>, B: AutodiffBackend>(pub M, PhantomData<B>);
+pub struct TrainingModel<M, B>(pub M, PhantomData<B>);
 
-impl<B: AutodiffBackend, M: Model<B, LossOutput = RegressionOutput<B>>>
+impl<B: AutodiffBackend, M: TrainableModel<B, RegressionOutput<B>> + AutodiffModule<B>>
     TrainStep<M::Batch, RegressionOutput<B>> for TrainingModel<M, B>
 {
     fn step(&self, batch: M::Batch) -> TrainOutput<RegressionOutput<B>> {
-        let item = self.0.forward_training(batch);
+        let item = M::forward_training(&self.0, batch);
         TrainOutput::new(&self.0, item.loss.backward(), item)
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B, LossOutput = ClassificationOutput<B>>>
-    TrainStep<M::Batch, ClassificationOutput<B>> for TrainingModel<M, B>
-{
-    fn step(&self, batch: M::Batch) -> TrainOutput<ClassificationOutput<B>> {
-        let item = self.0.forward_training(batch);
-        TrainOutput::new(&self.0, item.loss.backward(), item)
-    }
-}
+// impl<B: AutodiffBackend, M: Model<LossOutput<B> = ClassificationOutput<B>, ModelStruct<B> = M> + AutodiffModule<B>>
+//     TrainStep<M::Batch<B>, ClassificationOutput<B>> for TrainingModel<M, B>
+// {
+//     fn step(&self, batch: M::Batch<B>) -> TrainOutput<ClassificationOutput<B>> {
+//         let item = M::forward_training(&self.0, batch);
+//         TrainOutput::new(&self.0, item.loss.backward(), item)
+//     }
+// }
 
-impl<B: AutodiffBackend, M: Model<B, LossOutput = RegressionOutput<B>>>
+impl<B: Backend, M: TrainableModel<B, RegressionOutput<B>>>
     ValidStep<M::Batch, RegressionOutput<B>> for TrainingModel<M, B>
 {
     fn step(&self, batch: M::Batch) -> RegressionOutput<B> {
-        self.0.forward_training(batch)
+        M::forward_training(&self.0, batch)
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B, LossOutput = ClassificationOutput<B>>>
-    ValidStep<M::Batch, ClassificationOutput<B>> for TrainingModel<M, B>
-{
-    fn step(&self, batch: M::Batch) -> ClassificationOutput<B> {
-        self.0.forward_training(batch)
-    }
-}
+// impl<B: Backend, M: Model<LossOutput<B> = ClassificationOutput<B>, ModelStruct<B> = M>>
+//     ValidStep<M::Batch<B>, ClassificationOutput<B>> for TrainingModel<M, B>
+// {
+//     fn step(&self, batch: M::Batch<B>) -> ClassificationOutput<B> {
+//         M::forward_training(&self.0, batch)
+//     }
+// }
 
-impl<B: AutodiffBackend, M: Model<B>> Module<B> for TrainingModel<M, B> {
+impl<B: Backend, M: Module<B>> Module<B> for TrainingModel<M, B> {
     type Record = M::Record;
 
     fn collect_devices(&self, devices: burn::module::Devices<B>) -> burn::module::Devices<B> {
@@ -123,27 +126,27 @@ impl<B: AutodiffBackend, M: Model<B>> Module<B> for TrainingModel<M, B> {
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B>> AutodiffModule<B> for TrainingModel<M, B> {
-    type InnerModule = M::InnerModule;
+impl<B: AutodiffBackend, M: AutodiffModule<B>> AutodiffModule<B> for TrainingModel<M, B> {
+    type InnerModule = TrainingModel<M::InnerModule, B::InnerBackend>;
 
     fn valid(&self) -> Self::InnerModule {
-        self.0.valid()
+        TrainingModel::new(self.0.valid())
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B>> Debug for TrainingModel<M, B> {
+impl<B, M: Debug> Debug for TrainingModel<M, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.0, f)
     }
 }
 
-impl<B: AutodiffBackend, M: Model<B>> Display for TrainingModel<M, B> {
+impl<B, M: Display> Display for TrainingModel<M, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&self.0, f)
     }
 }
 
-impl<M: Model<B>, B: AutodiffBackend> TrainingModel<M, B> {
+impl<M, B> TrainingModel<M, B> {
     pub fn new(model: M) -> Self {
         Self(model, PhantomData)
     }
@@ -165,17 +168,18 @@ impl<B: Backend> RegressionBatcher<B> {
     }
 }
 
-impl<B: Backend, const T: usize, Item: Into<(Tensor<B, 2>, Tensor<B, T>)>>
-    Batcher<Item, RegressionBatch<B, 3, T>> for RegressionBatcher<B>
+impl<B: Backend, Item: Into<(Tensor<B, 2>, Tensor<B, 1>)>>
+    Batcher<Item, RegressionBatch<B, 3, 2>> for RegressionBatcher<B>
 {
-    fn batch(&self, items: Vec<Item>) -> RegressionBatch<B, 3, T> {
+    fn batch(&self, items: Vec<Item>) -> RegressionBatch<B, 3, 2> {
         let (inputs, targets) = items
             .into_iter()
-            .map(|item| Into::<(Tensor<B, 2>, Tensor<B, T>)>::into(item))
+            .map(|item| Into::<(Tensor<B, 2>, Tensor<B, 1>)>::into(item))
             .map(|(input, target)| {
                 let [a, b] = input.dims();
                 let len = a * b / 2;
-                (input.reshape([1, len, 2]), target)
+                let target_len = target.dims()[0];
+                (input.reshape([1, len, 2]), target.reshape([1, target_len]))
             })
             .unzip();
 
@@ -205,7 +209,7 @@ pub struct TrainingConfig<T> {
 }
 
 fn default_num_epochs() -> usize {
-    10
+    5
 }
 
 fn default_batch_size() -> usize {
@@ -300,7 +304,7 @@ pub struct Statistics {
     loss: f64
 }
 
-pub fn train_regression<B, const TN: usize, T, I>(
+pub fn train_regression<B, T, I>(
     artifact_dir: &str,
     training_data_path: PathBuf,
     testing_data_path: PathBuf,
@@ -310,15 +314,17 @@ pub fn train_regression<B, const TN: usize, T, I>(
 ) -> Statistics
 where
     B: AutodiffBackend,
-    T: Model<B, LossOutput = RegressionOutput<B>, Batch = RegressionBatch<B, 3, TN>>,
-    T::InnerModule:
-        ValidStep<RegressionBatch<B::InnerBackend, 3, TN>, RegressionOutput<B::InnerBackend>>,
+    T: Model<B> + AutodiffModule<B>,
+    TrainingModel<T, B>:
+        TrainStep<RegressionBatch<B, 3, 2>, RegressionOutput<B>>,
+    <TrainingModel<T, B> as AutodiffModule<B>>::InnerModule:
+        ValidStep<RegressionBatch<B::InnerBackend, 3, 2>, RegressionOutput<B::InnerBackend>>,
     I: Send
         + Sync
         + Clone
         + Debug
-        + Into<(Tensor<B, 2>, Tensor<B, TN>)>
-        + Into<(Tensor<B::InnerBackend, 2>, Tensor<B::InnerBackend, TN>)>
+        + Into<(Tensor<B, 2>, Tensor<B, 1>)>
+        + Into<(Tensor<B::InnerBackend, 2>, Tensor<B::InnerBackend, 1>)>
         + DeserializeOwned
         + 'static,
 {
@@ -432,7 +438,7 @@ fn default_max_batch_pow() -> u32 {
 }
 
 fn default_seed_count() -> usize {
-    5
+    2
 }
 
 fn default_init_learning_rate_min_pow() -> i32 {
@@ -440,22 +446,24 @@ fn default_init_learning_rate_min_pow() -> i32 {
 }
 
 fn default_init_learning_rate_max_pow() -> i32 {
-    -1
+    -2
 }
 
 fn default_min_grad_clipping_step() -> usize {
-    2
+    1
 }
 
 fn default_max_grad_clipping_step() -> usize {
-    10
+    5
 }
 
 fn default_grad_clipping_step_size() -> f32 {
-    0.1
+    0.2
 }
 
-pub fn super_train_regression<B, const TN: usize, T, I, TC, TCI>(
+impl<T: Serialize + DeserializeOwned> Config for SuperTrainingConfig<T> {}
+
+pub fn super_train_regression<B, T, I, TC, TCI>(
     mut super_dir: String,
     max_memory_usage: usize,
     config: SuperTrainingConfig<TC>,
@@ -464,15 +472,17 @@ pub fn super_train_regression<B, const TN: usize, T, I, TC, TCI>(
     device: B::Device,
 ) where
     B: AutodiffBackend,
-    T: Model<B, LossOutput = RegressionOutput<B>, Batch = RegressionBatch<B, 3, TN>>,
-    T::InnerModule:
-        ValidStep<RegressionBatch<B::InnerBackend, 3, TN>, RegressionOutput<B::InnerBackend>>,
+    T: Model<B> + AutodiffModule<B>,
+    TrainingModel<T, B>:
+        TrainStep<RegressionBatch<B, 3, 2>, RegressionOutput<B>>,
+    <TrainingModel<T, B> as AutodiffModule<B>>::InnerModule:
+        ValidStep<RegressionBatch<B::InnerBackend, 3, 2>, RegressionOutput<B::InnerBackend>>,
     I: Send
         + Sync
         + Clone
         + Debug
-        + Into<(Tensor<B, 2>, Tensor<B, TN>)>
-        + Into<(Tensor<B::InnerBackend, 2>, Tensor<B::InnerBackend, TN>)>
+        + Into<(Tensor<B, 2>, Tensor<B, 1>)>
+        + Into<(Tensor<B::InnerBackend, 2>, Tensor<B::InnerBackend, 1>)>
         + DeserializeOwned
         + 'static,
     TC: IntoIterator<IntoIter = TCI>,
@@ -493,7 +503,7 @@ pub fn super_train_regression<B, const TN: usize, T, I, TC, TCI>(
     super_dir += "/";
     super_dir += &log_folder_name;
     std::fs::create_dir_all(&super_dir).expect("super dir should be creatable");
-    let mut log_file = File::create(Path::new(&super_dir).join("path")).expect("log file should be creatable");
+    let mut log_file = File::create(Path::new(&super_dir).join("super.log")).expect("log file should be creatable");
 
     let model_config = config.model_config.into_iter();
     let max_i = model_config.len()
@@ -533,14 +543,14 @@ pub fn super_train_regression<B, const TN: usize, T, I, TC, TCI>(
                                         init_learning_rate: 10.0f64.powi(init_learning_rate_pow),
                                         stop_condition_epochs: config.stop_condition_epochs,
                                     };
-                                    let elapsed = start.elapsed().as_secs();
-                                    let hours = elapsed / 3600;
-                                    let mins = elapsed % 3600 / 60;
-                                    let secs = elapsed % 3600 % 60;
+                                    let mut elapsed = start.elapsed().as_secs();
+                                    let mut hours = elapsed / 3600;
+                                    let mut mins = elapsed % 3600 / 60;
+                                    let mut secs = elapsed % 3600 % 60;
                                     i += 1;
                                     let progress = i as f32 / max_i as f32 * 100.0;
                                     writeln!(log_file, "[{hours}:{mins}:{secs}] Running iter {i} of {max_i}. {progress:.2}%").expect("log file should be writable");
-                                    train_regression::<B, TN, T, I>(
+                                    let stats = train_regression::<B, T, I>(
                                         &format!("{super_dir}/iter_{i}"),
                                         training_data_path.clone(),
                                         testing_data_path.clone(),
@@ -548,6 +558,11 @@ pub fn super_train_regression<B, const TN: usize, T, I, TC, TCI>(
                                         config,
                                         device.clone(),
                                     );
+                                    elapsed = start.elapsed().as_secs();
+                                    hours = elapsed / 3600;
+                                    mins = elapsed % 3600 / 60;
+                                    secs = elapsed % 3600 % 60;
+                                    writeln!(log_file, "[{hours}:{mins}:{secs}] Loss: {:.5}", stats.loss).expect("log file should be writable");
                                 });
                         });
                 });
