@@ -1,8 +1,14 @@
 use std::path::Path;
 
 use clap::{command, Parser, Subcommand};
-use machine_academy::{data::create_dataset, super_train_regression, SuperTrainingConfig, burn::{config::Config, backend::{Wgpu, wgpu::AutoGraphicsApi, Autodiff}}, common::time_series::{GruNetworkSuperConfig, GruNetwork}};
-use smooth_diff_drive::TrainingItem;
+use machine_academy::{
+    burn::{backend::Autodiff, config::Config},
+    burn_ndarray::{NdArray, NdArrayDevice},
+    common::time_series::{GruNetwork, GruNetworkSuperConfig},
+    data::create_dataset,
+    super_train_regression, SuperTrainingConfig,
+};
+use smooth_diff_drive::{TrainingItem, TrainingItemGen};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -13,10 +19,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Gen {
-        train_len: usize,
-        test_len: usize,
-    },
+    Gen { train_len: usize, test_len: usize },
     Train,
     Test,
     Sample,
@@ -24,7 +27,7 @@ enum Commands {
 
 const BLOCK_MEM_SIZE: usize = 10_000_000;
 const SUPER_DIR: &str = "smooth-diff-drive-academy";
-type MyBackend = Wgpu<AutoGraphicsApi, f32, i32>;
+type MyBackend = NdArray;
 type MyAutodiffBackend = Autodiff<MyBackend>;
 
 fn main() {
@@ -37,19 +40,45 @@ fn main() {
             train_len,
             test_len,
         } => {
-            create_dataset::<TrainingItem>(train_len, training_data_path, BLOCK_MEM_SIZE);
-            create_dataset::<TrainingItem>(test_len, testing_data_path, BLOCK_MEM_SIZE);
+            let mut gen = TrainingItemGen::default();
+            create_dataset(
+                train_len,
+                training_data_path,
+                BLOCK_MEM_SIZE,
+                machine_academy::data::DataGenerator::Immut(&mut gen),
+            );
+            create_dataset(
+                test_len,
+                testing_data_path,
+                BLOCK_MEM_SIZE,
+                machine_academy::data::DataGenerator::Immut(&mut gen),
+            );
         }
         Commands::Train => {
-            let device = machine_academy::burn::backend::wgpu::WgpuDevice::default();
-            let config = SuperTrainingConfig::<GruNetworkSuperConfig>::load(Path::new(SUPER_DIR).join("super-config.json")).expect("super config should be valid and readable");
-            super_train_regression::<MyAutodiffBackend, GruNetwork<MyAutodiffBackend>, TrainingItem, _, _>(SUPER_DIR.into(), 1_000_000_000, config, training_data_path, testing_data_path, device);
+            let device = NdArrayDevice::default();
+            let config = SuperTrainingConfig::<GruNetworkSuperConfig>::load(
+                Path::new(SUPER_DIR).join("super-config.json"),
+            )
+            .expect("super config should be valid and readable");
+            super_train_regression::<
+                MyAutodiffBackend,
+                GruNetwork<MyAutodiffBackend>,
+                TrainingItem,
+                _,
+                _,
+            >(
+                SUPER_DIR.into(),
+                100,
+                config,
+                training_data_path,
+                testing_data_path,
+                device,
+            );
         }
         Commands::Test => {
-            let _device = machine_academy::burn::backend::wgpu::WgpuDevice::default();
+            let _device = NdArrayDevice::default();
             // smooth_diff_drive::test::<MyAutodiffBackend>("/tmp/smooth_diff_drive", device);
         }
-        Commands::Sample => {
-        }
+        Commands::Sample => {}
     }
 }

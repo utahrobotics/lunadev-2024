@@ -7,9 +7,10 @@ edition = "2021"
 
 [dependencies]
 unros-core = { path = "../unros-core" }
-machine-academy = { path = "../machine-academy" }
+machine-academy = { git = "https://github.com/manglemix/machine-academy.git", features = ["burn-ndarray"] }
 serde = { workspace = true }
 rand = { workspace = true }
 clap = { workspace = true }
 rand_distr = { workspace = true }
 serde-big-array = { workspace = true }
+crossbeam = { workspace = true }

@@ -12,7 +12,7 @@ members = [
     "localization",
     "serial",
     "navigator",
-    "rig", "tools", "smach", "costmap", "smooth-diff-drive", "machine-academy",
+    "rig", "tools", "smach", "costmap", "smooth-diff-drive",
 ]
 resolver = "2"
 
@@ -32,7 +32,6 @@ tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 fast_image_resize = "2"
 spin_sleep = "1"
-burn = { version = "0.11", features=["train", "wgpu"]}
 rand = { version = "0.8", features = ["small_rng"] }
 tokio-rayon = "2"
 serde-big-array = "0.5"

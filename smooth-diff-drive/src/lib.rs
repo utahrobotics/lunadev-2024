@@ -4,15 +4,18 @@ pub mod drive;
 
 use std::collections::VecDeque;
 
-use machine_academy::burn::tensor::{Tensor, backend::Backend, Data};
+use crossbeam::queue::SegQueue;
+use machine_academy::burn::tensor::{backend::Backend, Data, Tensor};
+use machine_academy::data::DataGen;
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
 use rand::{
     distributions::{Bernoulli, Distribution},
     Rng,
 };
 use rand_distr::Normal;
-use serde_big_array::BigArray;
 use serde::{Deserialize, Serialize};
-
+use serde_big_array::BigArray;
 
 const SEQ_LENGTH: usize = 150;
 const MAX_DELAY: f32 = 0.5;
@@ -27,22 +30,28 @@ const MAX_SLOWDOWN_STD_DEV: f32 = 0.1;
 pub struct TrainingItem {
     #[serde(with = "BigArray")]
     input: [[f32; 2]; SEQ_LENGTH],
-    target: f32
+    target: f32,
 }
-
 
 impl<B: Backend> From<TrainingItem> for (Tensor<B, 2>, Tensor<B, 1>) {
     fn from(value: TrainingItem) -> Self {
         (
             Tensor::<B, 2>::from_data(Data::<f32, 2>::from(value.input).convert()),
-            Tensor::<B, 1>::from_data(Data::<f32, 1>::from([value.target]).convert())
+            Tensor::<B, 1>::from_data(Data::<f32, 1>::from([value.target]).convert()),
         )
     }
 }
 
+#[derive(Default)]
+pub struct TrainingItemGen {
+    rngs: SegQueue<SmallRng>,
+}
 
-impl<R: Rng> From<&mut R> for TrainingItem {
-    fn from(mut rng: &mut R) -> Self {
+impl DataGen for TrainingItemGen {
+    type Output = TrainingItem;
+
+    fn gen(&self) -> Self::Output {
+        let mut rng = self.rngs.pop().unwrap_or_else(|| SmallRng::from_entropy());
         let mut item = TrainingItem {
             input: [[0.0; 2]; SEQ_LENGTH],
             target: 0.0,
@@ -128,6 +137,13 @@ impl<R: Rng> From<&mut R> for TrainingItem {
             item.target = left_slowdown;
         }
 
+        // 10% of not returning RNG so one is reseeded from entropy
+        if rng.gen_bool(0.9) {
+            self.rngs.push(rng);
+        }
+
         item
     }
+
+    fn skip(&mut self, _: usize) {}
 }
