@@ -12,7 +12,7 @@ members = [
     "localization",
     "serial",
     "navigator",
-    "rig", "tools", "smach", "costmap", "smooth-diff-drive",
+    "rig", "tools", "smach", "costmap", "smooth-diff-drive", "lunasimbot",
 ]
 resolver = "2"
 

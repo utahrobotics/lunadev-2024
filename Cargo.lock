@@ -2782,6 +2782,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lunasimbot"
+version = "0.1.0"
+dependencies = [
+ "costmap",
+ "fxhash",
+ "nalgebra",
+ "rig",
+ "toml",
+ "unros-core",
+]
+
+[[package]]
 name = "mach2"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
