@@ -5,7 +5,7 @@ use std::{
 
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use nalgebra::{Isometry, Vector3};
+use nalgebra::{Isometry, Vector3, Quaternion, Normed, UnitQuaternion, Translation};
 use rig::Robot;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
@@ -15,7 +15,7 @@ use unros_core::{
     },
     rayon::iter::ParallelIterator,
     signal::unbounded::UnboundedSubscription,
-    tokio, FnNode,
+    tokio::{self, net::{TcpListener, tcp}, io::AsyncReadExt}, FnNode,
 };
 
 #[tokio::main]
@@ -47,6 +47,26 @@ async fn main() -> anyhow::Result<()> {
             costmap_writer
                 .write_frame(costmap_ref.get_costmap_img().into())
                 .unwrap();
+        }
+    });
+
+    let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
+    let sim_conn = FnNode::new(|_| async move {
+        loop {
+            let (mut stream, _) = tcp_listener.accept().await.expect("Connection should have succeeded");
+            let mut buf = [0u8; 32];
+            loop {
+                stream.read_exact(&mut buf).await.expect("Failed to receive packet");
+                let x = f32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+                let y = f32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+                let z = f32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+                let w = f32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]);
+                let i = f32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]);
+                let j = f32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]);
+                let k = f32::from_be_bytes([buf[24], buf[25], buf[26], buf[27]]);
+                let n = u32::from_be_bytes([buf[28], buf[29], buf[30], buf[31]]);
+                robot_base.set_isometry(Isometry { rotation: UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)), translation: Translation::new(x, y, z) });
+            }
         }
     });
 
