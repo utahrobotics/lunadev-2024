@@ -13,10 +13,9 @@ use std::{
     net::SocketAddr,
     num::NonZeroU32,
     path::{Path, PathBuf},
-    sync::OnceLock,
-    time::{Duration, Instant},
 };
 
+use ffmpeg_sidecar::command::FfmpegCommand;
 use image::DynamicImage;
 use log::error;
 use tokio::{
@@ -24,13 +23,6 @@ use tokio::{
     io::{AsyncWrite, AsyncWriteExt, BufWriter},
     net::TcpStream,
     sync::mpsc,
-};
-use video_rs::{
-    ffmpeg::{
-        ffi::{av_image_fill_arrays, AVPixelFormat},
-        format::Pixel,
-    },
-    Encoder, EncoderSettings, Locator, Options, PixelFormat, RawFrame, Time,
 };
 
 use crate::spawn_persistent_thread;
@@ -168,14 +160,12 @@ impl Display for VideoWriteError {
 impl Error for VideoWriteError {}
 
 pub struct VideoDataDump {
-    writer: std::sync::mpsc::Sender<(DynamicImage, Time)>,
-    start: Instant,
-    elapsed: Duration,
+    writer: std::sync::mpsc::Sender<DynamicImage>,
 }
 
 #[derive(Debug)]
 pub enum VideoDumpInitError {
-    VideoError(video_rs::Error),
+    VideoError(std::io::Error),
     LoggingError(anyhow::Error),
 }
 
@@ -194,7 +184,7 @@ impl Display for VideoDumpInitError {
     }
 }
 
-static VIDEO_INIT: OnceLock<()> = OnceLock::new();
+// static VIDEO_INIT: OnceLock<()> = OnceLock::new();
 
 impl VideoDataDump {
     pub fn new(
@@ -202,29 +192,17 @@ impl VideoDataDump {
         height: u32,
         path: impl AsRef<Path>,
     ) -> Result<Self, VideoDumpInitError> {
-        VIDEO_INIT.get_or_try_init(|| {
-            video_rs::init()
-                .map_err(|e| VideoDumpInitError::LoggingError(anyhow::anyhow!(e.to_string())))
-        })?;
-
+        let pathbuf;
         let path = if path.as_ref().is_absolute() {
-            Locator::Path(path.as_ref().into())
+            path.as_ref()
         } else {
             let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
                 return Err(VideoDumpInitError::LoggingError(anyhow::anyhow!("Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`")));
             };
-            Locator::Path(PathBuf::from(sub_log_dir).join(path.as_ref()))
+            pathbuf = PathBuf::from(sub_log_dir).join(path.as_ref());
+            pathbuf.as_path()
         };
-
-        let settings = EncoderSettings::for_h264_custom(
-            width as usize,
-            height as usize,
-            PixelFormat::YUV420P,
-            Options::new_h264(),
-        );
-        let mut encoder =
-            Encoder::new(&path, settings).map_err(|e| VideoDumpInitError::VideoError(e))?;
-        let (writer, receiver) = std::sync::mpsc::channel::<(DynamicImage, Time)>();
+        let (writer, receiver) = std::sync::mpsc::channel::<DynamicImage>();
 
         let mut resizer = fast_image_resize::Resizer::new(
             fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Box),
@@ -236,10 +214,24 @@ impl VideoDataDump {
             fast_image_resize::PixelType::U8x3,
         );
 
-        spawn_persistent_thread(move || loop {
-            let Ok((frame, time)) = receiver.recv() else {
-                if let Err(e) = encoder.finish() {
-                    error!("Failed to close encoder: {e}");
+        let mut output = FfmpegCommand::new()
+            .args([
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", &format!("{width}x{height}"), "-r", "60", "-use_wallclock_as_timestamps", "1"
+            ])
+            .input("-")
+            .args(["-c:v", "libx265"])
+            .args(["-y".as_ref(), path.as_os_str()])
+            .spawn()
+            .map_err(|e| VideoDumpInitError::VideoError(e))?;
+
+        let mut video_out = output.take_stdin().unwrap();
+
+        spawn_persistent_thread(move || {
+            let _output = output;
+            loop {
+            let Ok(frame) = receiver.recv() else {
+                if let Err(e) = video_out.flush() {
+                    error!("Failed to flush encoder: {e}");
                 }
                 break;
             };
@@ -256,55 +248,17 @@ impl VideoDataDump {
             resizer.resize(&src_image.view(), &mut dst_view).unwrap();
 
             let frame = dst_image.buffer();
-            let mut raw = RawFrame::new(Pixel::RGB24, width, height);
-            unsafe {
-                let raw = raw.as_mut_ptr();
-                let err = av_image_fill_arrays(
-                    (*raw).data.as_mut_ptr(),
-                    (*raw).linesize.as_mut_ptr(),
-                    frame.as_ptr(),
-                    AVPixelFormat::AV_PIX_FMT_RGB24,
-                    width as i32,
-                    height as i32,
-                    1,
-                );
-                if err < 0 {
-                    error!("Internal error: unable to fill raw image: {err}");
-                    break;
-                }
-                if err as u32 / width / height != 3 {
-                    error!("Internal error: size mismatch: {err}");
-                    break;
-                }
-                if frame.len() != err as usize {
-                    error!(
-                        "Internal error: frame not of correct size, expected: {err}, got: {}",
-                        frame.len()
-                    );
-                    break;
-                }
-                (*raw).pts = time
-                    .with_time_base(encoder.time_base())
-                    .into_value()
-                    .unwrap();
+            if let Err(e) = video_out.write_all(frame) {
+                error!("Faced the following error while writing video frame: {e}");
             }
-
-            if let Err(e) = encoder.encode_raw(raw) {
-                error!("Failed to write to encoder: {e}");
-                break;
-            }
-        });
+        }});
 
         Ok(Self {
             writer,
-            start: Instant::now(),
-            elapsed: Duration::ZERO,
         })
     }
 
     pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
-        let time = Time::from_secs_f64(self.elapsed.as_secs_f64());
-        self.elapsed = self.start.elapsed();
-        self.writer.send((frame, time)).map_err(|_| VideoWriteError)
+        self.writer.send(frame).map_err(|_| VideoWriteError)
     }
 }

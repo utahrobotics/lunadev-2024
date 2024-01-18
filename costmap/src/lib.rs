@@ -156,7 +156,7 @@ impl Node for Costmap {
                 let Ok((next_duration, new_points)) = del_recv.recv() else {
                     break;
                 };
-                sleeper.sleep(next_duration - start2.elapsed());
+                sleeper.sleep(next_duration.saturating_sub(start2.elapsed()));
                 new_points.par_iter().for_each(|i| {
                     points2[*i].fetch_sub(1, Ordering::Relaxed);
                 });
