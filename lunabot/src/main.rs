@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     let debug_element = elements.remove("debug").unwrap();
     let robot_base_ref = robot_base.get_ref();
 
-    let mut costmap = Costmap::new(40, 40, 0.05, 1.9, 0.0);
+    let mut costmap = Costmap::new(40, 40, 0.05, 1.9, 0.0, 0.01);
 
     let mut camera = discover_all_realsense()?
         .next()
