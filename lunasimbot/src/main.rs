@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (_, robot_base) = rig.destructure::<FxBuildHasher>([])?;
 
-    let mut costmap = Costmap::new(40, 40, 0.05, 1.9, 0.0);
+    let mut costmap = Costmap::new(40, 40, 0.5, 10.0, 10.0, 0.01);
     let mut points_signal = Signal::<Vec<Point3<f32>>>::default();
 
     costmap.add_points_sub(points_signal.get_ref().subscribe_unbounded());
@@ -33,8 +33,11 @@ async fn main() -> anyhow::Result<()> {
     let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
 
     let video_maker = FnNode::new(|_| async move {
+        let mut i = 0;
         loop {
             tokio::time::sleep(Duration::from_millis(42)).await;
+            let _ = costmap_ref.get_costmap_img().save(format!("img{i}.png"));
+            i += 1;
             costmap_writer
                 .write_frame(costmap_ref.get_costmap_img().into())
                 .unwrap();
@@ -57,29 +60,29 @@ async fn main() -> anyhow::Result<()> {
                     .read_exact(&mut buf)
                     .await
                     .expect("Failed to receive packet");
-                let x = f32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as f64;
-                let y = f32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]) as f64;
-                let z = f32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]) as f64;
-                let w = f32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]) as f64;
-                let i = f32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]) as f64;
-                let j = f32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]) as f64;
-                let k = f32::from_be_bytes([buf[24], buf[25], buf[26], buf[27]]) as f64;
-                let n = u32::from_be_bytes([buf[28], buf[29], buf[30], buf[31]]) as usize;
+                let x = f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as f64;
+                let y = f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as f64;
+                let z = f32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as f64;
+                let w = f32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]) as f64;
+                let i = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]) as f64;
+                let j = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]) as f64;
+                let k = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]) as f64;
+                let n = u32::from_le_bytes([buf[28], buf[29], buf[30], buf[31]]) as usize;
                 robot_base.set_isometry(Isometry {
                     rotation: UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)),
                     translation: Translation3::new(x, y, z),
                 });
 
-                points.reserve(n - points.capacity());
+                points.reserve(n.saturating_sub(points.capacity()));
                 let mut buf = [0u8; 12];
                 for _ in 0..n {
                     stream
                         .read_exact(&mut buf)
                         .await
                         .expect("Failed to receive point");
-                    let x = f32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-                    let y = f32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
-                    let z = f32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+                    let x = f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+                    let y = f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
+                    let z = f32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
                     points.push(Point3::new(x, y, z));
                 }
 

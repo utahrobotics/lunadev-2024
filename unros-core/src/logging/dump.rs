@@ -15,9 +15,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ffmpeg_sidecar::command::FfmpegCommand;
+use ffmpeg_sidecar::{command::FfmpegCommand, event::FfmpegEvent};
 use image::DynamicImage;
-use log::error;
+use log::{error, info, warn};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt, BufWriter},
@@ -165,20 +165,30 @@ pub struct VideoDataDump {
 
 #[derive(Debug)]
 pub enum VideoDumpInitError {
-    VideoError(std::io::Error),
+    IOError(std::io::Error),
+    VideoError(String),
     LoggingError(anyhow::Error),
+    FFMPEGInstallError(String),
 }
 
 impl Error for VideoDumpInitError {}
 impl Display for VideoDumpInitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VideoDumpInitError::VideoError(e) => {
+            VideoDumpInitError::IOError(e) => {
                 write!(f, "Faced an error initializing the video encoder: {e}")
             }
             VideoDumpInitError::LoggingError(e) => write!(
                 f,
                 "Faced an error setting up the logging for the video encoder: {e}"
+            ),
+            VideoDumpInitError::FFMPEGInstallError(e) => write!(
+                f,
+                "Faced an error installing FFMPEG for the video encoder: {e}"
+            ),
+            VideoDumpInitError::VideoError(e) =>  write!(
+                f,
+                "Faced an error while encoding video: {e}"
             ),
         }
     }
@@ -192,6 +202,8 @@ impl VideoDataDump {
         height: u32,
         path: impl AsRef<Path>,
     ) -> Result<Self, VideoDumpInitError> {
+        ffmpeg_sidecar::download::auto_download()
+            .map_err(|e| VideoDumpInitError::FFMPEGInstallError(e.to_string()))?;
         let pathbuf;
         let path = if path.as_ref().is_absolute() {
             path.as_ref()
@@ -216,46 +228,73 @@ impl VideoDataDump {
 
         let mut output = FfmpegCommand::new()
             .args([
-            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", &format!("{width}x{height}"), "-r", "60", "-use_wallclock_as_timestamps", "1"
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-s",
+                &format!("{width}x{height}"),
+                "-r",
+                "60",
+                "-use_wallclock_as_timestamps",
+                "1",
             ])
             .input("-")
             .args(["-c:v", "libx265"])
             .args(["-y".as_ref(), path.as_os_str()])
             .spawn()
-            .map_err(|e| VideoDumpInitError::VideoError(e))?;
+            .map_err(VideoDumpInitError::IOError)?;
 
         let mut video_out = output.take_stdin().unwrap();
 
+        let events = output
+            .iter()
+            .map_err(|e| VideoDumpInitError::VideoError(e.to_string()))?;
+
         spawn_persistent_thread(move || {
-            let _output = output;
-            loop {
-            let Ok(frame) = receiver.recv() else {
-                if let Err(e) = video_out.flush() {
-                    error!("Failed to flush encoder: {e}");
+            events.for_each(|event| {
+                match event {
+                    FfmpegEvent::Log(level, msg) => match level {
+                        ffmpeg_sidecar::event::LogLevel::Info => info!("{msg}"),
+                        ffmpeg_sidecar::event::LogLevel::Warning => warn!("{msg}"),
+                        ffmpeg_sidecar::event::LogLevel::Unknown => {}
+                        _ => error!("{msg}"),
+                    }
+                    _ => {}
                 }
-                break;
-            };
-            let src_image = fast_image_resize::Image::from_vec_u8(
-                NonZeroU32::new(frame.width()).expect("incoming image width should be non-zero"),
-                NonZeroU32::new(frame.height()).expect("incoming image height should be non-zero"),
-                frame.into_rgb8().into_vec(),
-                fast_image_resize::PixelType::U8x3,
-            )
-            .unwrap();
+            });
+        });
 
-            // Get mutable view of destination image data
-            let mut dst_view = dst_image.view_mut();
-            resizer.resize(&src_image.view(), &mut dst_view).unwrap();
+        spawn_persistent_thread(move || {
+            loop {
+                let Ok(frame) = receiver.recv() else {
+                    if let Err(e) = video_out.flush() {
+                        error!("Failed to flush encoder: {e}");
+                    }
+                    break;
+                };
+                let src_image = fast_image_resize::Image::from_vec_u8(
+                    NonZeroU32::new(frame.width())
+                        .expect("incoming image width should be non-zero"),
+                    NonZeroU32::new(frame.height())
+                        .expect("incoming image height should be non-zero"),
+                    frame.into_rgb8().into_vec(),
+                    fast_image_resize::PixelType::U8x3,
+                )
+                .unwrap();
 
-            let frame = dst_image.buffer();
-            if let Err(e) = video_out.write_all(frame) {
-                error!("Faced the following error while writing video frame: {e}");
+                // Get mutable view of destination image data
+                let mut dst_view = dst_image.view_mut();
+                resizer.resize(&src_image.view(), &mut dst_view).unwrap();
+
+                let frame = dst_image.buffer();
+                if let Err(e) = video_out.write_all(frame) {
+                    error!("Faced the following error while writing video frame: {e}");
+                }
             }
-        }});
+        });
 
-        Ok(Self {
-            writer,
-        })
+        Ok(Self { writer })
     }
 
     pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {

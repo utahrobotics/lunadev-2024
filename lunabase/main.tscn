@@ -1,8 +1,10 @@
-[gd_scene load_steps=28 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=34 format=3 uid="uid://b8qgudi6vkflb"]
 
 [ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_1xyvq"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="1_hl7kb"]
+[ext_resource type="PackedScene" uid="uid://s8kxwa7b8f1t" path="res://ray_scanner.tscn" id="2_jsa7e"]
 [ext_resource type="AudioStream" uid="uid://cephremnedhtp" path="res://addons/kenney_interface_sounds/error_002.wav" id="2_kejy0"]
+[ext_resource type="PackedScene" uid="uid://br8rl5vykae1n" path="res://boulder.tscn" id="3_02f7a"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_f0mli"]
 
@@ -20,7 +22,6 @@ func _ready() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadMotion:
-#		print(Input.get_action_strength(\"DriveForward\"))
 		Lunabot.send_steering(
 			Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\"),
 			Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")
@@ -309,6 +310,13 @@ func _gui_input(event: InputEvent) -> void:
 		pressed = event.pressed
 "
 
+[sub_resource type="Environment" id="Environment_bvywr"]
+background_mode = 1
+background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
+
+[sub_resource type="World3D" id="World3D_pep74"]
+environment = SubResource("Environment_bvywr")
+
 [sub_resource type="BoxMesh" id="BoxMesh_0laka"]
 size = Vector3(0.15, 0.15, 0.15)
 
@@ -321,10 +329,6 @@ albedo_color = Color(0.027451, 0.0235294, 0.0627451, 1)
 [sub_resource type="PlaneMesh" id="PlaneMesh_hrbaw"]
 material = SubResource("StandardMaterial3D_7fexe")
 size = Vector2(20, 20)
-
-[sub_resource type="Environment" id="Environment_bvywr"]
-background_mode = 1
-background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_51jn0"]
 shading_mode = 0
@@ -356,6 +360,87 @@ top_radius = 0.02
 bottom_radius = 0.02
 height = 0.1
 
+[sub_resource type="GDScript" id="GDScript_0y6bh"]
+script/source = "extends CharacterBody3D
+
+
+const MOUSE_SENSITIVITY := 0.3
+const SPEED := 1.2
+const CONN_DELAY := 0.1
+
+var conn: StreamPeerTCP
+
+var conn_timer := CONN_DELAY
+@onready var scanner: RayScanner = $RayScanner
+
+
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed(\"ui_cancel\"):
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		return
+	
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		event.relative /= -Vector2(get_viewport().size)
+		event.relative = Vector2(sqrt(absf(event.relative.x)), sqrt(absf(event.relative.y))) * event.relative.sign()
+		event.relative *= MOUSE_SENSITIVITY
+		global_rotate(Vector3.UP, event.relative.x)
+		rotate_object_local(Vector3.RIGHT, event.relative.y)
+	
+	elif event.is_action(\"WalkForward\"):
+		pass
+	elif event.is_action(\"WalkBackwards\"):
+		pass
+	elif event.is_action(\"WalkLeft\"):
+		pass
+	elif event.is_action(\"WalkRight\"):
+		pass
+	else:
+		return
+	
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	velocity = global_transform.basis.z * (Input.get_action_strength(\"WalkBackwards\") - Input.get_action_strength(\"WalkForward\")) + global_transform.basis.x * (Input.get_action_strength(\"WalkRight\") - Input.get_action_strength(\"WalkLeft\"))
+	velocity = velocity.slide(Vector3.UP).normalized() * SPEED
+	velocity += Vector3.DOWN * 9.81
+	
+	if conn == null:
+		conn = StreamPeerTCP.new()
+		var err := conn.connect_to_host(\"127.0.0.1\", 11433)
+		if err != OK:
+			push_error(\"Failed to connect to lunasimbot: %s\" % err)
+			conn = null
+
+
+func _physics_process(delta: float) -> void:
+	if conn != null:
+		conn.poll()
+	
+	if conn_timer > 0.0:
+		conn_timer -= delta
+	else:
+		conn_timer = CONN_DELAY
+		if conn != null and conn.get_status() == StreamPeerTCP.STATUS_CONNECTED:
+			conn.put_float(global_position.x)
+			conn.put_float(global_position.y)
+			conn.put_float(global_position.z)
+			conn.put_float(quaternion.w)
+			conn.put_float(quaternion.x)
+			conn.put_float(quaternion.y)
+			conn.put_float(quaternion.z)
+			var points := scanner.scan()
+			conn.put_u32(points.size())
+			for point in points:
+				conn.put_float(point.x)
+				conn.put_float(point.y)
+				conn.put_float(point.z)
+	move_and_slide()
+"
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_u861d"]
+radius = 0.456615
+height = 0.992012
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_yqe5l"]
+
 [node name="Main" type="TabContainer"]
 anchors_preset = 15
 anchor_right = 1.0
@@ -367,9 +452,11 @@ offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxEmpty_f0mli")
+current_tab = 2
 script = SubResource("GDScript_45865")
 
 [node name="Controller" type="HSplitContainer" parent="."]
+visible = false
 layout_mode = 2
 theme_override_constants/autohide = 0
 split_offset = 400
@@ -468,6 +555,7 @@ stretch = true
 script = SubResource("GDScript_mnw3m")
 
 [node name="SubViewport" type="SubViewport" parent="3D Player/AspectRatioContainer/SubViewportContainer"]
+world_3d = SubResource("World3D_pep74")
 handle_input_locally = false
 msaa_3d = 1
 size = Vector2i(2, 2)
@@ -560,6 +648,77 @@ size_flags_vertical = 4
 max_value = 1.0
 step = 0.001
 editable = false
+
+[node name="Sim" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="AspectRatioContainer" type="AspectRatioContainer" parent="Sim"]
+layout_mode = 2
+size_flags_vertical = 3
+ratio = 1.8
+
+[node name="SubViewportContainer" type="SubViewportContainer" parent="Sim/AspectRatioContainer"]
+layout_mode = 2
+stretch = true
+
+[node name="SubViewport" type="SubViewport" parent="Sim/AspectRatioContainer/SubViewportContainer"]
+handle_input_locally = false
+msaa_3d = 1
+size = Vector2i(628, 348)
+render_target_update_mode = 4
+
+[node name="Node3D" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport"]
+
+[node name="CharacterBody3D" type="CharacterBody3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+script = SubResource("GDScript_0y6bh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
+shape = SubResource("CapsuleShape3D_u861d")
+
+[node name="RayScanner" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D" instance=ExtResource("2_jsa7e")]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+layers = 2
+mesh = SubResource("PlaneMesh_hrbaw")
+
+[node name="Decal" type="Decal" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D"]
+size = Vector3(15, 1, 15)
+texture_albedo = ExtResource("1_1xyvq")
+cull_mask = 1048574
+
+[node name="StaticBody3D" type="StaticBody3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D/StaticBody3D"]
+shape = SubResource("WorldBoundaryShape3D_yqe5l")
+
+[node name="Boulder" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
+
+[node name="Boulder2" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.13333, -0.296974, -0.871875)
+
+[node name="Boulder3" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.42865, -0.424198, 2.11976)
+
+[node name="Boulder4" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.30077, -0.203136, 2.17333)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+transform = Transform3D(0.243107, -0.860673, 0.44737, 3.6215e-11, 0.461207, 0.887293, -0.969999, -0.215707, 0.112123, 0, 1.80059, 0)
+shadow_enabled = true
+directional_shadow_mode = 1
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+environment = SubResource("Environment_bvywr")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Sim"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="Label" type="Label" parent="Sim/HBoxContainer"]
+layout_mode = 2
+text = "Not Connected
+"
 
 [node name="Disconnected" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("2_kejy0")

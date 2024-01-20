@@ -10,3 +10,4 @@ unros-core = { path = "../unros-core" }
 nalgebra = { workspace = true }
 image = { workspace = true, optional = false }
 spin_sleep = { workspace = true }
+ordered-float = { workspace = true }

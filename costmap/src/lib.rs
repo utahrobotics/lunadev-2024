@@ -8,27 +8,37 @@ use std::{
 };
 
 use nalgebra::{Dyn, Matrix, Point3, VecStorage};
+use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros_core::{
     anyhow, async_trait,
     rayon::{
         self,
-        iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+        iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, IndexedParallelIterator},
     },
     setup_logging,
     signal::unbounded::UnboundedSubscription,
     Node, RuntimeContext,
 };
 
+
+struct PointMeasurement {
+    index: usize,
+    height: usize
+}
+
+
 pub struct Costmap {
     pub window_duration: Duration,
     area_width: usize,
     area_length: usize,
     cell_width: f32,
+    height_step: f32,
     x_offset: f32,
     y_offset: f32,
-    points_sub: UnboundedSubscription<Arc<[usize]>>,
-    points: Arc<[AtomicUsize]>,
+    points_sub: UnboundedSubscription<Arc<[PointMeasurement]>>,
+    heights: Arc<[AtomicUsize]>,
+    counts: Arc<[AtomicUsize]>,
 }
 
 impl Costmap {
@@ -38,16 +48,21 @@ impl Costmap {
         cell_width: f32,
         x_offset: f32,
         y_offset: f32,
+        height_step: f32
     ) -> Self {
         Self {
             window_duration: Duration::from_secs(5),
             area_width,
             area_length,
+            height_step,
             cell_width,
             x_offset,
             y_offset,
             points_sub: UnboundedSubscription::none(),
-            points: (0..(area_length * area_width))
+            heights: (0..(area_length * area_width))
+                .map(|_| Default::default())
+                .collect(),
+            counts: (0..(area_length * area_width))
                 .map(|_| Default::default())
                 .collect(),
         }
@@ -62,10 +77,13 @@ impl Costmap {
         let area_length = self.area_length;
         let x_offset = self.x_offset;
         let y_offset = self.y_offset;
+        let height_step = self.height_step;
 
         self.points_sub += sub.map(move |x| {
             x.into_par_iter()
                 .filter_map(|mut point| {
+                    let height = (point.y / height_step).round() as usize;
+
                     point.x += x_offset;
                     point.z += y_offset;
                     point /= cell_width;
@@ -84,7 +102,7 @@ impl Costmap {
                         return None;
                     }
 
-                    Some(x * area_length + y)
+                    Some(PointMeasurement { index: x * area_length + y, height })
                 })
                 .collect()
         });
@@ -92,7 +110,8 @@ impl Costmap {
 
     pub fn get_ref(&self) -> CostmapRef {
         CostmapRef {
-            points: self.points.clone(),
+            heights: self.heights.clone(),
+            counts: self.counts.clone(),
             area_length: self.area_length,
             area_width: self.area_width,
         }
@@ -102,16 +121,26 @@ impl Costmap {
 pub struct CostmapRef {
     area_width: usize,
     area_length: usize,
-    points: Arc<[AtomicUsize]>,
+    heights: Arc<[AtomicUsize]>,
+    counts: Arc<[AtomicUsize]>,
 }
 
 impl CostmapRef {
-    pub fn get_costmap(&self) -> Matrix<usize, Dyn, Dyn, VecStorage<usize, Dyn, Dyn>> {
+    pub fn get_costmap(&self) -> Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>> {
         let data = self
-            .points
+            .heights
             .par_iter()
-            .map(|x| x.load(Ordering::Relaxed))
+            .zip(self.counts.par_iter())
+            .map(|(height, count)| {
+                let count = count.load(Ordering::Relaxed);
+                if count == 0 {
+                    0.0
+                } else {
+                    height.load(Ordering::Relaxed) as f32 / count as f32
+                }
+            })
             .collect();
+
         Matrix::from_data(VecStorage::new(
             Dyn(self.area_length),
             Dyn(self.area_width),
@@ -123,7 +152,8 @@ impl CostmapRef {
     pub fn get_costmap_img(&self) -> image::GrayImage {
         let costmap = self.get_costmap();
 
-        let max = *costmap.data.as_slice().into_iter().max().unwrap() as f32;
+        let max = costmap.data.as_slice().into_iter().map(|n| NotNan::new(*n).unwrap()).max().unwrap().into_inner();
+        // println!("{max}");
 
         let buf = costmap
             .row_iter()
@@ -145,10 +175,11 @@ impl Node for Costmap {
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
-        let (del_sender, del_recv) = channel::<(Duration, Arc<[usize]>)>();
+        let (del_sender, del_recv) = channel::<(Duration, Arc<[PointMeasurement]>)>();
         let start = Instant::now();
         let start2 = start.clone();
-        let points2 = self.points.clone();
+        let heights2 = self.heights.clone();
+        let counts2 = self.counts.clone();
 
         rayon::spawn(move || {
             let sleeper = SpinSleeper::default();
@@ -157,8 +188,9 @@ impl Node for Costmap {
                     break;
                 };
                 sleeper.sleep(next_duration.saturating_sub(start2.elapsed()));
-                new_points.par_iter().for_each(|i| {
-                    points2[*i].fetch_sub(1, Ordering::Relaxed);
+                new_points.par_iter().for_each(|p| {
+                    counts2[p.index].fetch_sub(1, Ordering::Relaxed);
+                    heights2[p.index].fetch_sub(p.height, Ordering::Relaxed);
                 });
             }
         });
@@ -166,13 +198,15 @@ impl Node for Costmap {
         loop {
             let new_points = self.points_sub.recv().await;
             let new_points2 = new_points.clone();
-            let points = self.points.clone();
+            let heights = self.heights.clone();
+            let counts = self.counts.clone();
 
             let _ = del_sender.send((start.elapsed() + self.window_duration, new_points2));
 
             rayon::spawn(move || {
-                new_points.par_iter().for_each(|i| {
-                    points[*i].fetch_add(1, Ordering::Relaxed);
+                new_points.par_iter().for_each(|p| {
+                    counts[p.index].fetch_add(1, Ordering::Relaxed);
+                    heights[p.index].fetch_add(p.height, Ordering::Relaxed);
                 });
             });
         }
