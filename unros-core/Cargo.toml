@@ -25,3 +25,4 @@ fast_image_resize = { workspace = true }
 spin_sleep = { workspace = true }
 tokio-rayon = { workspace = true }
 ffmpeg-sidecar = "0.5.1"
+srtlib = "0.1.7"

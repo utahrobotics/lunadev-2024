@@ -150,12 +150,14 @@ impl CostmapRef {
 
     // #[cfg(feature = "image")]
     pub fn get_costmap_img(&self) -> image::GrayImage {
-        let costmap = self.get_costmap();
+        self.matrix_to_img(self.get_costmap()).0
+    }
 
-        let max = costmap.data.as_slice().into_iter().map(|n| NotNan::new(*n).unwrap()).max().unwrap().into_inner();
+    pub fn matrix_to_img(&self, matrix: Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>) -> (image::GrayImage, f32) {
+        let max = matrix.data.as_slice().into_iter().map(|n| NotNan::new(*n).unwrap()).max().unwrap().into_inner();
         // println!("{max}");
 
-        let buf = costmap
+        let buf = matrix
             .row_iter()
             .flat_map(|x| {
                 x.column_iter()
@@ -164,7 +166,7 @@ impl CostmapRef {
             })
             .collect();
 
-        image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf).unwrap()
+        (image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf).unwrap(), max)
     }
 }
 

@@ -12,12 +12,13 @@ use std::{
     io::Write,
     net::SocketAddr,
     num::NonZeroU32,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, time::Instant,
 };
 
 use ffmpeg_sidecar::{command::FfmpegCommand, event::FfmpegEvent};
 use image::DynamicImage;
 use log::{error, info, warn};
+use srtlib::{Subtitle, Timestamp};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt, BufWriter},
@@ -160,7 +161,9 @@ impl Display for VideoWriteError {
 impl Error for VideoWriteError {}
 
 pub struct VideoDataDump {
-    writer: std::sync::mpsc::Sender<DynamicImage>,
+    video_writer: std::sync::mpsc::Sender<DynamicImage>,
+    path: PathBuf,
+    start: Instant
 }
 
 #[derive(Debug)]
@@ -194,7 +197,9 @@ impl Display for VideoDumpInitError {
     }
 }
 
-// static VIDEO_INIT: OnceLock<()> = OnceLock::new();
+pub enum SubtitleWriteError {
+    IOError(std::io::Error)
+}
 
 impl VideoDataDump {
     pub fn new(
@@ -294,10 +299,98 @@ impl VideoDataDump {
             }
         });
 
-        Ok(Self { writer })
+        Ok(Self { video_writer: writer, start: Instant::now(), path: path.to_path_buf() })
     }
 
     pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
-        self.writer.send(frame).map_err(|_| VideoWriteError)
+        self.video_writer.send(frame).map_err(|_| VideoWriteError)
+    }
+
+    pub async fn init_subtitles(&self) -> Result<SubtitleDump, std::io::Error> {
+        let path = PathBuf::from(self.path.file_stem().unwrap()).with_extension("srt");
+        let mut timestamp = Timestamp::new(0, 0, 0, 0);
+        timestamp.add_milliseconds(self.start.elapsed().as_millis() as i32);
+        Ok(SubtitleDump {
+            file: DataDump::new_file(path).await?,
+            start: self.start,
+            timestamp,
+            last_sub: None,
+            count: 0
+        })
+    }
+}
+
+
+pub struct SubtitleDump {
+    file: DataDump,
+    start: Instant,
+    timestamp: Timestamp,
+    count: usize,
+    last_sub: Option<String>
+}
+
+
+impl SubtitleDump {
+    pub fn write_subtitle(&mut self, subtitle: impl Into<String>) -> std::io::Result<()> {
+        let start_time = self.timestamp;
+        let mut end_time = start_time;
+        let now = Instant::now();
+        end_time.add_milliseconds(now.duration_since(self.start).as_millis() as i32);
+
+        if let Some(last_sub) = self.last_sub.take() {
+            self.count += 1;
+            let sub = Subtitle::new(self.count, start_time, end_time, last_sub);
+            self.start = now;
+            self.timestamp = end_time;
+            self.last_sub = Some(subtitle.into());
+            writeln!(self.file, "{sub}\n")
+        } else {
+            self.start = now;
+            self.timestamp = end_time;
+            self.last_sub = Some(subtitle.into());
+            Ok(())
+        }
+    }
+
+    pub fn clear_subtitle(&mut self) -> std::io::Result<()> {
+        let start_time = self.timestamp;
+        let mut end_time = start_time;
+        let now = Instant::now();
+        end_time.add_milliseconds(now.duration_since(self.start).as_millis() as i32);
+        
+        if let Some(last_sub) = self.last_sub.take() {
+            self.count += 1;
+            let sub = Subtitle::new(self.count, start_time, end_time, last_sub);
+            self.start = now;
+            self.timestamp = end_time;
+            self.last_sub = None;
+            writeln!(self.file, "{sub}\n")
+        } else {
+            self.start = now;
+            self.timestamp = end_time;
+            self.last_sub = None;
+            Ok(())
+        }
+    }
+}
+
+
+impl Drop for SubtitleDump {
+    fn drop(&mut self) {
+        
+        if let Some(last_sub) = self.last_sub.take() {
+            let start_time = self.timestamp;
+            let mut end_time = start_time;
+            let now = Instant::now();
+            end_time.add_milliseconds(now.duration_since(self.start).as_millis() as i32);
+            self.count += 1;
+            let sub = Subtitle::new(self.count, start_time, end_time, last_sub);
+            self.start = now;
+            self.timestamp = end_time;
+            self.last_sub = None;
+            if let Err(e) = writeln!(self.file, "{sub}\n") {
+                error!("Failed to write final subtitle: {e}");
+            }
+        }
     }
 }

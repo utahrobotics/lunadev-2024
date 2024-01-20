@@ -1531,6 +1531,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "encoding_rs"
+version = "0.8.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7268b386296a025e474d5140678f75d6de9493ae55a5d709eeb9dd08149945e1"
+dependencies = [
+ "cfg-if 1.0.0",
+]
+
+[[package]]
 name = "enet"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4507,6 +4516,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "srtlib"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f1e833468139c102e57293a0ac969aaea5750565e05e293a18f6acbb540b07c"
+dependencies = [
+ "encoding_rs",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5173,6 +5191,7 @@ dependencies = [
  "rand",
  "serde",
  "spin_sleep",
+ "srtlib",
  "static_assertions",
  "tokio",
  "tokio-rayon",
