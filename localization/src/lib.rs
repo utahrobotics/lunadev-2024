@@ -139,6 +139,9 @@ struct LocalizerBlackboard {
     robot_base: RobotBase,
 }
 
+/// The calibration stage of the localizer.
+/// 
+/// This stage runs for `calibration_duration` before applying the calibrations and exiting.
 async fn calibrate_localizer(
     (mut bb, context, _): (LocalizerBlackboard, RuntimeContext, ESKF),
 ) -> ((LocalizerBlackboard, RuntimeContext, ESKF), ()) {
@@ -203,23 +206,30 @@ async fn calibrate_localizer(
     );
     eskf.gravity = Vector3::y_axis().into_inner() * 9.81;
     bb.recalibrate_sub.get_or_empty();
+    info!("Localizer calibrated");
     ((bb, context, eskf), ())
 }
 
+/// The active stage of the localizer.  
+/// During this stage, the localizer accepts observations and updates its estimate of the robot's Isometry.
+/// 
+/// If recalibration is triggered, this stage exits. Otherwise, this stage runs forever.
 async fn run_localizer(
     (mut bb, context, mut eskf): (LocalizerBlackboard, RuntimeContext, ESKF),
 ) -> ((LocalizerBlackboard, RuntimeContext, ESKF), ()) {
     setup_logging!(context);
-    info!("Localizer calibrated");
 
     let start = Instant::now();
     let mut last_elapsed = Duration::ZERO;
-    let mut sum = Vector3::default();
-    let mut count = 0usize;
 
+    // Check for recalibration while simultaneously feeding observations into the Kalman Filter
     tokio::select! {
         () = bb.recalibrate_sub.wait_for_change() => {}
         _ = async { loop {
+            // Simultaneously watch three different subscriptions at once.
+            // 1. IMU observations
+            // 2. Position observations
+            // 3. Orientation observations
             tokio::select! {
                 (mut frame, imu_sub_counter) = bb.imu_sub.wait_for_change() => {
                     if imu_sub_counter != bb.imu_recv_counter {
@@ -234,23 +244,21 @@ async fn run_localizer(
                         continue;
                     };
 
-                    // frame.acceleration_variance = isometry * frame.acceleration_variance;
                     eskf.set_acceleration_variance(frame.acceleration_variance * calibration.accel_scale);
-                    // println!("{}", eskf.orientation * frame.acceleration);
 
                     frame.angular_velocity -= calibration.angular_velocity_bias;
 
                     frame.acceleration = frame.robot_element.get_global_isometry() * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
-                    // info!("{}", frame.acceleration);
 
                     let isometry = frame.robot_element.get_isometry_from_base();
 
+                    // Some unwieldly math to convert the angular velocity variance into the correct rotation type (intrinsic xyz)
                     let (w, [i, j, k]) = quaternion_core::from_euler_angles(frame.rotation_type.into(), frame.rotation_sequence.into(), [frame.angular_velocity_variance.x, frame.angular_velocity_variance.y, frame.angular_velocity_variance.z]);
                     let angular_velocity_variance_quat = isometry.rotation * UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k));
                     let angular_velocity_variance_quat = (angular_velocity_variance_quat.w, [angular_velocity_variance_quat.i, angular_velocity_variance_quat.j, angular_velocity_variance_quat.k]);
-
                     eskf.set_rotational_variance(quaternion_core::to_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, angular_velocity_variance_quat).into());
 
+                    // Some unwieldly math to convert the angular velocity into the correct rotation type (intrinsic xyz)
                     let (w, [i, j, k]) = quaternion_core::from_euler_angles(frame.rotation_type.into(), frame.rotation_sequence.into(), [frame.angular_velocity.x, frame.angular_velocity.y, frame.angular_velocity.z]);
                     let vel_quat = isometry.rotation * UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k));
                     let vel_quat = (vel_quat.w, [vel_quat.i, vel_quat.j, vel_quat.k]);
@@ -258,26 +266,19 @@ async fn run_localizer(
 
                     let now = start.elapsed();
                     let delta = now - last_elapsed;
-                    count += 1;
-                    // sum += frame.acceleration + eskf.gravity;
-                    let new_sum = frame.acceleration;
-                    // info!("{:?} {:?}", new_sum.angle(&sum) / delta.as_secs_f64() / PI * 180.0, new_sum.cross(&sum).normalize());
-                    sum = new_sum;
-                    // info!("ang_vel: {:?}", frame.angular_velocity);
-                    // info!("delta: {:.4}", delta.as_secs_f32());
-                    // info!("{}", eskf.orientation);
                     eskf.predict(
                         frame.acceleration,
                         frame.angular_velocity,
                         delta
                     );
-                    // println!("{:.2}", (frame.acceleration - Vector3::y_axis().into_inner() * 9.81).y);
                     last_elapsed = now;
 
                     if eskf.velocity.x.is_nan() {
                         break;
                     }
 
+                    // Apply the predicted position, orientation, and velocity onto the robot base such that
+                    // other nodes can observe it.
                     bb.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
                     bb.robot_base.set_linear_velocity(eskf.velocity);
                 }
@@ -289,19 +290,21 @@ async fn run_localizer(
                         bb.position_recv_counter += 1;
                     }
 
+                    // Find the position of the robot base based on the observation of the position of an element
+                    // attached to the robot base.
                     let isometry = frame.robot_element.get_isometry_from_base().inverse();
                     frame.position = isometry * frame.position;
                     frame.variance = isometry.rotation.to_rotation_matrix() * frame.variance;
 
+                    // Observe either velocity or position from the observation
+                    // We probably only want to observe position
                     if let Some(mut velocity) = frame.velocity {
                         velocity = isometry * velocity;
-                        // info!("Tag vel: {:?}", velocity);
                         if let Err(e) = eskf.observe_velocity(velocity, frame.variance) {
                             error!("Failed to observe velocity: {e:#?}");
                             continue;
                         }
                     } else {
-                        // info!("Tag pos: {:?}", frame.position);
                         if let Err(e) = eskf.observe_position(frame.position, frame.variance) {
                             error!("Failed to observe position: {e:#?}");
                             continue;
@@ -312,28 +315,33 @@ async fn run_localizer(
                         break;
                     }
 
+                    // Apply the predicted position, orientation, and velocity onto the robot base such that
+                    // other nodes can observe it.
                     bb.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
                     bb.robot_base.set_linear_velocity(eskf.velocity);
                 }
                 (mut frame, orientation_sub_counter) = bb.orientation_sub.wait_for_change() => {
                     if orientation_sub_counter != bb.orientation_recv_counter {
-                        // warn!("Lagged behind by {} orientation frames", imu_recv_counter - orientation_sub_counter);
                         bb.orientation_recv_counter = orientation_sub_counter + 1;
                     } else {
                         bb.orientation_recv_counter += 1;
                     }
 
+                    // Find the orientation of the robot base based on the observation of the orientation of an element
+                    // attached to the robot base.
                     let isometry = frame.robot_element.get_isometry_from_base().inverse();
                     frame.orientation = isometry.rotation * frame.orientation;
                     frame.variance = isometry.rotation.to_rotation_matrix() * frame.variance;
 
-                    // info!("Tag orientation: {}", frame.orientation);
                     if let Err(e) = eskf.observe_orientation(frame.orientation, frame.variance) {
                         error!("Failed to observe orientation: {e:#?}");
                         continue;
                     }
 
+                    // Apply the predicted position, orientation, and velocity onto the robot base such that
+                    // other nodes can observe it.
                     bb.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
+                    bb.robot_base.set_linear_velocity(eskf.velocity);
                 }
             }
         }}=> {}
