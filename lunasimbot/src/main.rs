@@ -31,15 +31,23 @@ async fn main() -> anyhow::Result<()> {
     let costmap_ref = costmap.get_ref();
 
     let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
+    let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
     let video_maker = FnNode::new(|_| async move {
         let mut i = 0;
         loop {
             tokio::time::sleep(Duration::from_millis(42)).await;
-            let _ = costmap_ref.get_costmap_img().save(format!("img{i}.png"));
+            let costmap = costmap_ref.get_costmap();
+            let (img, max) = costmap_ref.matrix_to_img(costmap);
             i += 1;
+            let _ = img.save(format!("img{i}.png"));
+
             costmap_writer
-                .write_frame(costmap_ref.get_costmap_img().into())
+                .write_frame(img.into())
+                .unwrap();
+
+            subtitle_writer
+                .write_subtitle(format!("{max:.2}"))
                 .unwrap();
         }
     });
