@@ -1,10 +1,8 @@
-//! Signals are an essential component of many frameworks in many different disciplines.
+//! Publishers and Subscribers are an essential component of many frameworks in many different disciplines.
 //!
 //! This is one of the aspects taken from `ROS` that have been greatly improved. We offer
-//! an `API` for signals that is more similar to `Rust`'s iterators. Signals are analagous
+//! an `API` for pubsub that is more similar to `Rust`'s iterators. Signals are analagous
 //! to `Rust`'s channels in that they do not trigger code, unlike `ROS` subscriber callbacks.
-//! Signals in this crate also differ by having 3 different ways that they can be subscribed
-//! to depending on the needs of the code using it.
 
 use std::{
     io::Write,
@@ -23,31 +21,14 @@ use crate::logging::{dump::DataDump, START_TIME};
 /// An essential component that promotes separation of concerns, and is
 /// an intrinsic element of the ROS framework.
 ///
-/// Signals provide a simple way to send a message to receivers, much
-/// like Rust's channels. However, signals provide 3 different forms
-/// of subscriptions:
-///
-/// 1. **Unbounded**<br>
-///    The subscription will contain all sent messages forever and ever
-///    if it is never read from. If the receiving code can handle the same
-///    throughput that this signal produces, but the buffer size needed is
-///    unknown or highly variable, use this subscription.
-///
-/// 2. ****<br>
-///    The subscription will hold a limited number of messages before
-///    ignoring future messages until the current ones are read. If the
-///    receiving code may not be able to handle the same throughput that
-///    this signal produces, and can tolerate lost messages, use this
-///    subscription.
-///
-/// 3. **Watched**<br>
-///    The subscription will only keep track of the latest message. If you
-///    only need the latest value, use this subscription.
+/// Publishers provide a simple way to send a message to receivers, much
+/// like Rust's channels. These are analagous to single-producer-multi-consumer
+/// channels.
 ///
 /// Signals make numerous clones of the values it will send, so you should
 /// use a type `T` that is cheap to clone with this signal. A good default is
 /// `Arc`. Since Nodes will often be used from different threads, the type `T`
-/// should also be `Send + Sync`, but this is not a requirement.
+/// should also be `Send`.
 pub struct Publisher<T> {
     bounded_queues: Vec<Box<dyn Queue<T>>>,
     watch_sender: watch::Sender<()>,
@@ -63,22 +44,17 @@ impl<T> Default for Publisher<T> {
 }
 
 impl<T: Clone> Publisher<T> {
-    /// Sets a value into this signal.
+    /// Sets a value into this signal, allowing it to be received by Subscribers.
     ///
-    /// Unbounded and  Subscriptions will receive this value, and
-    /// Watched Subscriptions will replace their current values with this.
-    ///
-    /// This method takes an immutable reference as a convenience, but this
-    /// can be abused by nodes that do not own this signal. As a user of this
-    /// signal, ie. you are accessing this signal just to subscribe to it,
-    /// do not call this method ever. This will lead to spaghetti code. Only
-    /// the node that owns this signal should call this method.
+    /// Only the node that owns this signal should call this method.
     pub fn set(&mut self, value: T) {
         self.bounded_queues
             .retain(|queue| queue.push(value.clone()));
         self.watch_sender.send_replace(());
     }
 
+    /// Accepts a given subscription, allowing the corresponding `Subscriber` to
+    /// receive new messages.
     pub fn accept_subscription(&mut self, sub: Subscription<T>) {
         self.bounded_queues.push(sub.queue);
         (sub.subscriber)(self.watch_sender.subscribe());
@@ -111,6 +87,11 @@ struct SubscriptionInner<T> {
     watch: watch::Receiver<()>,
 }
 
+/// An essential companion to the `Publisher`.
+/// 
+/// Subscribers are bounded queues that can receive messages `T`
+/// from multiple Publishers concurrently. To subscribe to a `Publisher`,
+/// a `Subscriber` must create a subscription and pass that to the `Publisher`.
 pub struct Subscriber<T> {
     subscriptions: Vec<SubscriptionInner<T>>,
     rng: SmallRng,
@@ -125,13 +106,18 @@ impl<T> Default for Subscriber<T> {
     }
 }
 
+/// An object that must be passed to a `Publisher`, enabling the `Subscriber`
+/// that created the subscription to receive messages from that `Publisher`.
+/// 
+/// If dropped, no change will occur to the `Subscriber` and no resources will be leaked.
 pub struct Subscription<'a, T> {
     subscriber: Box<dyn FnOnce(watch::Receiver<()>) + 'a>,
     queue: Box<dyn Queue<T>>,
 }
 
 impl<T: Clone + Send + 'static> Subscriber<T> {
-    pub async fn recv_or_empty(&mut self) -> Option<T> {
+    /// Receive some message (waiting if none are available), or `None` if all `Publishers` have been dropped.
+    pub async fn recv_or_closed(&mut self) -> Option<T> {
         let mut futs = FuturesUnordered::new();
         self.subscriptions.shuffle(&mut self.rng);
 
@@ -157,6 +143,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         None
     }
 
+    /// Try to receive a message if one is available.
     pub fn try_recv(&mut self) -> Option<T> {
         self.subscriptions.shuffle(&mut self.rng);
 
@@ -170,14 +157,19 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         None
     }
 
+    /// Wait until a message is received, even if all `Publisher`s have been dropped.
     pub async fn recv(&mut self) -> T {
-        if let Some(x) = self.recv_or_empty().await {
+        if let Some(x) = self.recv_or_closed().await {
             x
         } else {
             std::future::pending().await
         }
     }
 
+    /// Convert this `Subscriber` into a logger that logs
+    /// all received messages formatted using the `display` function.
+    /// 
+    /// Logs are saved to `path` using a `DataDump`.
     pub async fn into_logger(
         mut self,
         mut display: impl FnMut(T) -> String + Send + 'static,
@@ -186,7 +178,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         let mut dump = DataDump::new_file(path).await?;
         tokio::spawn(async move {
             loop {
-                let Some(value) = self.recv_or_empty().await else {
+                let Some(value) = self.recv_or_closed().await else {
                     break;
                 };
                 let secs = START_TIME.get().unwrap().elapsed().as_secs_f32();
@@ -203,7 +195,10 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         Ok(())
     }
 
-    ///
+    /// Creates a `Subscription` that needs to be passed to a `Publisher`.
+    /// 
+    /// The final queue will have a maximum size of `size`.
+    /// 
     /// # Panics
     /// Panics if size is 0.
     pub fn create_subscription(&mut self, size: usize) -> Subscription<T> {
@@ -216,6 +211,9 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         }
     }
 
+    /// Converts this `Subscriber` into a `WatchSubscriber`.
+    /// 
+    /// Wait until a message is received, even if all `Publisher`s have been dropped.
     pub async fn into_watch(mut self) -> WatchSubscriber<T> {
         WatchSubscriber {
             value: self.recv().await,
@@ -223,6 +221,9 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         }
     }
 
+    /// Tries to convert this `Subscriber` into a `WatchSubscriber`.
+    /// 
+    /// If no message is available, this `Subscriber` will be returned.
     pub fn try_into_watch(mut self) -> Result<WatchSubscriber<T>, Self> {
         if let Some(value) = self.try_recv() {
             Ok(WatchSubscriber { value, inner: self })
@@ -231,8 +232,11 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         }
     }
 
+    /// Convert this `Subscriber` into a `WatchSubscriber`.
+    /// 
+    /// Wait until a message is received. If all `Publisher`s have been dropped this `Subscriber` will be returned.
     pub async fn into_watch_or_empty(mut self) -> Result<WatchSubscriber<T>, Self> {
-        if let Some(value) = self.recv_or_empty().await {
+        if let Some(value) = self.recv_or_closed().await {
             Ok(WatchSubscriber { value, inner: self })
         } else {
             Err(self)
@@ -241,6 +245,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
 }
 
 impl<'a, T: 'static> Subscription<'a, T> {
+    /// Changes the generic type of this `Subscription` using the given `map` function.
     pub fn map<V>(self, map: impl Fn(V) -> T + Send + Sync + 'static) -> Subscription<'a, V> {
         Subscription {
             subscriber: self.subscriber,
@@ -249,6 +254,10 @@ impl<'a, T: 'static> Subscription<'a, T> {
     }
 }
 
+/// A `Subscriber` that always stores the last received message, acting as a smart pointer for `T`.
+/// 
+/// Users must regularly call `update`, `update_or_closed`, or `try_update` to receive newer messages.
+#[derive(Default)]
 pub struct WatchSubscriber<T> {
     inner: Subscriber<T>,
     value: T,
@@ -269,16 +278,26 @@ impl<T> DerefMut for WatchSubscriber<T> {
 }
 
 impl<T: Clone + Send + 'static> WatchSubscriber<T> {
+    /// Creates a new `WatchSubscriber` initialized with the given value and no subscriptions.
+    pub fn new(value: T) -> Self {
+        Self {
+            inner: Subscriber::default(),
+            value
+        }
+    }
+
+    /// Wait until a message is received, even if all `Publisher`s have been dropped.
     pub async fn update(sub: &mut Self) {
         if !Self::try_update(sub) {
             sub.value = sub.inner.recv().await;
         }
     }
 
+    /// Wait for a new message (returning `true`), or return `false` if all `Publishers` have been dropped.
     pub async fn update_or_closed(sub: &mut Self) -> bool {
         if Self::try_update(sub) {
             true
-        } else if let Some(x) = sub.inner.recv_or_empty().await {
+        } else if let Some(x) = sub.inner.recv_or_closed().await {
             sub.value = x;
             true
         } else {
@@ -286,6 +305,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
         }
     }
 
+    /// Try receive new message (returning `true`), or return `false` if no messages are available.
     pub fn try_update(sub: &mut Self) -> bool {
         if Self::try_update_inner(sub) {
             while Self::try_update_inner(sub) {}
@@ -302,5 +322,30 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
         } else {
             false
         }
+    }
+
+    /// Creates a `Subscription` with a size of 1.
+    /// 
+    /// There is no benefit to having a queue size of more than 1.
+    pub fn create_subscription(&mut self) -> Subscription<T> {
+        let queue = Arc::new(ArrayQueue::new(1));
+        Subscription {
+            queue: Box::new(Arc::downgrade(&queue)),
+            subscriber: Box::new(move |watch| {
+                self.inner.subscriptions.push(SubscriptionInner { queue, watch })
+            }),
+        }
+    }
+
+    /// Convert this `WatchSubscriber` into a logger that logs
+    /// all received messages formatted using the `display` function.
+    /// 
+    /// Logs are saved to `path` using a `DataDump`.
+    pub async fn into_logger(
+        self,
+        display: impl FnMut(T) -> String + Send + 'static,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
+        self.inner.into_logger(display, path).await
     }
 }

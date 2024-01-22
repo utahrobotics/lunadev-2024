@@ -17,7 +17,7 @@ use unros_core::{
         iter::{
             IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
             ParallelIterator,
-        },
+        },pubsub
     },
     setup_logging,
     signal::{Subscriber, Subscription},

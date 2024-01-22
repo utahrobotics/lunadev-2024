@@ -8,7 +8,7 @@ use unros_core::{
     anyhow, async_trait,
     bytes::Bytes,
     setup_logging,
-    signal::{Publisher, Subscriber, Subscription},
+    pubsub::{Publisher, Subscriber, Subscription},
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},

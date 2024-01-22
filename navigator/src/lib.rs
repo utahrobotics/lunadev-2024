@@ -11,7 +11,7 @@ use pid::Pid;
 use rig::RobotBaseRef;
 use unros_core::{
     anyhow, async_trait,
-    signal::{Publisher, Subscription},
+    pubsub::{Publisher, Subscription},
     task::{Task, TaskHandle},
     tokio::{self, sync::oneshot},
     tokio_rayon, Node, RuntimeContext,

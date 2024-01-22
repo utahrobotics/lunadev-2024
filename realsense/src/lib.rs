@@ -36,7 +36,7 @@ use unros_core::{
         join,
     },
     setup_logging,
-    signal::{Publisher, SignalRef},
+    pubsub::{Publisher, SignalRef},
     tokio_rayon, DropCheck, Node, RuntimeContext,
 };
 

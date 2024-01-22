@@ -2,7 +2,7 @@ use global_msgs::Steering;
 use serial::SerialConnection;
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{Publisher, Subscriber, Subscription},
+    pubsub::{Publisher, Subscriber, Subscription},
     tokio, Node, RuntimeContext,
 };
 
@@ -40,7 +40,7 @@ impl Node for Drive {
 
         let handle = tokio::spawn(async move {
             'main: loop {
-                let Some(steering) = self.steering_sub.recv_or_empty().await else {
+                let Some(steering) = self.steering_sub.recv_or_closed().await else {
                     break Ok(());
                 };
                 write_signal.set(

@@ -3,7 +3,7 @@ use std::io::{stdin, stdout, BufRead, Write};
 use serial::SerialConnection;
 use unros_core::{
     anyhow, async_run_all,
-    bytes::Bytes,
+    bytes::Bytes,pubsub
     default_run_options,
     logging::init_logger,
     signal::{Publisher, Subscriber},

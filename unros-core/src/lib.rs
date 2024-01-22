@@ -27,7 +27,7 @@ use std::{
 };
 
 pub mod logging;
-pub mod signal;
+pub mod pubsub;
 pub mod task;
 
 pub use anyhow;

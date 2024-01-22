@@ -15,7 +15,7 @@ use nokhwa::{
 use unros_core::{
     anyhow::{self, Context},
     async_trait, setup_logging,
-    signal::{Publisher, Subscription},
+    pubsub::{Publisher, Subscription},
     tokio_rayon, Node, RuntimeContext,
 };
 

@@ -5,7 +5,7 @@ use unros_core::{
     anyhow::{self, Context},
     async_run_all, default_run_options,
     log::info,
-    signal::Subscriber,
+    signal:pubsubriber,
     tokio,
 };
 

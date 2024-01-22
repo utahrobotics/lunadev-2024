@@ -7,7 +7,7 @@ use rig::Robot;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
     logging::{dump::VideoDataDump, init_logger},
-    signal::Publisher,
+    pubsub::Publisher,
     tokio::{
         self,
         io::{AsyncReadExt, BufReader},

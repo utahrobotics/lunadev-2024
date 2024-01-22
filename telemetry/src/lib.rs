@@ -16,7 +16,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use unros_core::{
     anyhow, async_trait, log, setup_logging,
-    signal::{Publisher, Subscriber, Subscription},
+    pubsub::{Publisher, Subscriber, Subscription},
     tokio_rayon::{self},
     Node, RuntimeContext,
 };

@@ -16,7 +16,7 @@ use nalgebra::{Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{Publisher, Subscriber, Subscription},
+    pubsub::{Publisher, Subscriber, Subscription},
     tokio::{self, sync::mpsc::channel},
     tokio_rayon, Node, RuntimeContext,
 };

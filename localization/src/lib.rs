@@ -15,7 +15,7 @@ use rig::{RobotBase, RobotElementRef, RotationSequence, RotationType};
 use smach::{start_machine, Transition};
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{unbounded::UnboundedSubscription, watched::WatchedSubscription},
+    pubsub::{unbounded::UnboundedSubscription, watched::WatchedSubscription},
     tokio, Node, RuntimeContext,
 };
 
