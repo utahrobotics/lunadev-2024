@@ -6,7 +6,7 @@
 //! Signals in this crate also differ by having 3 different ways that they can be subscribed
 //! to depending on the needs of the code using it.
 
-use std::{sync::{Arc, Weak}, path::Path, io::Write};
+use std::{sync::{Arc, Weak}, path::Path, io::Write, ops::{Deref, DerefMut}};
 
 use crossbeam::queue::ArrayQueue;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -207,6 +207,35 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
             subscriber: Box::new(move |watch| self.subscriptions.push(SubscriptionInner { queue, watch })),
         }
     }
+
+    pub async fn into_watch(mut self) -> WatchSubscriber<T> {
+        WatchSubscriber {
+            value: self.recv().await,
+            inner: self
+        }
+    }
+
+    pub fn try_into_watch(mut self) -> Result<WatchSubscriber<T>, Self> {
+        if let Some(value) = self.try_recv() {
+            Ok(WatchSubscriber {
+                            value,
+                            inner: self
+                        })
+        } else {
+            Err(self)
+        }
+    }
+
+    pub async fn into_watch_or_empty(mut self) -> Result<WatchSubscriber<T>, Self> {
+        if let Some(value) = self.recv_or_empty().await {
+            Ok(WatchSubscriber {
+                            value,
+                            inner: self
+                        })
+        } else {
+            Err(self)
+        }
+    }
 }
 
 
@@ -215,6 +244,65 @@ impl<'a, T: 'static> Subscription<'a, T> {
         Subscription {
             subscriber: self.subscriber,
             queue: Box::new(move |x| self.queue.push(map(x))),
+        }
+    }
+}
+
+pub struct WatchSubscriber<T> {
+    inner: Subscriber<T>,
+    value: T
+}
+
+
+impl<T> Deref for WatchSubscriber<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+
+impl<T> DerefMut for WatchSubscriber<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
+    }
+}
+
+
+impl<T: Clone + Send + 'static> WatchSubscriber<T> {
+    pub async fn update(sub: &mut Self) {
+        if !Self::try_update(sub) {
+            sub.value = sub.inner.recv().await;
+        }
+    }
+
+    pub async fn update_or_closed(sub: &mut Self) -> bool {
+        if Self::try_update(sub) {
+            true
+        } else if let Some(x) = sub.inner.recv_or_empty().await {
+            sub.value = x;
+            true
+        } else {
+            false
+        }
+    }
+    
+    pub fn try_update(sub: &mut Self) -> bool {
+        if Self::try_update_inner(sub) {
+            while Self::try_update_inner(sub) {}
+            true
+        } else {
+            false
+        }
+    }
+    
+    fn try_update_inner(sub: &mut Self) -> bool {
+        if let Some(x) = sub.inner.try_recv() {
+            sub.value = x;
+            true
+        } else {
+            false
         }
     }
 }
