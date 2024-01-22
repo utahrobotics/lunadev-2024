@@ -11,7 +11,7 @@ use pid::Pid;
 use rig::RobotBaseRef;
 use unros_core::{
     anyhow, async_trait,
-    signal::{Signal, SignalRef},
+    signal::{Publisher, Subscription},
     task::{Task, TaskHandle},
     tokio::{self, sync::oneshot},
     tokio_rayon, Node, RuntimeContext,
@@ -79,7 +79,7 @@ impl Task for DrivingTask {
 
 pub struct WaypointDriver {
     driving_task: DrivingTask,
-    steering_signal: Signal<Steering>,
+    steering_signal: Publisher<Steering>,
     robot_base: RobotBaseRef,
     task_receiver: mpsc::Receiver<DrivingTaskInit>,
     steering_pid: Pid<f64>,
@@ -101,8 +101,8 @@ impl WaypointDriver {
         }
     }
 
-    pub fn get_steering_signal(&mut self) -> SignalRef<Steering> {
-        self.steering_signal.get_ref()
+    pub fn accept_steering_signal(&mut self, sub: Subscription<Steering>) {
+        self.steering_signal.accept_subscription(sub);
     }
 
     pub fn get_driving_task(&self) -> &DrivingTask {

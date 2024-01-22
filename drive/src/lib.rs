@@ -2,21 +2,25 @@ use global_msgs::Steering;
 use serial::SerialConnection;
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{watched::WatchedSubscription, Signal},
+    signal::{Publisher, Subscriber, Subscription},
     tokio, Node, RuntimeContext,
 };
 
 pub struct Drive {
     drive_controller: SerialConnection,
-    steering_sub: WatchedSubscription<Steering>,
+    steering_sub: Subscriber<Steering>,
 }
 
 impl Drive {
-    pub fn new(serial: SerialConnection, steering_sub: WatchedSubscription<Steering>) -> Self {
+    pub fn new(serial: SerialConnection) -> Self {
         Self {
             drive_controller: serial,
-            steering_sub,
+            steering_sub: Subscriber::default(),
         }
+    }
+
+    pub fn create_steering_sub(&mut self) -> Subscription<Steering> {
+        self.steering_sub.create_subscription(8)
     }
 }
 
@@ -28,17 +32,17 @@ impl Node for Drive {
         let context2 = context.clone();
         setup_logging!(context);
 
-        let mut write_signal = Signal::default();
-        self.drive_controller
-            .message_to_send_subscription(write_signal.get_ref().subscribe_bounded());
-        let mut read_sub = self
+        let mut write_signal = Publisher::default();
+        write_signal.accept_subscription(self.drive_controller
+            .create_message_to_send_sub());
+        let mut read_sub = Subscriber::default();
+        self
             .drive_controller
-            .get_msg_received_signal()
-            .subscribe_unbounded();
+            .accept_msg_received_sub(read_sub.create_subscription(8));
 
         let handle = tokio::spawn(async move {
             'main: loop {
-                let Some(steering) = self.steering_sub.changed_or_closed().await else {
+                let Some(steering) = self.steering_sub.recv_or_empty().await else {
                     break Ok(());
                 };
                 write_signal.set(

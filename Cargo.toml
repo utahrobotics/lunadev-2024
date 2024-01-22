@@ -3,13 +3,13 @@ members = [
     "unros-core",
     "telemetry",
     "global-msgs",
-    "lunabot",
+    # "lunabot",
     "drive",
     "camera",
     "apriltag",
     # If you do not have the RealSense SDK, remove the realsense member
     "realsense",
-    "localization",
+    # "localization",
     "serial",
     "navigator",
     "rig", "tools", "smach", "costmap", "smooth-diff-drive", "lunasimbot",
@@ -46,11 +46,11 @@ opt-level = 3
 [profile.dev.package.apriltag]
 opt-level = 3
 
-[profile.dev.package.localization]
-opt-level = 3
+# [profile.dev.package.localization]
+# opt-level = 3
 
 [profile.dev.package.camera]
 opt-level = 3
 
-[profile.dev.package.lunabot]
-opt-level = 3
+# [profile.dev.package.lunabot]
+# opt-level = 3

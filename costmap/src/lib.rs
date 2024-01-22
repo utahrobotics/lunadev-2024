@@ -17,8 +17,7 @@ use unros_core::{
         iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, IndexedParallelIterator},
     },
     setup_logging,
-    signal::unbounded::UnboundedSubscription,
-    Node, RuntimeContext,
+    Node, RuntimeContext, signal::{Subscriber, Subscription},
 };
 
 
@@ -36,7 +35,7 @@ pub struct Costmap {
     height_step: f32,
     x_offset: f32,
     y_offset: f32,
-    points_sub: UnboundedSubscription<Arc<[PointMeasurement]>>,
+    points_sub: Subscriber<Arc<[PointMeasurement]>>,
     heights: Arc<[AtomicUsize]>,
     counts: Arc<[AtomicUsize]>,
 }
@@ -58,7 +57,7 @@ impl Costmap {
             cell_width,
             x_offset,
             y_offset,
-            points_sub: UnboundedSubscription::none(),
+            points_sub: Subscriber::default(),
             heights: (0..(area_length * area_width))
                 .map(|_| Default::default())
                 .collect(),
@@ -68,10 +67,9 @@ impl Costmap {
         }
     }
 
-    pub fn add_points_sub<T: Send + IntoParallelIterator<Item = Point3<f32>> + 'static>(
-        &mut self,
-        sub: UnboundedSubscription<T>,
-    ) {
+    pub fn create_points_sub<T: Send + IntoParallelIterator<Item = Point3<f32>> + 'static>(
+        &mut self
+    ) -> Subscription<T> {
         let cell_width = self.cell_width;
         let area_width = self.area_width;
         let area_length = self.area_length;
@@ -79,7 +77,7 @@ impl Costmap {
         let y_offset = self.y_offset;
         let height_step = self.height_step;
 
-        self.points_sub += sub.map(move |x| {
+        self.points_sub.create_subscription(8).map(move |x: T| {
             x.into_par_iter()
                 .filter_map(|mut point| {
                     let height = (point.y / height_step).round() as usize;
@@ -105,7 +103,7 @@ impl Costmap {
                     Some(PointMeasurement { index: x * area_length + y, height })
                 })
                 .collect()
-        });
+        })
     }
 
     pub fn get_ref(&self) -> CostmapRef {

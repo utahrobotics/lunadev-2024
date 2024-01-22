@@ -1,12 +1,10 @@
-use std::{
-    io::{stdin, stdout, BufRead, Write},
-    sync::Arc,
-};
+use std::
+    io::{stdin, stdout, BufRead, Write};
 
 use serial::SerialConnection;
 use unros_core::{
-    anyhow, async_run_all, default_run_options, logging::init_logger, signal::Signal, tokio,
-    tokio_rayon, FnNode, RuntimeContext,
+    anyhow, async_run_all, default_run_options, logging::init_logger, signal::{Publisher, Subscriber}, tokio,
+    tokio_rayon, FnNode, RuntimeContext, bytes::Bytes,
 };
 
 #[tokio::main]
@@ -15,7 +13,8 @@ async fn main() -> anyhow::Result<()> {
     init_logger(&run_options)?;
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
     let mut serial = SerialConnection::new("/dev/ttyACM1".into(), 115200, true).await;
-    let mut sub = serial.get_msg_received_signal().subscribe_unbounded();
+    let mut sub = Subscriber::<Bytes>::default();
+    serial.accept_msg_received_sub(sub.create_subscription(8));
     tokio::spawn(async move {
         loop {
             let x = sub.recv().await;
@@ -27,9 +26,9 @@ async fn main() -> anyhow::Result<()> {
             stdout.flush().expect("Stdout should have been flushable");
         }
     });
-    let mut write_signal: Signal<_> = Default::default();
-    serial.message_to_send_subscription(write_signal.get_ref().subscribe_bounded());
-    let write_signal = Arc::new(write_signal);
+    let mut write_signal: Publisher<_> = Default::default();
+    write_signal.accept_subscription(serial.create_message_to_send_sub());
+    // let write_signal = Arc::new(write_signal);
 
     let fn_node = FnNode::new(move |_context: RuntimeContext| async {
         tokio_rayon::spawn(move || {
@@ -42,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
                 stdin.read_line(&mut line)?;
                 line += "\r";
                 let line = line.clone().into_bytes();
-                let write_signal = write_signal.clone();
+                // let write_signal = write_signal.clone();
                 write_signal.set(line.into());
             }
         })

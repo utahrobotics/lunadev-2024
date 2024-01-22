@@ -57,6 +57,7 @@ macro_rules! setup_logging {
 }
 
 static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
+pub(crate) static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 /// Initializes the default logging implementation.
 ///
@@ -100,11 +101,11 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             .create(&log_folder_name)
             .context("Failed to create sub-logging directory. Do we have permissions?")?;
 
-        let start_time = Instant::now();
+        let _ = START_TIME.set(Instant::now());
 
         fern::Dispatch::new()
             .format(move |out, message, record| {
-                let secs = start_time.elapsed().as_secs_f32();
+                let secs = START_TIME.get().unwrap().elapsed().as_secs_f32();
                 out.finish(format_args!(
                     "[{:0>1}:{:.2} {} {}] {}",
                     (secs / 60.0).floor(),

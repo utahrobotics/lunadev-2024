@@ -2604,20 +2604,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
-name = "las"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6021d378135165202cd287627dd6fbb25fb80cc740adf72ce5576fab1946a4c3"
-dependencies = [
- "byteorder",
- "chrono",
- "log",
- "num-traits",
- "thiserror",
- "uuid",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2733,24 +2719,6 @@ name = "log"
 version = "0.4.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
-
-[[package]]
-name = "lunabot"
-version = "0.1.0"
-dependencies = [
- "apriltag 0.1.0",
- "costmap",
- "fxhash",
- "las",
- "localization",
- "nalgebra",
- "navigator",
- "realsense",
- "rig",
- "telemetry",
- "toml",
- "unros-core",
-]
 
 [[package]]
 name = "lunasimbot"

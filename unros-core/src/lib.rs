@@ -13,7 +13,7 @@
 //! 4. Signals, with 3 subscription variants (analagous to ROS publisher and subscribers)
 //! 5. The Task trait (analagous to ROS actions)
 
-#![feature(associated_type_defaults, once_cell_try)]
+#![feature(associated_type_defaults, once_cell_try, iter_collect_into)]
 
 use std::{
     future::Future,

@@ -16,7 +16,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use unros_core::{
     anyhow, async_trait, log, setup_logging,
-    signal::{bounded::BoundedSubscription, Signal, SignalRef},
+    signal::{Publisher, Subscriber, Subscription},
     tokio_rayon::{self},
     Node, RuntimeContext,
 };
@@ -43,8 +43,8 @@ enum ImportantMessage {
 pub struct Telemetry {
     pub bandwidth_limit: u32,
     pub server_addr: Address,
-    steering_signal: Signal<Steering>,
-    image_subscriptions: BoundedSubscription<Arc<DynamicImage>, 8>,
+    steering_signal: Publisher<Steering>,
+    image_subscriptions: Subscriber<Arc<DynamicImage>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
 }
 
@@ -54,17 +54,16 @@ impl Telemetry {
             bandwidth_limit: 0,
             server_addr: server_addr.into(),
             steering_signal: Default::default(),
-            image_subscriptions: BoundedSubscription::none(),
-            // image_queue: Arc::new(SegQueue::new()),
+            image_subscriptions: Subscriber::default(),
             packet_queue: SegQueue::new(),
         }
     }
 
-    pub fn get_steering_signal(&mut self) -> SignalRef<Steering> {
-        self.steering_signal.get_ref()
+    pub fn accept_steering_sub(&mut self, sub: Subscription<Steering>) {
+        self.steering_signal.accept_subscription(sub);
     }
 
-    fn receive_packet(&self, channel: u8, packet: Box<[u8]>, context: &RuntimeContext) {
+    fn receive_packet(&mut self, channel: u8, packet: Box<[u8]>, context: &RuntimeContext) {
         setup_logging!(context);
         let Ok(channel) = Channels::try_from(channel) else {
             error!("Received invalid channel: {channel}");
@@ -241,8 +240,7 @@ impl Node for Telemetry {
                     while let Some((body, mode, channel)) = self.packet_queue.pop() {
                         peer.send_packet(Packet::new(&body, mode)?, channel as u8)?;
                     }
-                    while let Some(result) = self.image_subscriptions.try_recv() {
-                        let Ok(img) = result else { continue };
+                    while let Some(img) = self.image_subscriptions.try_recv() {
                         let img = webp::Encoder::from_image(&img)
                             .map_err(|e| {
                                 anyhow::anyhow!("Failed to encode image frame to webp: {e}")

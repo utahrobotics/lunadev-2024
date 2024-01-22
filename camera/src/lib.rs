@@ -15,7 +15,7 @@ use nokhwa::{
 use unros_core::{
     anyhow::{self, Context},
     async_trait, setup_logging,
-    signal::{Signal, SignalRef},
+    signal::{Publisher, Subscription},
     tokio_rayon, Node, RuntimeContext,
 };
 
@@ -27,7 +27,7 @@ pub struct Camera {
     pub camera_index: u32,
     pub res_x: u32,
     pub res_y: u32,
-    image_received: Signal<Arc<DynamicImage>>,
+    image_received: Publisher<Arc<DynamicImage>>,
 }
 
 impl Camera {
@@ -43,8 +43,8 @@ impl Camera {
     }
 
     /// Gets a reference to the `Signal` that represents received images.
-    pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
-        self.image_received.get_ref()
+    pub fn accept_image_received_sub(&mut self, sub: Subscription<Arc<DynamicImage>>) {
+        self.image_received.accept_subscription(sub);
     }
 }
 

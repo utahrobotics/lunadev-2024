@@ -36,7 +36,7 @@ use unros_core::{
         join,
     },
     setup_logging,
-    signal::{Signal, SignalRef},
+    signal::{Publisher, SignalRef},
     tokio_rayon, DropCheck, Node, RuntimeContext,
 };
 
@@ -64,9 +64,9 @@ impl PointCloud {
 pub struct RealSenseCamera {
     device: Device,
     context: Arc<Mutex<Context>>,
-    image_received: Signal<Arc<DynamicImage>>,
-    point_cloud_received: Signal<PointCloud>,
-    imu_frame_received: Signal<IMUFrame>,
+    image_received: Publisher<Arc<DynamicImage>>,
+    point_cloud_received: Publisher<PointCloud>,
+    imu_frame_received: Publisher<IMUFrame>,
     robot_element: Option<RobotElementRef>,
     pub focal_length_frac: f32,
     pub min_distance: f32,

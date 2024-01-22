@@ -7,7 +7,7 @@ use rig::Robot;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
     logging::{dump::VideoDataDump, init_logger},
-    signal::Signal,
+    signal::Publisher,
     tokio::{
         self,
         io::{AsyncReadExt, BufReader},
@@ -25,9 +25,9 @@ async fn main() -> anyhow::Result<()> {
     let (_, robot_base) = rig.destructure::<FxBuildHasher>([])?;
 
     let mut costmap = Costmap::new(40, 40, 0.5, 10.0, 10.0, 0.01);
-    let mut points_signal = Signal::<Vec<Point3<f32>>>::default();
+    let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
-    costmap.add_points_sub(points_signal.get_ref().subscribe_unbounded());
+    points_signal.accept_subscription(costmap.create_points_sub());
     let costmap_ref = costmap.get_ref();
 
     let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;

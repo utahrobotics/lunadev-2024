@@ -7,8 +7,8 @@ use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros_core::{
     anyhow, async_trait,
     bytes::Bytes,
-    log, setup_logging,
-    signal::{bounded::BoundedSubscription, watched::WatchedSubscription, Signal, SignalRef},
+    setup_logging,
+    signal::{Publisher, Subscription, Subscriber},
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
@@ -22,8 +22,8 @@ use unros_core::{
 pub struct SerialConnection {
     path: Arc<str>,
     baud_rate: u32,
-    msg_received: Option<Signal<Bytes>>,
-    messages_to_send: Arc<Mutex<BoundedSubscription<Bytes, 64>>>,
+    msg_received: Option<Publisher<Bytes>>,
+    messages_to_send: Arc<Mutex<Subscriber<Bytes>>>,
     tolerate_error: bool,
 }
 
@@ -38,7 +38,7 @@ impl SerialConnection {
             path: path.into_boxed_str().into(),
             baud_rate,
             msg_received: Some(Default::default()),
-            messages_to_send: Arc::new(Mutex::new(BoundedSubscription::none())),
+            messages_to_send: Arc::new(Mutex::new(Subscriber::default())),
             tolerate_error,
         }
     }
@@ -78,13 +78,13 @@ impl SerialConnection {
     }
 
     /// Gets a reference to the `Signal` that represents received `Bytes`.
-    pub fn get_msg_received_signal(&mut self) -> SignalRef<Bytes> {
-        self.msg_received.as_mut().unwrap().get_ref()
+    pub fn accept_msg_received_sub(&mut self, sub: Subscription<Bytes>) {
+        self.msg_received.as_mut().unwrap().accept_subscription(sub);
     }
 
     /// Provide a subscription whose messages will be written to the serial port.
-    pub fn message_to_send_subscription(&mut self, sub: BoundedSubscription<Bytes, 64>) {
-        *Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut() += sub;
+    pub fn create_message_to_send_sub(&mut self) -> Subscription<Bytes> {
+        Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut().create_subscription(8)
     }
 }
 
@@ -95,7 +95,7 @@ impl Node for SerialConnection {
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
-        let msg_received = Arc::new(self.msg_received.take().unwrap());
+        let msg_received = Arc::new(std::sync::Mutex::new(self.msg_received.take().unwrap()));
 
         loop {
             let Some(stream) = self.connect(&context).await? else {
@@ -113,7 +113,7 @@ impl Node for SerialConnection {
                 loop {
                     let n = reader.read(&mut buf).await?;
                     let bytes = buf.split_at(n).0.to_vec();
-                    msg_received.set(bytes.into());
+                    msg_received.lock().unwrap().set(bytes.into());
                 }
             });
             let messages_to_send = self.messages_to_send.clone();
@@ -121,7 +121,7 @@ impl Node for SerialConnection {
             tasks.spawn(async move {
                 let mut messages_to_send = messages_to_send.lock().await;
                 loop {
-                    let msg = messages_to_send.recv().await.unwrap();
+                    let msg = messages_to_send.recv().await;
                     writer.write_all(&msg).await?;
                 }
             });
@@ -146,7 +146,7 @@ impl Node for SerialConnection {
 }
 
 struct VescReader {
-    recv: BoundedSubscription<Bytes, 32>,
+    recv: Subscriber<Bytes>,
     buffer: VecDeque<u8>,
 }
 
@@ -154,11 +154,8 @@ impl embedded_hal::serial::Read<u8> for VescReader {
     type Error = ();
 
     fn read(&mut self) -> nb::Result<u8, Self::Error> {
-        if let Some(result) = self.recv.try_recv() {
-            match result {
-                Ok(msg) => self.buffer.extend(msg.into_iter()),
-                Err(n) => log::warn!("Lagged by {n} messages"),
-            }
+        if let Some(msg) = self.recv.try_recv() {
+            self.buffer.extend(msg.into_iter());
         }
         self.buffer.pop_back().ok_or(nb::Error::WouldBlock)
     }
@@ -166,7 +163,7 @@ impl embedded_hal::serial::Read<u8> for VescReader {
 
 #[derive(Default)]
 struct VescWriter {
-    signal: Signal<Bytes>,
+    signal: Publisher<Bytes>,
     buffer: Vec<u8>,
 }
 
@@ -188,8 +185,8 @@ impl embedded_hal::serial::Write<u8> for VescWriter {
 /// A single `VESC` connection to a serial port.
 pub struct VescConnection {
     serial: SerialConnection,
-    current: WatchedSubscription<u32>,
-    duty: WatchedSubscription<u32>,
+    current: Subscriber<u32>,
+    duty: Subscriber<u32>,
 }
 
 impl VescConnection {
@@ -199,23 +196,19 @@ impl VescConnection {
     pub fn new(serial: SerialConnection) -> Self {
         Self {
             serial,
-            current: WatchedSubscription::none(),
-            duty: WatchedSubscription::none(),
+            current: Subscriber::default(),
+            duty: Subscriber::default(),
         }
     }
 
     /// Provide a subscription for the current level.
-    ///
-    /// This will replace the last subscription provided.
-    pub fn connect_current_from(&mut self, sub: WatchedSubscription<u32>) {
-        self.current = sub;
+    pub fn connect_current_from(&mut self) -> Subscription<u32> {
+        self.current.create_subscription(32)
     }
 
     /// Provide a subscription for the duty cycle.
-    ///
-    /// This will replace the last subscription provided.
-    pub fn connect_duty_from(&mut self, sub: WatchedSubscription<u32>) {
-        self.duty = sub;
+    pub fn connect_duty_from(&mut self) -> Subscription<u32> {
+        self.current.create_subscription(32)
     }
 }
 
@@ -225,12 +218,12 @@ impl Node for VescConnection {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         let mut writer = VescWriter::default();
-        self.serial
-            .message_to_send_subscription(writer.signal.get_ref().subscribe_bounded());
-        let vesc_reader = VescReader {
-            recv: self.serial.get_msg_received_signal().subscribe_bounded(),
+        writer.signal.accept_subscription(self.serial.create_message_to_send_sub());
+        let mut vesc_reader = VescReader {
+            recv: Subscriber::default(),
             buffer: Default::default(),
         };
+        self.serial.accept_msg_received_sub(vesc_reader.recv.create_subscription(8));
         let mut vesc = vesc_comm::VescConnection::new(vesc_reader, writer);
 
         tokio::select! {
@@ -238,10 +231,10 @@ impl Node for VescConnection {
             _ = async {
                 loop {
                     tokio::select! {
-                        current = self.current.wait_for_change() => {
+                        current = self.current.recv() => {
                             vesc.set_current(current).expect("Setting current should have not panicked");
                         }
-                        duty = self.duty.wait_for_change() => {
+                        duty = self.duty.recv() => {
                             vesc.set_duty(duty).expect("Setting duty should have not panicked");
                         }
                     }

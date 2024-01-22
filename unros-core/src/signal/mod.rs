@@ -6,130 +6,14 @@
 //! Signals in this crate also differ by having 3 different ways that they can be subscribed
 //! to depending on the needs of the code using it.
 
-use std::{collections::hash_map::Entry, num::NonZeroU32};
+use std::{sync::{Arc, Weak}, path::Path, io::Write};
 
-use async_trait::async_trait;
-use fxhash::FxHashMap;
-use rand::{rngs::SmallRng, SeedableRng};
-use tokio::sync::{broadcast, mpsc, watch};
+use crossbeam::queue::ArrayQueue;
+use futures::{stream::FuturesUnordered, StreamExt};
+use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
+use tokio::sync::watch;
 
-use self::{
-    bounded::BoundedSubscription, unbounded::UnboundedSubscription, watched::WatchedSubscription,
-};
-
-pub mod bounded;
-pub mod unbounded;
-pub mod watched;
-
-#[async_trait]
-trait ChannelTrait<T>: Send + Sync + 'static {
-    fn source_count(&self) -> usize;
-
-    async fn recv_or_closed(&mut self) -> Option<T>;
-    async fn recv(&mut self) -> T;
-    // fn blocking_recv(&mut self) -> Option<T>;
-
-    fn try_recv(&mut self) -> Option<T>;
-}
-
-struct MappedChannel<T, S> {
-    source: Box<dyn ChannelTrait<S>>,
-    mapper: Box<dyn FnMut(S) -> T + Send + Sync>,
-}
-
-#[async_trait]
-impl<T: 'static, S: 'static> ChannelTrait<T> for MappedChannel<T, S> {
-    fn source_count(&self) -> usize {
-        self.source.source_count()
-    }
-
-    async fn recv_or_closed(&mut self) -> Option<T> {
-        self.source.recv_or_closed().await.map(|x| (self.mapper)(x))
-    }
-
-    async fn recv(&mut self) -> T {
-        (self.mapper)(self.source.recv().await)
-    }
-
-    // fn blocking_recv(&mut self) -> Option<T> {
-    //     self.source.blocking_recv().map(|x| (self.mapper)(x))
-    // }
-
-    fn try_recv(&mut self) -> Option<T> {
-        self.source.try_recv().map(|x| (self.mapper)(x))
-    }
-}
-
-struct ZippedChannel<A, B> {
-    source_a: Box<dyn ChannelTrait<A>>,
-    item_a: Option<A>,
-    source_b: Box<dyn ChannelTrait<B>>,
-    item_b: Option<B>,
-}
-
-#[async_trait]
-impl<A, B> ChannelTrait<(A, B)> for ZippedChannel<A, B>
-where
-    A: Clone + Send + Sync + 'static,
-    B: Clone + Send + Sync + 'static,
-{
-    fn source_count(&self) -> usize {
-        self.source_a.source_count() + self.source_b.source_count()
-    }
-
-    async fn recv_or_closed(&mut self) -> Option<(A, B)> {
-        loop {
-            tokio::select! {
-                new_item_a = self.source_a.recv_or_closed() => {
-                    let new_item_a = new_item_a?;
-                    self.item_a = Some(new_item_a);
-                }
-                new_item_b = self.source_b.recv_or_closed() => {
-                    let new_item_b = new_item_b?;
-                    self.item_b = Some(new_item_b);
-                }
-            }
-            if let Some(item_a) = &self.item_a {
-                if let Some(item_b) = &self.item_b {
-                    break Some((item_a.clone(), item_b.clone()));
-                }
-            }
-        }
-    }
-
-    async fn recv(&mut self) -> (A, B) {
-        loop {
-            tokio::select! {
-                new_item_a = self.source_a.recv() => {
-                    self.item_a = Some(new_item_a);
-                }
-                new_item_b = self.source_b.recv() => {
-                    self.item_b = Some(new_item_b);
-                }
-            }
-            if let Some(item_a) = &self.item_a {
-                if let Some(item_b) = &self.item_b {
-                    break (item_a.clone(), item_b.clone());
-                }
-            }
-        }
-    }
-
-    fn try_recv(&mut self) -> Option<(A, B)> {
-        if let Some(new_item_a) = self.source_a.try_recv() {
-            self.item_a = Some(new_item_a);
-        }
-        if let Some(new_item_b) = self.source_b.try_recv() {
-            self.item_b = Some(new_item_b);
-        }
-        if let Some(item_a) = &self.item_a {
-            if let Some(item_b) = &self.item_b {
-                return Some((item_a.clone(), item_b.clone()));
-            }
-        }
-        None
-    }
-}
+use crate::logging::{dump::DataDump, START_TIME};
 
 /// An essential component that promotes separation of concerns, and is
 /// an intrinsic element of the ROS framework.
@@ -144,7 +28,7 @@ where
 ///    throughput that this signal produces, but the buffer size needed is
 ///    unknown or highly variable, use this subscription.
 ///
-/// 2. **Bounded**<br>
+/// 2. ****<br>
 ///    The subscription will hold a limited number of messages before
 ///    ignoring future messages until the current ones are read. If the
 ///    receiving code may not be able to handle the same throughput that
@@ -159,33 +43,24 @@ where
 /// use a type `T` that is cheap to clone with this signal. A good default is
 /// `Arc`. Since Nodes will often be used from different threads, the type `T`
 /// should also be `Send + Sync`, but this is not a requirement.
-pub struct Signal<T> {
-    unbounded_senders: Vec<mpsc::UnboundedSender<T>>,
-    bounded_senders: FxHashMap<NonZeroU32, broadcast::Sender<T>>,
-    watch_sender: Option<watch::Sender<Option<T>>>,
+pub struct Publisher<T> {
+    bounded_queues: Vec<Box<dyn Queue<T>>>,
+    watch_sender: watch::Sender<()>,
 }
 
-impl<T> Default for Signal<T> {
+impl<T> Default for Publisher<T> {
     fn default() -> Self {
         Self {
-            unbounded_senders: Default::default(),
-            bounded_senders: Default::default(),
-            watch_sender: None,
+            bounded_queues: Default::default(),
+            watch_sender: watch::channel(()).0,
         }
     }
 }
 
-impl<T: Clone> Signal<T> {
-    /// Gets a mutable reference to the signal.
-    ///
-    /// It is through this reference that you can make subscriptions.
-    pub fn get_ref(&mut self) -> SignalRef<T> {
-        SignalRef(self)
-    }
-
+impl<T: Clone> Publisher<T> {
     /// Sets a value into this signal.
     ///
-    /// Unbounded and Bounded Subscriptions will receive this value, and
+    /// Unbounded and  Subscriptions will receive this value, and
     /// Watched Subscriptions will replace their current values with this.
     ///
     /// This method takes an immutable reference as a convenience, but this
@@ -193,82 +68,153 @@ impl<T: Clone> Signal<T> {
     /// signal, ie. you are accessing this signal just to subscribe to it,
     /// do not call this method ever. This will lead to spaghetti code. Only
     /// the node that owns this signal should call this method.
-    pub fn set(&self, value: T) {
-        for sender in &self.unbounded_senders {
-            let _ = sender.send(value.clone());
-        }
-        for sender in self.bounded_senders.values() {
-            let _ = sender.send(value.clone());
-        }
-        if let Some(watch_sender) = &self.watch_sender {
-            watch_sender.send_replace(Some(value));
+    pub fn set(&mut self, value: T) {
+        self.bounded_queues.retain(|queue|
+            queue.push(value.clone())
+        );
+        self.watch_sender.send_replace(());
+    }
+
+    pub fn accept_subscription(&mut self, sub: Subscription<T>) {
+        self.bounded_queues.push(sub.queue);
+        (sub.subscriber)(self.watch_sender.subscribe());
+    }
+}
+
+
+trait Queue<T>: Send + Sync {
+    fn push(&self, value: T) -> bool;
+}
+
+
+impl<T: Send> Queue<T> for Weak<ArrayQueue<T>> {
+    fn push(&self, value: T) -> bool {
+        if let Some(queue) = self.upgrade() {
+            queue.force_push(value);
+            true
+        } else {
+            false
         }
     }
 }
 
-/// A mutable reference to a signal.
-///
-/// This is the only way to make subscriptions to a signal.
-/// This approach was used to reduce the odds of code outside
-/// of the code owning a `Signal` having a direct reference
-/// to the `Signal` itself, allowing them to `set` the `Signal`
-/// externally, which is an anti-pattern.
-pub struct SignalRef<'a, T>(&'a mut Signal<T>);
 
-impl<'a, T: Clone + Send + Sync + 'static> SignalRef<'a, T> {
-    /// Create an unbounded subscription to the `Signal` that stores
-    /// all sent messages until they are read.
-    ///
-    /// If you cannot guarantee that you can read from this subscription
-    /// faster than messages are sent, you should not use this subscription
-    /// as it will eat up memory.
-    pub fn subscribe_unbounded(&mut self) -> UnboundedSubscription<T> {
-        let (sender, recv) = mpsc::unbounded_channel();
-        self.0.unbounded_senders.push(sender);
-
-        UnboundedSubscription {
-            receivers: vec![Box::new(recv)],
-            rng: SmallRng::from_entropy(),
-        }
+impl<T, F: Fn(T) -> bool + Send + Sync> Queue<T> for F {
+    fn push(&self, value: T) -> bool {
+        self(value)
     }
+}
 
-    /// Create an bounded subscription to the `Signal` that stores
-    /// a limited number of messages (the `SIZE` const parameter)
-    ///
-    /// If you cannot guarantee that you can read from this subscription
-    /// faster than messages are sent, you should use this subscription
-    /// as it will prevent newer messages from entering. As a result, this
-    /// subscription will return an error when used if it identifies that
-    /// messages have been blocked.
-    pub fn subscribe_bounded<const SIZE: u32>(&mut self) -> BoundedSubscription<T, SIZE> {
-        let recv = match self.0.bounded_senders.entry(
-            NonZeroU32::new(SIZE).expect("Size of BoundedSubscription should be greater than 0"),
-        ) {
-            Entry::Occupied(x) => x.get().subscribe(),
-            Entry::Vacant(x) => {
-                let (sender, recv) = broadcast::channel(SIZE as usize);
-                x.insert(sender);
-                recv
+
+struct SubscriptionInner<T> {
+    queue: Arc<ArrayQueue<T>>,
+    watch: watch::Receiver<()>
+}
+
+
+pub struct Subscriber<T> {
+    subscriptions: Vec<SubscriptionInner<T>>,
+    rng: SmallRng
+}
+
+
+impl<T> Default for Subscriber<T> {
+    fn default() -> Self {
+        Self { subscriptions: Default::default(), rng: SmallRng::from_entropy() }
+    }
+}
+
+
+pub struct Subscription<'a, T> {
+    subscriber: Box<dyn FnOnce(watch::Receiver<()>) + 'a>,
+    queue: Box<dyn Queue<T>>
+}
+
+
+impl<T: Clone + Send + 'static> Subscriber<T> {
+    pub async fn recv_or_empty(&mut self) -> Option<T> {
+        let mut futs = FuturesUnordered::new();
+        self.subscriptions.shuffle(&mut self.rng);
+
+        for sub in &mut self.subscriptions {
+            if let Some(x) = sub.queue.pop() {
+                sub.watch.mark_changed();
+                return Some(x);
             }
-        };
-        BoundedSubscription {
-            receivers: vec![Box::new(recv)],
-            rng: SmallRng::from_entropy(),
+            futs.push(async {
+                if sub.watch.changed().await.is_ok() {
+                    Some(sub.queue.pop().unwrap())
+                } else {
+                    None
+                }
+            });
+        }
+
+        while let Some(x) = futs.next().await {
+            if x.is_some() {
+                return x;
+            }
+        }
+        None
+    }
+
+    pub fn try_recv(&mut self) -> Option<T> {
+        self.subscriptions.shuffle(&mut self.rng);
+
+        for sub in &mut self.subscriptions {
+            if let Some(x) = sub.queue.pop() {
+                sub.watch.mark_changed();
+                return Some(x);
+            }
+        }
+
+        None
+    }
+
+    pub async fn recv(&mut self) -> T {
+        if let Some(x) = self.recv_or_empty().await {
+            x
+        } else {
+            std::future::pending().await
         }
     }
 
-    /// Create a subscription that only tracks the latest value.
+    pub async fn into_logger(mut self, mut display: impl FnMut(T) -> String + Send + 'static, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let mut dump = DataDump::new_file(path).await?;
+        tokio::spawn(async move {
+            loop {
+                let Some(value) = self.recv_or_empty().await else { break; };
+                let secs = START_TIME.get().unwrap().elapsed().as_secs_f32();
+                writeln!(
+                    dump,
+                    "[{:0>1}:{:.2}] {}",
+                    (secs / 60.0).floor(),
+                    secs % 60.0,
+                    display(value)
+                ).unwrap();
+            }
+        });
+        Ok(())
+    }
+
     ///
-    /// This is generally the most performant option as it will never use
-    /// up a lot of memory when many messages are incoming but not many reads
-    /// are occurring.
-    pub fn watch(&mut self) -> WatchedSubscription<T> {
-        let watch_sender = self
-            .0
-            .watch_sender
-            .get_or_insert_with(|| watch::channel(None).0);
-        WatchedSubscription {
-            recv: Some(Box::new(watch_sender.subscribe())),
+    /// # Panics
+    /// Panics if size is 0.
+    pub fn create_subscription(&mut self, size: usize) -> Subscription<T> {
+        let queue = Arc::new(ArrayQueue::new(size));
+        Subscription {
+            queue: Box::new(Arc::downgrade(&queue)),
+            subscriber: Box::new(move |watch| self.subscriptions.push(SubscriptionInner { queue, watch })),
+        }
+    }
+}
+
+
+impl<'a, T: 'static> Subscription<'a, T> {
+    pub fn map<V>(self, map: impl Fn(V) -> T + Send + Sync + 'static) -> Subscription<'a, V> {
+        Subscription {
+            subscriber: self.subscriber,
+            queue: Box::new(move |x| self.queue.push(map(x))),
         }
     }
 }

@@ -16,7 +16,7 @@ use nalgebra::{Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros_core::{
     anyhow, async_trait, setup_logging,
-    signal::{watched::WatchedSubscription, Signal, SignalRef},
+    signal::{Publisher, Subscriber, Subscription},
     tokio::{self, sync::mpsc::channel},
     tokio_rayon, Node, RuntimeContext,
 };
@@ -66,8 +66,8 @@ struct KnownTag {
 /// Actual detection does not occur until the node
 /// is running.
 pub struct AprilTagDetector {
-    image_sub: WatchedSubscription<Arc<DynamicImage>>,
-    tag_detected: Signal<PoseObservation>,
+    image_sub: Subscriber<Arc<DynamicImage>>,
+    tag_detected: Publisher<PoseObservation>,
     known_tags: FxHashMap<usize, KnownTag>,
     focal_length_px: f64,
     image_width: u32,
@@ -90,11 +90,10 @@ impl AprilTagDetector {
         focal_length_px: f64,
         image_width: u32,
         image_height: u32,
-        image_sub: WatchedSubscription<Arc<DynamicImage>>,
         robot_element: RobotElementRef,
     ) -> Self {
         Self {
-            image_sub,
+            image_sub: Subscriber::default(),
             tag_detected: Default::default(),
             known_tags: Default::default(),
             focal_length_px,
@@ -133,8 +132,8 @@ impl AprilTagDetector {
     }
 
     /// Gets a reference to the `Signal` that represents detected tags.
-    pub fn tag_detected_signal(&mut self) -> SignalRef<PoseObservation> {
-        self.tag_detected.get_ref()
+    pub fn accept_tag_detected_sub(&mut self, sub: Subscription<PoseObservation>) {
+        self.tag_detected.accept_subscription(sub);
     }
 }
 
@@ -252,7 +251,7 @@ impl Node for AprilTagDetector {
 
         loop {
             tokio::select! {
-                img = self.image_sub.wait_for_change() => {
+                img = self.image_sub.recv() => {
                     let _ = img_sender.try_send(img);
                 }
                 result = err_receiver.recv() => {
