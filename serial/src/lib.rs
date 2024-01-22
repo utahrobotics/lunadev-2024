@@ -8,7 +8,7 @@ use unros_core::{
     anyhow, async_trait,
     bytes::Bytes,
     setup_logging,
-    signal::{Publisher, Subscription, Subscriber},
+    signal::{Publisher, Subscriber, Subscription},
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
@@ -84,7 +84,10 @@ impl SerialConnection {
 
     /// Provide a subscription whose messages will be written to the serial port.
     pub fn create_message_to_send_sub(&mut self) -> Subscription<Bytes> {
-        Arc::get_mut(&mut self.messages_to_send).unwrap().get_mut().create_subscription(8)
+        Arc::get_mut(&mut self.messages_to_send)
+            .unwrap()
+            .get_mut()
+            .create_subscription(8)
     }
 }
 
@@ -218,12 +221,15 @@ impl Node for VescConnection {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         let mut writer = VescWriter::default();
-        writer.signal.accept_subscription(self.serial.create_message_to_send_sub());
+        writer
+            .signal
+            .accept_subscription(self.serial.create_message_to_send_sub());
         let mut vesc_reader = VescReader {
             recv: Subscriber::default(),
             buffer: Default::default(),
         };
-        self.serial.accept_msg_received_sub(vesc_reader.recv.create_subscription(8));
+        self.serial
+            .accept_msg_received_sub(vesc_reader.recv.create_subscription(8));
         let mut vesc = vesc_comm::VescConnection::new(vesc_reader, writer);
 
         tokio::select! {

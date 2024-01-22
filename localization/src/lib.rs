@@ -140,7 +140,7 @@ struct LocalizerBlackboard {
 }
 
 /// The calibration stage of the localizer.
-/// 
+///
 /// This stage runs for `calibration_duration` before applying the calibrations and exiting.
 async fn calibrate_localizer(
     (mut bb, context, _): (LocalizerBlackboard, RuntimeContext, ESKF),
@@ -212,7 +212,7 @@ async fn calibrate_localizer(
 
 /// The active stage of the localizer.  
 /// During this stage, the localizer accepts observations and updates its estimate of the robot's Isometry.
-/// 
+///
 /// If recalibration is triggered, this stage exits. Otherwise, this stage runs forever.
 async fn run_localizer(
     (mut bb, context, mut eskf): (LocalizerBlackboard, RuntimeContext, ESKF),

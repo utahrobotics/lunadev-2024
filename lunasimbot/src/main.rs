@@ -42,13 +42,9 @@ async fn main() -> anyhow::Result<()> {
             i += 1;
             let _ = img.save(format!("img{i}.png"));
 
-            costmap_writer
-                .write_frame(img.into())
-                .unwrap();
+            costmap_writer.write_frame(img.into()).unwrap();
 
-            subtitle_writer
-                .write_subtitle(format!("{max:.2}"))
-                .unwrap();
+            subtitle_writer.write_subtitle(format!("{max:.2}")).unwrap();
         }
     });
 

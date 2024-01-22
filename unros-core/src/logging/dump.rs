@@ -12,7 +12,8 @@ use std::{
     io::Write,
     net::SocketAddr,
     num::NonZeroU32,
-    path::{Path, PathBuf}, time::Instant,
+    path::{Path, PathBuf},
+    time::Instant,
 };
 
 use ffmpeg_sidecar::{command::FfmpegCommand, event::FfmpegEvent};
@@ -163,7 +164,7 @@ impl Error for VideoWriteError {}
 pub struct VideoDataDump {
     video_writer: std::sync::mpsc::Sender<DynamicImage>,
     path: PathBuf,
-    start: Instant
+    start: Instant,
 }
 
 #[derive(Debug)]
@@ -189,16 +190,15 @@ impl Display for VideoDumpInitError {
                 f,
                 "Faced an error installing FFMPEG for the video encoder: {e}"
             ),
-            VideoDumpInitError::VideoError(e) =>  write!(
-                f,
-                "Faced an error while encoding video: {e}"
-            ),
+            VideoDumpInitError::VideoError(e) => {
+                write!(f, "Faced an error while encoding video: {e}")
+            }
         }
     }
 }
 
 pub enum SubtitleWriteError {
-    IOError(std::io::Error)
+    IOError(std::io::Error),
 }
 
 impl VideoDataDump {
@@ -257,16 +257,14 @@ impl VideoDataDump {
             .map_err(|e| VideoDumpInitError::VideoError(e.to_string()))?;
 
         spawn_persistent_thread(move || {
-            events.for_each(|event| {
-                match event {
-                    FfmpegEvent::Log(level, msg) => match level {
-                        ffmpeg_sidecar::event::LogLevel::Info => info!("{msg}"),
-                        ffmpeg_sidecar::event::LogLevel::Warning => warn!("{msg}"),
-                        ffmpeg_sidecar::event::LogLevel::Unknown => {}
-                        _ => error!("{msg}"),
-                    }
-                    _ => {}
-                }
+            events.for_each(|event| match event {
+                FfmpegEvent::Log(level, msg) => match level {
+                    ffmpeg_sidecar::event::LogLevel::Info => info!("{msg}"),
+                    ffmpeg_sidecar::event::LogLevel::Warning => warn!("{msg}"),
+                    ffmpeg_sidecar::event::LogLevel::Unknown => {}
+                    _ => error!("{msg}"),
+                },
+                _ => {}
             });
         });
 
@@ -299,7 +297,11 @@ impl VideoDataDump {
             }
         });
 
-        Ok(Self { video_writer: writer, start: Instant::now(), path: path.to_path_buf() })
+        Ok(Self {
+            video_writer: writer,
+            start: Instant::now(),
+            path: path.to_path_buf(),
+        })
     }
 
     pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
@@ -315,20 +317,18 @@ impl VideoDataDump {
             start: self.start,
             timestamp,
             last_sub: None,
-            count: 0
+            count: 0,
         })
     }
 }
-
 
 pub struct SubtitleDump {
     file: DataDump,
     start: Instant,
     timestamp: Timestamp,
     count: usize,
-    last_sub: Option<String>
+    last_sub: Option<String>,
 }
-
 
 impl SubtitleDump {
     pub fn write_subtitle(&mut self, subtitle: impl Into<String>) -> std::io::Result<()> {
@@ -357,7 +357,7 @@ impl SubtitleDump {
         let mut end_time = start_time;
         let now = Instant::now();
         end_time.add_milliseconds(now.duration_since(self.start).as_millis() as i32);
-        
+
         if let Some(last_sub) = self.last_sub.take() {
             self.count += 1;
             let sub = Subtitle::new(self.count, start_time, end_time, last_sub);
@@ -374,10 +374,8 @@ impl SubtitleDump {
     }
 }
 
-
 impl Drop for SubtitleDump {
     fn drop(&mut self) {
-        
         if let Some(last_sub) = self.last_sub.take() {
             let start_time = self.timestamp;
             let mut end_time = start_time;

@@ -6,7 +6,12 @@
 //! Signals in this crate also differ by having 3 different ways that they can be subscribed
 //! to depending on the needs of the code using it.
 
-use std::{sync::{Arc, Weak}, path::Path, io::Write, ops::{Deref, DerefMut}};
+use std::{
+    io::Write,
+    ops::{Deref, DerefMut},
+    path::Path,
+    sync::{Arc, Weak},
+};
 
 use crossbeam::queue::ArrayQueue;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -69,9 +74,8 @@ impl<T: Clone> Publisher<T> {
     /// do not call this method ever. This will lead to spaghetti code. Only
     /// the node that owns this signal should call this method.
     pub fn set(&mut self, value: T) {
-        self.bounded_queues.retain(|queue|
-            queue.push(value.clone())
-        );
+        self.bounded_queues
+            .retain(|queue| queue.push(value.clone()));
         self.watch_sender.send_replace(());
     }
 
@@ -81,11 +85,9 @@ impl<T: Clone> Publisher<T> {
     }
 }
 
-
 trait Queue<T>: Send + Sync {
     fn push(&self, value: T) -> bool;
 }
-
 
 impl<T: Send> Queue<T> for Weak<ArrayQueue<T>> {
     fn push(&self, value: T) -> bool {
@@ -98,38 +100,35 @@ impl<T: Send> Queue<T> for Weak<ArrayQueue<T>> {
     }
 }
 
-
 impl<T, F: Fn(T) -> bool + Send + Sync> Queue<T> for F {
     fn push(&self, value: T) -> bool {
         self(value)
     }
 }
 
-
 struct SubscriptionInner<T> {
     queue: Arc<ArrayQueue<T>>,
-    watch: watch::Receiver<()>
+    watch: watch::Receiver<()>,
 }
-
 
 pub struct Subscriber<T> {
     subscriptions: Vec<SubscriptionInner<T>>,
-    rng: SmallRng
+    rng: SmallRng,
 }
-
 
 impl<T> Default for Subscriber<T> {
     fn default() -> Self {
-        Self { subscriptions: Default::default(), rng: SmallRng::from_entropy() }
+        Self {
+            subscriptions: Default::default(),
+            rng: SmallRng::from_entropy(),
+        }
     }
 }
 
-
 pub struct Subscription<'a, T> {
     subscriber: Box<dyn FnOnce(watch::Receiver<()>) + 'a>,
-    queue: Box<dyn Queue<T>>
+    queue: Box<dyn Queue<T>>,
 }
-
 
 impl<T: Clone + Send + 'static> Subscriber<T> {
     pub async fn recv_or_empty(&mut self) -> Option<T> {
@@ -179,11 +178,17 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         }
     }
 
-    pub async fn into_logger(mut self, mut display: impl FnMut(T) -> String + Send + 'static, path: impl AsRef<Path>) -> std::io::Result<()> {
+    pub async fn into_logger(
+        mut self,
+        mut display: impl FnMut(T) -> String + Send + 'static,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
         let mut dump = DataDump::new_file(path).await?;
         tokio::spawn(async move {
             loop {
-                let Some(value) = self.recv_or_empty().await else { break; };
+                let Some(value) = self.recv_or_empty().await else {
+                    break;
+                };
                 let secs = START_TIME.get().unwrap().elapsed().as_secs_f32();
                 writeln!(
                     dump,
@@ -191,7 +196,8 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
                     (secs / 60.0).floor(),
                     secs % 60.0,
                     display(value)
-                ).unwrap();
+                )
+                .unwrap();
             }
         });
         Ok(())
@@ -204,23 +210,22 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         let queue = Arc::new(ArrayQueue::new(size));
         Subscription {
             queue: Box::new(Arc::downgrade(&queue)),
-            subscriber: Box::new(move |watch| self.subscriptions.push(SubscriptionInner { queue, watch })),
+            subscriber: Box::new(move |watch| {
+                self.subscriptions.push(SubscriptionInner { queue, watch })
+            }),
         }
     }
 
     pub async fn into_watch(mut self) -> WatchSubscriber<T> {
         WatchSubscriber {
             value: self.recv().await,
-            inner: self
+            inner: self,
         }
     }
 
     pub fn try_into_watch(mut self) -> Result<WatchSubscriber<T>, Self> {
         if let Some(value) = self.try_recv() {
-            Ok(WatchSubscriber {
-                            value,
-                            inner: self
-                        })
+            Ok(WatchSubscriber { value, inner: self })
         } else {
             Err(self)
         }
@@ -228,16 +233,12 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
 
     pub async fn into_watch_or_empty(mut self) -> Result<WatchSubscriber<T>, Self> {
         if let Some(value) = self.recv_or_empty().await {
-            Ok(WatchSubscriber {
-                            value,
-                            inner: self
-                        })
+            Ok(WatchSubscriber { value, inner: self })
         } else {
             Err(self)
         }
     }
 }
-
 
 impl<'a, T: 'static> Subscription<'a, T> {
     pub fn map<V>(self, map: impl Fn(V) -> T + Send + Sync + 'static) -> Subscription<'a, V> {
@@ -250,9 +251,8 @@ impl<'a, T: 'static> Subscription<'a, T> {
 
 pub struct WatchSubscriber<T> {
     inner: Subscriber<T>,
-    value: T
+    value: T,
 }
-
 
 impl<T> Deref for WatchSubscriber<T> {
     type Target = T;
@@ -262,13 +262,11 @@ impl<T> Deref for WatchSubscriber<T> {
     }
 }
 
-
 impl<T> DerefMut for WatchSubscriber<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.value
     }
 }
-
 
 impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     pub async fn update(sub: &mut Self) {
@@ -287,7 +285,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
             false
         }
     }
-    
+
     pub fn try_update(sub: &mut Self) -> bool {
         if Self::try_update_inner(sub) {
             while Self::try_update_inner(sub) {}
@@ -296,7 +294,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
             false
         }
     }
-    
+
     fn try_update_inner(sub: &mut Self) -> bool {
         if let Some(x) = sub.inner.try_recv() {
             sub.value = x;

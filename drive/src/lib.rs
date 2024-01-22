@@ -33,11 +33,9 @@ impl Node for Drive {
         setup_logging!(context);
 
         let mut write_signal = Publisher::default();
-        write_signal.accept_subscription(self.drive_controller
-            .create_message_to_send_sub());
+        write_signal.accept_subscription(self.drive_controller.create_message_to_send_sub());
         let mut read_sub = Subscriber::default();
-        self
-            .drive_controller
+        self.drive_controller
             .accept_msg_received_sub(read_sub.create_subscription(8));
 
         let handle = tokio::spawn(async move {

@@ -14,18 +14,20 @@ use unros_core::{
     anyhow, async_trait,
     rayon::{
         self,
-        iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, IndexedParallelIterator},
+        iter::{
+            IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+            ParallelIterator,
+        },
     },
     setup_logging,
-    Node, RuntimeContext, signal::{Subscriber, Subscription},
+    signal::{Subscriber, Subscription},
+    Node, RuntimeContext,
 };
-
 
 struct PointMeasurement {
     index: usize,
-    height: usize
+    height: usize,
 }
-
 
 pub struct Costmap {
     pub window_duration: Duration,
@@ -47,7 +49,7 @@ impl Costmap {
         cell_width: f32,
         x_offset: f32,
         y_offset: f32,
-        height_step: f32
+        height_step: f32,
     ) -> Self {
         Self {
             window_duration: Duration::from_secs(5),
@@ -68,7 +70,7 @@ impl Costmap {
     }
 
     pub fn create_points_sub<T: Send + IntoParallelIterator<Item = Point3<f32>> + 'static>(
-        &mut self
+        &mut self,
     ) -> Subscription<T> {
         let cell_width = self.cell_width;
         let area_width = self.area_width;
@@ -100,7 +102,10 @@ impl Costmap {
                         return None;
                     }
 
-                    Some(PointMeasurement { index: x * area_length + y, height })
+                    Some(PointMeasurement {
+                        index: x * area_length + y,
+                        height,
+                    })
                 })
                 .collect()
         })
@@ -151,8 +156,18 @@ impl CostmapRef {
         self.matrix_to_img(self.get_costmap()).0
     }
 
-    pub fn matrix_to_img(&self, matrix: Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>) -> (image::GrayImage, f32) {
-        let max = matrix.data.as_slice().into_iter().map(|n| NotNan::new(*n).unwrap()).max().unwrap().into_inner();
+    pub fn matrix_to_img(
+        &self,
+        matrix: Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>,
+    ) -> (image::GrayImage, f32) {
+        let max = matrix
+            .data
+            .as_slice()
+            .into_iter()
+            .map(|n| NotNan::new(*n).unwrap())
+            .max()
+            .unwrap()
+            .into_inner();
         // println!("{max}");
 
         let buf = matrix
@@ -164,7 +179,11 @@ impl CostmapRef {
             })
             .collect();
 
-        (image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf).unwrap(), max)
+        (
+            image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf)
+                .unwrap(),
+            max,
+        )
     }
 }
 

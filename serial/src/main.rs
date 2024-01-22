@@ -1,10 +1,13 @@
-use std::
-    io::{stdin, stdout, BufRead, Write};
+use std::io::{stdin, stdout, BufRead, Write};
 
 use serial::SerialConnection;
 use unros_core::{
-    anyhow, async_run_all, default_run_options, logging::init_logger, signal::{Publisher, Subscriber}, tokio,
-    tokio_rayon, FnNode, RuntimeContext, bytes::Bytes,
+    anyhow, async_run_all,
+    bytes::Bytes,
+    default_run_options,
+    logging::init_logger,
+    signal::{Publisher, Subscriber},
+    tokio, tokio_rayon, FnNode, RuntimeContext,
 };
 
 #[tokio::main]
