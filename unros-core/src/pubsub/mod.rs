@@ -235,7 +235,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     /// Convert this `Subscriber` into a `WatchSubscriber`.
     /// 
     /// Wait until a message is received. If all `Publisher`s have been dropped this `Subscriber` will be returned.
-    pub async fn into_watch_or_empty(mut self) -> Result<WatchSubscriber<T>, Self> {
+    pub async fn into_watch_or_closed(mut self) -> Result<WatchSubscriber<T>, Self> {
         if let Some(value) = self.recv_or_closed().await {
             Ok(WatchSubscriber { value, inner: self })
         } else {
