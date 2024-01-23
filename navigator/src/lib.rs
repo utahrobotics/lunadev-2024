@@ -1,5 +1,5 @@
 use std::{
-    f64::consts::PI,
+    f32::consts::PI,
     fmt::{Debug, Display},
     sync::mpsc,
 };
@@ -18,6 +18,8 @@ use unros_core::{
 };
 
 pub use pid;
+
+type Float = f32;
 
 struct DrivingTaskInit {
     data: DrivingTaskScheduleData,
@@ -49,7 +51,7 @@ impl std::error::Error for DrivingIsBusy {}
 
 pub struct DrivingTaskScheduleData {
     pub force: bool,
-    pub waypoints: Vec<Point2<f64>>,
+    pub waypoints: Vec<Point2<Float>>,
 }
 
 #[async_trait]
@@ -82,13 +84,13 @@ pub struct WaypointDriver {
     steering_signal: Publisher<Steering>,
     robot_base: RobotBaseRef,
     task_receiver: mpsc::Receiver<DrivingTaskInit>,
-    steering_pid: Pid<f64>,
-    pub completion_distance: f64,
-    pub wheel_separation: f64,
+    steering_pid: Pid<Float>,
+    pub completion_distance: Float,
+    pub wheel_separation: Float,
 }
 
 impl WaypointDriver {
-    pub fn new(robot_base: RobotBaseRef, steering_pid: Pid<f64>) -> Self {
+    pub fn new(robot_base: RobotBaseRef, steering_pid: Pid<Float>) -> Self {
         let (task_sender, task_receiver) = mpsc::sync_channel(0);
         Self {
             driving_task: DrivingTask { task_sender },
@@ -136,13 +138,13 @@ impl Node for WaypointDriver {
         let half_wheel_separation = self.wheel_separation / 2.0;
         'main: loop {
             let DrivingTaskInit { data, sender } = init;
-            let mut distance_travelled = 0.0f64;
+            let mut distance_travelled: Float = 0.0;
             let Isometry3 {
                 translation,
                 rotation: mut orientation,
             } = self.robot_base.get_isometry();
             let mut position = translation.vector;
-            let mut yaw_travelled = 0.0f64;
+            let mut yaw_travelled: Float = 0.0;
 
             for waypoint in data.waypoints {
                 loop {
@@ -175,8 +177,8 @@ impl Node for WaypointDriver {
 
                         // We do not need to query the pid as we would want to rotate at full speed in this scenario
                         self.steering_signal.set(Steering {
-                            left: NotNan::new(left as f32).unwrap(),
-                            right: NotNan::new(right as f32).unwrap(),
+                            left: NotNan::new(left as Float).unwrap(),
+                            right: NotNan::new(right as Float).unwrap(),
                         })
                     } else {
                         let turning_radius =
@@ -215,14 +217,14 @@ impl Node for WaypointDriver {
                         };
 
                         // Feed into PIDs to get control values for each side
-                        let mut control = left_pid.next_control_output(left as f64);
-                        let left = (control.output / left_pid.output_limit) as f64;
-                        control = right_pid.next_control_output(right as f64);
-                        let right = (control.output / left_pid.output_limit) as f64;
+                        let mut control = left_pid.next_control_output(left as Float);
+                        let left = (control.output / left_pid.output_limit) as Float;
+                        control = right_pid.next_control_output(right as Float);
+                        let right = (control.output / left_pid.output_limit) as Float;
 
                         self.steering_signal.set(Steering {
-                            left: NotNan::new(left as f32).unwrap(),
-                            right: NotNan::new(right as f32).unwrap(),
+                            left: NotNan::new(left as Float).unwrap(),
+                            right: NotNan::new(right as Float).unwrap(),
                         })
                     }
 

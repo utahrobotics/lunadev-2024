@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
 };
 
+use atomic_float::AtomicF32;
 use crossbeam::atomic::AtomicCell;
 use fxhash::FxHashMap;
 use joints::{Joint, JointMut};
@@ -17,6 +18,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 
 pub mod joints;
+
+type Float = f32;
+type AtomicFloat = AtomicF32;
 
 /// The order with which a set of euler angles should be applied.
 ///
@@ -112,9 +116,9 @@ impl Default for RotationType {
 #[derive(Deserialize, Serialize)]
 pub struct PendingRobotElement {
     #[serde(default)]
-    pub position: Point3<f64>,
+    pub position: Point3<Float>,
     #[serde(default)]
-    pub orientation: Vector3<f64>,
+    pub orientation: Vector3<Float>,
     #[serde(default)]
     pub rotation_order: RotationSequence,
     #[serde(default)]
@@ -221,7 +225,7 @@ impl Robot {
 }
 
 struct IsometryAndJoint {
-    isometry: Isometry3<f64>,
+    isometry: Isometry3<Float>,
     joint: Joint,
 }
 
@@ -305,7 +309,7 @@ impl RobotElement {
         self.get_local_element().joint.get_joint_mut()
     }
 
-    pub fn get_isometry_from_base(&self) -> Isometry3<f64> {
+    pub fn get_isometry_from_base(&self) -> Isometry3<Float> {
         let mut out = Isometry3::default();
 
         for element in self.0.chain.iter().rev() {
@@ -315,11 +319,11 @@ impl RobotElement {
         out
     }
 
-    pub fn get_isometry_of_base(&self) -> Isometry3<f64> {
+    pub fn get_isometry_of_base(&self) -> Isometry3<Float> {
         self.0.reference.get_isometry()
     }
 
-    pub fn get_global_isometry(&self) -> Isometry3<f64> {
+    pub fn get_global_isometry(&self) -> Isometry3<Float> {
         self.get_isometry_of_base() * self.get_isometry_from_base()
     }
 }
@@ -329,15 +333,15 @@ impl RobotElementRef {
         &self.0.get_local_element().joint
     }
 
-    pub fn get_isometry_from_base(&self) -> Isometry3<f64> {
+    pub fn get_isometry_from_base(&self) -> Isometry3<Float> {
         self.0.get_isometry_from_base()
     }
 
-    pub fn get_isometry_of_base(&self) -> Isometry3<f64> {
+    pub fn get_isometry_of_base(&self) -> Isometry3<Float> {
         self.0.get_isometry_of_base()
     }
 
-    pub fn get_global_isometry(&self) -> Isometry3<f64> {
+    pub fn get_global_isometry(&self) -> Isometry3<Float> {
         self.0.get_isometry_of_base() * self.0.get_isometry_from_base()
     }
 
@@ -354,8 +358,8 @@ impl RobotElementRef {
 }
 
 struct RobotBaseInner {
-    isometry: AtomicCell<Isometry3<f64>>,
-    linear_velocity: AtomicCell<Vector3<f64>>,
+    isometry: AtomicCell<Isometry3<Float>>,
+    linear_velocity: AtomicCell<Vector3<Float>>,
     sender: watch::Sender<()>,
 }
 
@@ -388,31 +392,31 @@ impl RobotBase {
         RobotBaseRef(Self(self.0.clone()), self.0.sender.subscribe())
     }
 
-    pub fn get_isometry(&self) -> Isometry3<f64> {
+    pub fn get_isometry(&self) -> Isometry3<Float> {
         self.0.isometry.load()
     }
 
-    pub fn set_linear_velocity(&self, linear_velocity: Vector3<f64>) {
+    pub fn set_linear_velocity(&self, linear_velocity: Vector3<Float>) {
         self.0.linear_velocity.store(linear_velocity);
         self.0.sender.send_replace(());
     }
 
-    pub fn get_linear_velocity(&self) -> Vector3<f64> {
+    pub fn get_linear_velocity(&self) -> Vector3<Float> {
         self.0.linear_velocity.load()
     }
 
-    pub fn set_isometry(&self, isometry: Isometry3<f64>) {
+    pub fn set_isometry(&self, isometry: Isometry3<Float>) {
         self.0.isometry.store(isometry);
         self.0.sender.send_replace(());
     }
 
-    pub fn set_position(&self, position: Point3<f64>) {
+    pub fn set_position(&self, position: Point3<Float>) {
         let mut isometry = self.get_isometry();
         isometry.translation = position.into();
         self.set_isometry(isometry);
     }
 
-    pub fn set_orientation(&self, orientation: UnitQuaternion<f64>) {
+    pub fn set_orientation(&self, orientation: UnitQuaternion<Float>) {
         let mut isometry = self.get_isometry();
         isometry.rotation = orientation.into();
         self.set_isometry(isometry);
@@ -420,11 +424,11 @@ impl RobotBase {
 }
 
 impl RobotBaseRef {
-    pub fn get_isometry(&self) -> Isometry3<f64> {
+    pub fn get_isometry(&self) -> Isometry3<Float> {
         self.0.get_isometry()
     }
 
-    pub fn get_linear_velocity(&self) -> Vector3<f64> {
+    pub fn get_linear_velocity(&self) -> Vector3<Float> {
         self.0.get_linear_velocity()
     }
 

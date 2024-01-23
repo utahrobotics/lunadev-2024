@@ -15,8 +15,9 @@ use image::{DynamicImage, EncodableLayout};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use unros_core::{
-    anyhow, async_trait, log, setup_logging,
+    anyhow, async_trait, log,
     pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging,
     tokio_rayon::{self},
     Node, RuntimeContext,
 };

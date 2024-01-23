@@ -1,9 +1,9 @@
 use global_msgs::Steering;
 use serial::SerialConnection;
 use unros_core::{
-    anyhow, async_trait, setup_logging,
+    anyhow, async_trait,
     pubsub::{Publisher, Subscriber, Subscription},
-    tokio, Node, RuntimeContext,
+    setup_logging, tokio, Node, RuntimeContext,
 };
 
 pub struct Drive {

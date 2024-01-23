@@ -16,6 +16,8 @@ use unros_core::{
     FnNode,
 };
 
+type Float = f32;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let run_options = default_run_options!();
@@ -64,13 +66,13 @@ async fn main() -> anyhow::Result<()> {
                     .read_exact(&mut buf)
                     .await
                     .expect("Failed to receive packet");
-                let x = f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as f64;
-                let y = f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as f64;
-                let z = f32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as f64;
-                let w = f32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]) as f64;
-                let i = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]) as f64;
-                let j = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]) as f64;
-                let k = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]) as f64;
+                let x = f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as Float;
+                let y = f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as Float;
+                let z = f32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as Float;
+                let w = f32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]) as Float;
+                let i = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]) as Float;
+                let j = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]) as Float;
+                let k = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]) as Float;
                 let n = u32::from_le_bytes([buf[28], buf[29], buf[30], buf[31]]) as usize;
                 robot_base.set_isometry(Isometry {
                     rotation: UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)),

@@ -12,6 +12,7 @@ use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros_core::{
     anyhow, async_trait,
+    pubsub::{Subscriber, Subscription},
     rayon::{
         self,
         iter::{
@@ -19,9 +20,7 @@ use unros_core::{
             ParallelIterator,
         },
     },
-    setup_logging,
-    pubsub::{Subscriber, Subscription},
-    Node, RuntimeContext,
+    setup_logging, Node, RuntimeContext,
 };
 
 struct PointMeasurement {

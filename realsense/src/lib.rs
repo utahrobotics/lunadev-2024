@@ -31,13 +31,12 @@ use realsense_rust::{
 use rig::RobotElementRef;
 use unros_core::{
     anyhow, async_trait,
+    pubsub::{Publisher, SignalRef},
     rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
     },
-    setup_logging,
-    pubsub::{Publisher, SignalRef},
-    tokio_rayon, DropCheck, Node, RuntimeContext,
+    setup_logging, tokio_rayon, DropCheck, Node, RuntimeContext,
 };
 
 pub mod iter;

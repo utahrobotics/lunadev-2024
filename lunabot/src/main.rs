@@ -58,16 +58,11 @@ async fn main() -> anyhow::Result<()> {
 
             let (img, max) = costmap_ref.matrix_to_img(costmap);
 
-            costmap_writer
-                .write_frame(img.into())
-                .unwrap();
+            costmap_writer.write_frame(img.into()).unwrap();
 
-            subtitle_writer
-                .write_subtitle(format!("{max:.2}"))
-                .unwrap();
+            subtitle_writer.write_subtitle(format!("{max:.2}")).unwrap();
         }
     });
-
 
     let mut apriltag = AprilTagDetector::new(
         640.0,

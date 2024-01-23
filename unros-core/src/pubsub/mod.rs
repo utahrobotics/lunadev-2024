@@ -13,10 +13,10 @@ use std::{
 
 use crossbeam::queue::ArrayQueue;
 use futures::{stream::FuturesUnordered, StreamExt};
-use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
+use rand::seq::SliceRandom;
 use tokio::sync::watch;
 
-use crate::logging::{dump::DataDump, START_TIME};
+use crate::{logging::{dump::DataDump, START_TIME}, rng::QuickRng};
 
 /// An essential component that promotes separation of concerns, and is
 /// an intrinsic element of the ROS framework.
@@ -88,27 +88,27 @@ struct SubscriptionInner<T> {
 }
 
 /// An essential companion to the `Publisher`.
-/// 
+///
 /// Subscribers are bounded queues that can receive messages `T`
 /// from multiple Publishers concurrently. To subscribe to a `Publisher`,
 /// a `Subscriber` must create a subscription and pass that to the `Publisher`.
 pub struct Subscriber<T> {
     subscriptions: Vec<SubscriptionInner<T>>,
-    rng: SmallRng,
+    rng: QuickRng,
 }
 
 impl<T> Default for Subscriber<T> {
     fn default() -> Self {
         Self {
             subscriptions: Default::default(),
-            rng: SmallRng::from_entropy(),
+            rng: QuickRng::default(),
         }
     }
 }
 
 /// An object that must be passed to a `Publisher`, enabling the `Subscriber`
 /// that created the subscription to receive messages from that `Publisher`.
-/// 
+///
 /// If dropped, no change will occur to the `Subscriber` and no resources will be leaked.
 pub struct Subscription<'a, T> {
     subscriber: Box<dyn FnOnce(watch::Receiver<()>) + 'a>,
@@ -168,7 +168,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
 
     /// Convert this `Subscriber` into a logger that logs
     /// all received messages formatted using the `display` function.
-    /// 
+    ///
     /// Logs are saved to `path` using a `DataDump`.
     pub async fn into_logger(
         mut self,
@@ -196,9 +196,9 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 
     /// Creates a `Subscription` that needs to be passed to a `Publisher`.
-    /// 
+    ///
     /// The final queue will have a maximum size of `size`.
-    /// 
+    ///
     /// # Panics
     /// Panics if size is 0.
     pub fn create_subscription(&mut self, size: usize) -> Subscription<T> {
@@ -212,7 +212,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 
     /// Converts this `Subscriber` into a `WatchSubscriber`.
-    /// 
+    ///
     /// Wait until a message is received, even if all `Publisher`s have been dropped.
     pub async fn into_watch(mut self) -> WatchSubscriber<T> {
         WatchSubscriber {
@@ -222,7 +222,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 
     /// Tries to convert this `Subscriber` into a `WatchSubscriber`.
-    /// 
+    ///
     /// If no message is available, this `Subscriber` will be returned.
     pub fn try_into_watch(mut self) -> Result<WatchSubscriber<T>, Self> {
         if let Some(value) = self.try_recv() {
@@ -233,7 +233,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 
     /// Convert this `Subscriber` into a `WatchSubscriber`.
-    /// 
+    ///
     /// Wait until a message is received. If all `Publisher`s have been dropped this `Subscriber` will be returned.
     pub async fn into_watch_or_closed(mut self) -> Result<WatchSubscriber<T>, Self> {
         if let Some(value) = self.recv_or_closed().await {
@@ -255,7 +255,7 @@ impl<'a, T: 'static> Subscription<'a, T> {
 }
 
 /// A `Subscriber` that always stores the last received message, acting as a smart pointer for `T`.
-/// 
+///
 /// Users must regularly call `update`, `update_or_closed`, or `try_update` to receive newer messages.
 #[derive(Default)]
 pub struct WatchSubscriber<T> {
@@ -282,7 +282,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     pub fn new(value: T) -> Self {
         Self {
             inner: Subscriber::default(),
-            value
+            value,
         }
     }
 
@@ -325,21 +325,23 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     }
 
     /// Creates a `Subscription` with a size of 1.
-    /// 
+    ///
     /// There is no benefit to having a queue size of more than 1.
     pub fn create_subscription(&mut self) -> Subscription<T> {
         let queue = Arc::new(ArrayQueue::new(1));
         Subscription {
             queue: Box::new(Arc::downgrade(&queue)),
             subscriber: Box::new(move |watch| {
-                self.inner.subscriptions.push(SubscriptionInner { queue, watch })
+                self.inner
+                    .subscriptions
+                    .push(SubscriptionInner { queue, watch })
             }),
         }
     }
 
     /// Convert this `WatchSubscriber` into a logger that logs
     /// all received messages formatted using the `display` function.
-    /// 
+    ///
     /// Logs are saved to `path` using a `DataDump`.
     pub async fn into_logger(
         self,

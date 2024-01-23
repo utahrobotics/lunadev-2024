@@ -7,8 +7,8 @@ use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros_core::{
     anyhow, async_trait,
     bytes::Bytes,
-    setup_logging,
     pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging,
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},

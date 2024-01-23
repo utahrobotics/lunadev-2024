@@ -15,8 +15,9 @@ use fxhash::FxHashMap;
 use nalgebra::{Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros_core::{
-    anyhow, async_trait, setup_logging,
+    anyhow, async_trait,
     pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging,
     tokio::{self, sync::mpsc::channel},
     tokio_rayon, Node, RuntimeContext,
 };

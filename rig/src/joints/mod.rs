@@ -1,9 +1,10 @@
 use std::sync::{atomic::Ordering, Mutex};
 
-use atomic_float::AtomicF64;
 use nalgebra::{Isometry3, UnitQuaternion, UnitVector3};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
+
+use crate::{AtomicFloat, Float};
 
 /// A joint that may be moved at runtime
 #[derive(Deserialize, Serialize)]
@@ -33,7 +34,7 @@ impl Joint {
         }
     }
 
-    pub fn get_isometry(&self) -> Isometry3<f64> {
+    pub fn get_isometry(&self) -> Isometry3<Float> {
         match self {
             Joint::Fixed => Isometry3::default(),
             Joint::Hinge(x) => Isometry3::from_parts(
@@ -63,10 +64,10 @@ pub enum JointMut<'a> {
 /// A joint that rotates about a single axis.
 #[derive(Deserialize, Serialize)]
 pub struct HingeJoint {
-    pub axis: UnitVector3<f64>,
-    pub starting_angle: f64,
+    pub axis: UnitVector3<Float>,
+    pub starting_angle: Float,
     #[serde(skip)]
-    angle: AtomicF64,
+    angle: AtomicFloat,
     #[serde(skip)]
     senders: Mutex<Vec<mpsc::Sender<()>>>,
 }
@@ -79,7 +80,7 @@ impl HingeJoint {
     }
 
     /// Gets the signed angle of the hinge from the starting point.
-    pub fn get_angle(&self) -> f64 {
+    pub fn get_angle(&self) -> Float {
         self.angle.load(Ordering::Acquire)
     }
 
@@ -94,16 +95,16 @@ impl HingeJoint {
 pub struct HingeJointMut<'a>(&'a HingeJoint);
 
 impl<'a> HingeJointMut<'a> {
-    pub fn get_angle(&self) -> f64 {
+    pub fn get_angle(&self) -> Float {
         self.0.get_angle()
     }
 
-    pub fn add_angle(&mut self, angle: f64) {
+    pub fn add_angle(&mut self, angle: Float) {
         self.0.angle.fetch_add(angle, Ordering::Release);
         self.0.update();
     }
 
-    pub fn set_angle(&mut self, angle: f64) {
+    pub fn set_angle(&mut self, angle: Float) {
         self.0.angle.store(angle, Ordering::Release);
         self.0.update();
     }
