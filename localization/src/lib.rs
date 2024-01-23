@@ -204,6 +204,53 @@ async fn calibrate_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboar
     (bb, ())
 }
 
+
+const E: Float = std::f64::consts::E as Float;
+const TAU: Float = std::f64::consts::TAU as Float;
+const SQRT_TAU: Float = TAU.sqrt();
+
+
+fn normal(mean: Float, std_dev: Float, x: Float) -> Float {
+    E.powf(((x - mean) / std_dev).powi(2) / - 2.0) / std_dev / SQRT_TAU
+}
+
+
+fn c_normal_sum(mean_a: Float, mean_b: Float, mean_c: Float, x: Float) -> Float {
+    normal(mean_c, x, mean_a) + normal(mean_c, x, mean_b)
+}
+
+
+fn c_normal_sum_deriv(mean_a: Float, mean_b: Float, mean_c: Float, x: Float) -> Float {
+    let e_a = E.powf(-(mean_a - mean_c).powi(2) / 2.0 / x.powi(2));
+    let e_b = E.powf(-(mean_b - mean_c).powi(2) / 2.0 / x.powi(2));
+    let x2 = x.powi(2);
+
+    - e_a / SQRT_TAU / x2 +
+    (mean_a - mean_c).powi(2) * e_a / SQRT_TAU / x2 / x2 -
+    e_b / SQRT_TAU / x2 +
+    (mean_b - mean_c).powi(2) * e_b / SQRT_TAU / x2 / x2
+}
+
+
+fn c_normal_sol(mean_a: Float, mean_b: Float, mean_c: Float, n: usize, start_x: Float) -> Float {
+    let mut x = start_x;
+    for _ in 0..n {
+        x = x - c_normal_sum(mean_a, mean_b, mean_c, x) / c_normal_sum_deriv(mean_a, mean_b, mean_c, x);
+    }
+    x
+}
+
+
+fn mean_means(mean_a: Float, std_dev_a: Float, mean_b: Float, std_dev_b: Float) -> Float {
+    (std_dev_a * mean_b + std_dev_b * mean_a) / (std_dev_a + std_dev_b)
+}
+
+
+fn lerp_std_dev(std_dev_a: Float, std_dev_b: Float, target_std_dev: Float) -> Float {
+    std_dev_a / std_dev_b * (target_std_dev - std_dev_a) + std_dev_a
+}
+
+
 /// The active stage of the localizer.  
 /// During this stage, the localizer accepts observations and updates its estimate of the robot's Isometry.
 ///
@@ -214,21 +261,9 @@ async fn run_localizer(
     let context = bb.context;
     setup_logging!(context);
 
-    let rand_points = |origin: Vector3, std_dev: Float| {
-        let mut rng = QuickRng::default();
-        let x_distr = Normal::new(origin.x, std_dev).unwrap();
-        let y_distr = Normal::new(origin.y, std_dev).unwrap();
-        let z_distr = Normal::new(origin.z, std_dev).unwrap();
+    let mut position = bb.start_position;
+    let mut position_std_dev = bb.start_std_dev;
 
-        (0..bb.point_count).map(|_| Vector3::new(x_distr.sample(&mut rng), y_distr.sample(&mut rng), z_distr.sample(&mut rng))).collect()
-    };
-
-    let mut position_points: Box<[Vector3]> = rand_points(bb.start_position.coords, bb.start_std_dev);
-    let mut velocity_points: Box<[Vector3]> = vec![Default::default(); bb.point_count].into_boxed_slice();
-    let mut accel_points: Box<[Vector3]> = vec![Vector3::new(0.0, -9.81, 0.0); bb.point_count].into_boxed_slice();
-
-    let mut ang_vel_points: Box<[UnitQuaternion<Float>]> = vec![Default::default(); bb.point_count].into_boxed_slice();
-    let mut orientation_points: Box<[UnitQuaternion<Float>]> = (0..bb.point_count).map(move |i| UnitQuaternion::from_axis_angle(&UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)), std::f64::consts::TAU as Float * i as Float / bb.point_count as Float)).collect();
     let start = Instant::now();
 
     // Check for recalibration while simultaneously feeding observations into the Kalman Filter
@@ -266,11 +301,16 @@ async fn run_localizer(
                     // attached to the robot base.
                     let isometry = frame.robot_element.get_isometry_from_base().inverse();
                     frame.position = isometry * frame.position;
-                    frame.variance = isometry.rotation.to_rotation_matrix() * frame.variance;
+
+                    let mean_c_x = mean_means(position.x, position_std_dev, frame.position.x, frame.variance);
+                    let mean_c_y = mean_means(position.y, position_std_dev, frame.position.y, frame.variance);
+                    let mean_c_z = mean_means(position.z, position_std_dev, frame.position.z, frame.variance);
+
+                    let length
 
                     // Apply the predicted position, orientation, and velocity onto the robot base such that
                     // other nodes can observe it.
-                    bb.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
+                    bb.robot_base.set_isometry(Isometry3::from_parts(position.into(), eskf.orientation));
                     bb.robot_base.set_linear_velocity(eskf.velocity);
                 }
                 mut frame = bb.orientation_sub.recv() => {
