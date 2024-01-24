@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use atomic_float::AtomicF32;
+use portable_atomic::AtomicF32;
 use crossbeam::atomic::AtomicCell;
 use fxhash::FxHashMap;
 use joints::{Joint, JointMut};

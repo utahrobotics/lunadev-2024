@@ -8,8 +8,6 @@ edition = "2021"
 [dependencies]
 tokio-serial = "5"
 unros-core = { path = "../unros-core" }
-embedded-hal = "1.0"
-nb = "1"
 vesc-comm = { git = "https://github.com/manglemix/vesc-comm.git" }
 # tokio-util = { version = "0.7", features = ["codec"] }
 # futures = "0.3"

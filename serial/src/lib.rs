@@ -1,7 +1,7 @@
 //! This crate offers several ways to interface with serial ports under
 //! the Unros framwork.
 
-use std::{collections::VecDeque, ops::Deref, sync::Arc, time::Duration};
+use std::{ops::Deref, sync::Arc, time::Duration};
 
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros_core::{
@@ -12,8 +12,6 @@ use unros_core::{
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
-        sync::Mutex,
-        task::JoinSet,
     },
     Node, RuntimeContext,
 };
@@ -22,8 +20,8 @@ use unros_core::{
 pub struct SerialConnection {
     path: Arc<str>,
     baud_rate: u32,
-    msg_received: Option<Publisher<Bytes>>,
-    messages_to_send: Arc<Mutex<Subscriber<Bytes>>>,
+    msg_received: Publisher<Bytes>,
+    messages_to_send: Subscriber<Bytes>,
     tolerate_error: bool,
 }
 
@@ -37,8 +35,8 @@ impl SerialConnection {
         Self {
             path: path.into_boxed_str().into(),
             baud_rate,
-            msg_received: Some(Default::default()),
-            messages_to_send: Arc::new(Mutex::new(Subscriber::default())),
+            msg_received: Publisher::default(),
+            messages_to_send: Subscriber::default(),
             tolerate_error,
         }
     }
@@ -79,15 +77,12 @@ impl SerialConnection {
 
     /// Gets a reference to the `Signal` that represents received `Bytes`.
     pub fn accept_msg_received_sub(&mut self, sub: Subscription<Bytes>) {
-        self.msg_received.as_mut().unwrap().accept_subscription(sub);
+        self.msg_received.accept_subscription(sub);
     }
 
     /// Provide a subscription whose messages will be written to the serial port.
     pub fn create_message_to_send_sub(&mut self) -> Subscription<Bytes> {
-        Arc::get_mut(&mut self.messages_to_send)
-            .unwrap()
-            .get_mut()
-            .create_subscription(8)
+        self.messages_to_send.create_subscription(8)
     }
 }
 
@@ -98,92 +93,42 @@ impl Node for SerialConnection {
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
-        let msg_received = Arc::new(std::sync::Mutex::new(self.msg_received.take().unwrap()));
-
         loop {
-            let Some(stream) = self.connect(&context).await? else {
+            let Some(mut stream) = self.connect(&context).await? else {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             };
 
-            let (mut reader, mut writer) = tokio::io::split(stream);
-
-            let mut tasks = JoinSet::<anyhow::Result<()>>::new();
-            let msg_received = msg_received.clone();
-
-            tasks.spawn(async move {
-                let mut buf = [0; 1024];
-                loop {
-                    let n = reader.read(&mut buf).await?;
-                    let bytes = buf.split_at(n).0.to_vec();
-                    msg_received.lock().unwrap().set(bytes.into());
+            let mut buf = [0; 1024];
+            let e = loop {
+                tokio::select! {
+                    msg = self.messages_to_send.recv() => {
+                        let Err(e) = stream.write_all(&msg).await else { continue; };
+                        break e;
+                    }
+                    result = stream.read(&mut buf) => {
+                        let n = match result {
+                            Ok(n) => n,
+                            Err(e) => break e,
+                        };
+                        let bytes = buf.split_at(n).0.to_vec();
+                        self.msg_received.set(bytes.into());
+                    }
                 }
-            });
-            let messages_to_send = self.messages_to_send.clone();
-
-            tasks.spawn(async move {
-                let mut messages_to_send = messages_to_send.lock().await;
-                loop {
-                    let msg = messages_to_send.recv().await;
-                    writer.write_all(&msg).await?;
-                }
-            });
-
-            let e = tasks
-                .join_next()
-                .await
-                .unwrap()
-                .expect("I/O should not have panicked")
-                .unwrap_err();
-
+            };
+            
             if self.tolerate_error {
                 error!(
                     "Encountered the following error while communicating with: {}: {e}",
                     self.path
                 );
             } else {
-                break Err(e);
+                break Err(e.into());
             }
         }
     }
 }
 
-struct VescReader {
-    recv: Subscriber<Bytes>,
-    buffer: VecDeque<u8>,
-}
-
-impl embedded_hal::serial::Read<u8> for VescReader {
-    type Error = ();
-
-    fn read(&mut self) -> nb::Result<u8, Self::Error> {
-        if let Some(msg) = self.recv.try_recv() {
-            self.buffer.extend(msg.into_iter());
-        }
-        self.buffer.pop_back().ok_or(nb::Error::WouldBlock)
-    }
-}
-
-#[derive(Default)]
-struct VescWriter {
-    signal: Publisher<Bytes>,
-    buffer: Vec<u8>,
-}
-
-impl embedded_hal::serial::Write<u8> for VescWriter {
-    type Error = ();
-
-    fn write(&mut self, word: u8) -> nb::Result<(), Self::Error> {
-        self.buffer.push(word);
-        Ok(())
-    }
-
-    fn flush(&mut self) -> nb::Result<(), Self::Error> {
-        let buffer: Bytes = self.buffer.drain(..).collect();
-        self.signal.set(buffer);
-        Ok(())
-    }
-}
 
 /// A single `VESC` connection to a serial port.
 pub struct VescConnection {
@@ -195,7 +140,7 @@ pub struct VescConnection {
 impl VescConnection {
     /// Wraps the given `SerialConnection` with the `VESC` protocol.
     ///
-    /// The given `SerialConnection` should not have any subscriptions.
+    /// Pre-existing subscriptions in the given `SerialConnection` will be ignored (but not dropped).
     pub fn new(serial: SerialConnection) -> Self {
         Self {
             serial,
@@ -220,32 +165,37 @@ impl Node for VescConnection {
     const DEFAULT_NAME: &'static str = "vesc_connection";
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
-        let mut writer = VescWriter::default();
-        writer
-            .signal
-            .accept_subscription(self.serial.create_message_to_send_sub());
-        let mut vesc_reader = VescReader {
-            recv: Subscriber::default(),
-            buffer: Default::default(),
-        };
-        self.serial
-            .accept_msg_received_sub(vesc_reader.recv.create_subscription(8));
-        let mut vesc = vesc_comm::VescConnection::new(vesc_reader, writer);
+        setup_logging!(context);
 
-        tokio::select! {
-            result = self.serial.run(context) => result,
-            _ = async {
-                loop {
-                    tokio::select! {
-                        current = self.current.recv() => {
-                            vesc.set_current(current).expect("Setting current should have not panicked");
-                        }
-                        duty = self.duty.recv() => {
-                            vesc.set_duty(duty).expect("Setting duty should have not panicked");
-                        }
+        loop {
+            let Some(stream) = self.serial.connect(&context).await? else {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            };
+
+            let mut stream = vesc_comm::VescConnection::new(stream);
+
+            let e = loop {
+                tokio::select! {
+                    duty = self.duty.recv() => {
+                        let Err(e) = stream.set_duty(duty).await else { continue; };
+                        break e;
+                    }
+                    current = self.current.recv() => {
+                        let Err(e) = stream.set_current(current).await else { continue; };
+                        break e;
                     }
                 }
-            } => { unreachable!() }
+            };
+            
+            if self.serial.tolerate_error {
+                error!(
+                    "Encountered the following error while communicating with: {}: {e}",
+                    self.serial.path
+                );
+            } else {
+                break Err(e.into());
+            }
         }
     }
 }
