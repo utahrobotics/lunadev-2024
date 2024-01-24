@@ -88,9 +88,9 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // });
 
-    let mut positioning = Localizer::new(robot_base, 0.4);
+    let mut localizer = Localizer::new(robot_base, 0.4);
 
-    apriltag.accept_tag_detected_sub(positioning.create_position_sub().map(
+    apriltag.accept_tag_detected_sub(localizer.create_position_sub().map(
         |pose: PoseObservation| PositionFrame {
             position: nalgebra::convert(pose.position),
             variance: 0.1,
@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         },
     ));
 
-    apriltag.accept_tag_detected_sub(positioning.create_orientation_sub().map(
+    apriltag.accept_tag_detected_sub(localizer.create_orientation_sub().map(
         |pose: PoseObservation| OrientationFrame {
             orientation: nalgebra::convert(pose.orientation),
             variance: 0.1,
@@ -106,7 +106,12 @@ async fn main() -> anyhow::Result<()> {
         },
     ));
 
-    camera.accept_imu_frame_received_sub(positioning.create_imu_sub());
+    camera.accept_image_received_sub(
+        apriltag
+            .create_image_subscription()
+            .set_name("RealSense Apriltag Image"),
+    );
+    camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
 
     let mut pid = pid::Pid::new(0.0, 100.0);
     pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);
@@ -155,7 +160,7 @@ async fn main() -> anyhow::Result<()> {
         [
             camera.into(),
             apriltag.into(),
-            positioning.into(),
+            localizer.into(),
             video_maker.into(),
             navigator.into(),
             costmap.into(),

@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicIsize, AtomicUsize, Ordering},
         mpsc::channel,
         Arc,
     },
@@ -25,7 +25,7 @@ use unros_core::{
 
 struct PointMeasurement {
     index: usize,
-    height: usize,
+    height: isize,
 }
 
 pub struct Costmap {
@@ -37,7 +37,7 @@ pub struct Costmap {
     x_offset: f32,
     y_offset: f32,
     points_sub: Subscriber<Arc<[PointMeasurement]>>,
-    heights: Arc<[AtomicUsize]>,
+    heights: Arc<[AtomicIsize]>,
     counts: Arc<[AtomicUsize]>,
 }
 
@@ -81,7 +81,7 @@ impl Costmap {
         self.points_sub.create_subscription(8).map(move |x: T| {
             x.into_par_iter()
                 .filter_map(|mut point| {
-                    let height = (point.y / height_step).round() as usize;
+                    let height = (point.y / height_step).round() as isize;
 
                     point.x += x_offset;
                     point.z += y_offset;
@@ -123,7 +123,7 @@ impl Costmap {
 pub struct CostmapRef {
     area_width: usize,
     area_length: usize,
-    heights: Arc<[AtomicUsize]>,
+    heights: Arc<[AtomicIsize]>,
     counts: Arc<[AtomicUsize]>,
 }
 
@@ -167,13 +167,21 @@ impl CostmapRef {
             .max()
             .unwrap()
             .into_inner();
-        // println!("{max}");
+        let min = matrix
+            .data
+            .as_slice()
+            .into_iter()
+            .map(|n| NotNan::new(*n).unwrap())
+            .min()
+            .unwrap()
+            .into_inner();
+        let max = min.abs().max(max);
 
         let buf = matrix
             .row_iter()
             .flat_map(|x| {
                 x.column_iter()
-                    .map(|x| (x[0] as f32 / max * 255.0) as u8)
+                    .map(|x| (x[0].abs() / max * 255.0) as u8)
                     .collect::<Vec<_>>()
             })
             .collect();

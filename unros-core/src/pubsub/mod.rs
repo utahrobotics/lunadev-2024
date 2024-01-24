@@ -8,11 +8,15 @@ use std::{
     io::Write,
     ops::{Deref, DerefMut},
     path::Path,
-    sync::{Arc, Weak},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex, Weak,
+    },
 };
 
 use crossbeam::queue::ArrayQueue;
 use futures::{stream::FuturesUnordered, StreamExt};
+use log::warn;
 use rand::seq::SliceRandom;
 use tokio::sync::watch;
 
@@ -60,7 +64,7 @@ impl<T: Clone> Publisher<T> {
     /// receive new messages.
     pub fn accept_subscription(&mut self, sub: Subscription<T>) {
         self.bounded_queues.push(sub.queue);
-        (sub.subscriber)(self.watch_sender.subscribe());
+        (sub.subscriber)(self.watch_sender.subscribe(), sub.name);
     }
 }
 
@@ -68,10 +72,23 @@ trait Queue<T>: Send + Sync {
     fn push(&self, value: T) -> bool;
 }
 
-impl<T: Send> Queue<T> for Weak<ArrayQueue<T>> {
+struct SubscriptionQueue<T> {
+    queue: ArrayQueue<T>,
+    lag: AtomicUsize,
+    name: Mutex<Option<Box<str>>>,
+}
+
+impl<T: Send> Queue<T> for Weak<SubscriptionQueue<T>> {
     fn push(&self, value: T) -> bool {
         if let Some(queue) = self.upgrade() {
-            queue.force_push(value);
+            if queue.queue.force_push(value).is_some() {
+                let n = queue.lag.fetch_add(1, Ordering::Relaxed) + 1;
+                if let Some(name) = queue.name.lock().unwrap().as_ref() {
+                    warn!(target: "publishers", "{name} lagging by {n} messages");
+                }
+            } else {
+                queue.lag.store(0, Ordering::Relaxed);
+            }
             true
         } else {
             false
@@ -86,7 +103,7 @@ impl<T, F: Fn(T) -> bool + Send + Sync> Queue<T> for F {
 }
 
 struct SubscriptionInner<T> {
-    queue: Arc<ArrayQueue<T>>,
+    queue: Arc<SubscriptionQueue<T>>,
     watch: watch::Receiver<()>,
 }
 
@@ -114,8 +131,9 @@ impl<T> Default for Subscriber<T> {
 ///
 /// If dropped, no change will occur to the `Subscriber` and no resources will be leaked.
 pub struct Subscription<'a, T> {
-    subscriber: Box<dyn FnOnce(watch::Receiver<()>) + 'a>,
+    subscriber: Box<dyn FnOnce(watch::Receiver<()>, Option<Box<str>>) + 'a>,
     queue: Box<dyn Queue<T>>,
+    name: Option<Box<str>>,
 }
 
 impl<T: Clone + Send + 'static> Subscriber<T> {
@@ -125,17 +143,19 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         self.subscriptions.shuffle(&mut self.rng);
 
         for sub in &mut self.subscriptions {
-            if let Some(x) = sub.queue.pop() {
+            if let Some(x) = sub.queue.queue.pop() {
                 sub.watch.mark_changed();
+                sub.queue.lag.store(0, Ordering::Relaxed);
                 return Some(x);
             }
             futs.push(async {
                 loop {
                     break if sub.watch.changed().await.is_ok() {
-                        let Some(value) = sub.queue.pop() else {
-                            println!("fwfw");
+                        let Some(value) = sub.queue.queue.pop() else {
+                            // println!("fwfw");
                             continue;
                         };
+                        sub.queue.lag.store(0, Ordering::Relaxed);
                         Some(value)
                     } else {
                         None
@@ -157,7 +177,8 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         self.subscriptions.shuffle(&mut self.rng);
 
         for sub in &mut self.subscriptions {
-            if let Some(x) = sub.queue.pop() {
+            if let Some(x) = sub.queue.queue.pop() {
+                sub.queue.lag.store(0, Ordering::Relaxed);
                 sub.watch.mark_changed();
                 return Some(x);
             }
@@ -211,12 +232,18 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     /// # Panics
     /// Panics if size is 0.
     pub fn create_subscription(&mut self, size: usize) -> Subscription<T> {
-        let queue = Arc::new(ArrayQueue::new(size));
+        let queue = Arc::new(SubscriptionQueue {
+            queue: ArrayQueue::new(size),
+            lag: Default::default(),
+            name: Default::default(),
+        });
         Subscription {
             queue: Box::new(Arc::downgrade(&queue)),
-            subscriber: Box::new(move |watch| {
-                self.subscriptions.push(SubscriptionInner { queue, watch })
+            subscriber: Box::new(move |watch, name| {
+                *queue.name.lock().unwrap() = name;
+                self.subscriptions.push(SubscriptionInner { queue, watch });
             }),
+            name: None,
         }
     }
 
@@ -259,7 +286,13 @@ impl<'a, T: 'static> Subscription<'a, T> {
         Subscription {
             subscriber: self.subscriber,
             queue: Box::new(move |x| self.queue.push(map(x))),
+            name: None,
         }
+    }
+
+    pub fn set_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into().into_boxed_str());
+        self
     }
 }
 
@@ -337,15 +370,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     ///
     /// There is no benefit to having a queue size of more than 1.
     pub fn create_subscription(&mut self) -> Subscription<T> {
-        let queue = Arc::new(ArrayQueue::new(1));
-        Subscription {
-            queue: Box::new(Arc::downgrade(&queue)),
-            subscriber: Box::new(move |watch| {
-                self.inner
-                    .subscriptions
-                    .push(SubscriptionInner { queue, watch })
-            }),
-        }
+        self.inner.create_subscription(1)
     }
 
     /// Convert this `WatchSubscriber` into a logger that logs

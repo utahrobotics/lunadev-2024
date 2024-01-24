@@ -422,7 +422,7 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
                 });
             }
             mut frame = bb.velocity_sub.recv() => {
-                // Find the velocity of the robot base based on the observation of the position of an element
+                // Find the velocity of the robot base based on the observation of the velocity of an element
                 // attached to the robot base.
                 let inv_rotation = frame.robot_element.get_isometry_from_base().rotation.inverse();
                 frame.velocity = inv_rotation * frame.velocity;
