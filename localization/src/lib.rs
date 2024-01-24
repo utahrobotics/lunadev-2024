@@ -49,7 +49,7 @@ pub struct PositionFrame {
 pub struct VelocityFrame {
     /// Velocity in meters
     pub velocity: Vector3,
-    /// Variance centered around velocity in meters
+    /// Variance centered around velocity in meters per second
     pub variance: Float,
     pub robot_element: RobotElementRef,
 }
@@ -67,11 +67,11 @@ pub struct OrientationFrame {
 #[derive(Clone)]
 pub struct IMUFrame {
     pub acceleration: Vector3,
-    /// Variance centered around acceleration in meters
+    /// Variance centered around acceleration in meters per second^2
     pub acceleration_variance: Float,
 
     pub angular_velocity: UnitQuaternion,
-    /// Variance of angular_velocity in radians
+    /// Variance of angular_velocity in radians per second
     pub angular_velocity_variance: Float,
 
     pub robot_element: RobotElementRef,
@@ -506,6 +506,7 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
         let mut isometry = bb.robot_base.get_isometry();
         isometry.translation.vector = position;
 
+        // https://math.stackexchange.com/questions/61146/averaging-quaternions
         match Davidson::new::<DMatrix<f64>>(
             nalgebra::convert(rotation_matrix),
             1,

@@ -3,23 +3,19 @@ use std::{
     time::{Duration, Instant},
 };
 
-use apriltag::AprilTagDetector;
+use apriltag::{AprilTagDetector, PoseObservation};
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use localization::{eskf, IMUFrame, Localizer, OrientationFrame, PositionFrame};
-use nalgebra::{Isometry, Vector3};
+use localization::{Localizer, OrientationFrame, PositionFrame};
+use nalgebra::Isometry;
 use navigator::{pid, WaypointDriver};
-use realsense::discover_all_realsense;
+use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use unros_core::{
-    anyhow, async_run_all, default_run_options,
-    logging::{
+    anyhow, async_run_all, default_run_options, logging::{
         dump::{DataDump, VideoDataDump},
         init_logger,
-    },
-    rayon::iter::ParallelIterator,
-    signal::unbounded::UnboundedSubscription,
-    tokio, FnNode,
+    }, pubsub::Subscriber, rayon::iter::ParallelIterator, tokio, FnNode
 };
 
 #[tokio::main]
@@ -28,9 +24,8 @@ async fn main() -> anyhow::Result<()> {
     init_logger(&run_options)?;
 
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
-    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "debug"])?;
+    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera"])?;
     let camera_element = elements.remove("camera").unwrap();
-    let debug_element = elements.remove("debug").unwrap();
     let robot_base_ref = robot_base.get_ref();
 
     let mut costmap = Costmap::new(40, 40, 0.05, 1.9, 0.0, 0.01);
@@ -40,12 +35,7 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
 
     camera.set_robot_element_ref(camera_element.get_ref());
-    costmap.add_points_sub(
-        camera
-            .point_cloud_received_signal()
-            .subscribe_unbounded()
-            .map(|x| x.par_iter().map(|x| x.0)),
-    );
+    camera.accept_cloud_received_sub(costmap.create_points_sub().map(|x: PointCloud| x.par_iter().map(|x| x.0)));
     let costmap_ref = costmap.get_ref();
 
     let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
@@ -68,7 +58,6 @@ async fn main() -> anyhow::Result<()> {
         640.0,
         1280,
         720,
-        camera.image_received_signal().watch(),
         camera_element.get_ref(),
     );
     apriltag.add_tag(Default::default(), Default::default(), 0.134, 0);
@@ -96,39 +85,29 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // });
 
-    let mut positioning = Localizer::new(robot_base);
-    positioning.add_position_sub(
-        apriltag
-            .tag_detected_signal()
-            .subscribe_unbounded()
-            .map(|tag| PositionFrame {
-                position: tag.position,
-                velocity: tag.velocity,
-                variance: eskf::ESKF::variance_from_element(0.5),
-                robot_element: tag.robot_element,
-            }),
+    let mut positioning = Localizer::new(robot_base, 0.4);
+    
+    apriltag.accept_tag_detected_sub(
+        positioning.create_position_sub().map(|pose: PoseObservation| 
+            PositionFrame {
+                position: nalgebra::convert(pose.position),
+                variance: 0.1,
+                robot_element: pose.robot_element,
+            }
+        )
     );
-    positioning.add_orientation_sub(apriltag.tag_detected_signal().subscribe_unbounded().map(
-        |tag| OrientationFrame {
-            orientation: tag.orientation,
-            variance: eskf::ESKF::variance_from_element(0.5),
-            robot_element: tag.robot_element,
-        },
-    ));
-    positioning.add_imu_sub(camera.imu_frame_received().subscribe_unbounded());
+    
+    apriltag.accept_tag_detected_sub(
+        positioning.create_orientation_sub().map(|pose: PoseObservation| 
+            OrientationFrame {
+                orientation: nalgebra::convert(pose.orientation),
+                variance: 0.1,
+                robot_element: pose.robot_element,
+            },
+        )
+    );
 
-    positioning.add_imu_sub(UnboundedSubscription::repeat(
-        IMUFrame {
-            acceleration: Vector3::new(0.0, -9.81, 0.0),
-            angular_velocity: Default::default(),
-            rotation_sequence: Default::default(),
-            rotation_type: Default::default(),
-            acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.25,
-            angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 0.25,
-            robot_element: debug_element.get_ref(),
-        },
-        Duration::from_millis(10),
-    ));
+    camera.accept_imu_frame_received_sub(positioning.create_imu_sub());
 
     let mut pid = pid::Pid::new(0.0, 100.0);
     pid.p(1.0, 100.0).i(1.0, 100.0).d(1.0, 100.0);
@@ -137,16 +116,17 @@ async fn main() -> anyhow::Result<()> {
     let mut data_dump = DataDump::new_file("motion.csv").await?;
     writeln!(
         data_dump,
-        "imu_ax,imu_ay,imu_az,imu_rvx,imu_rvy,imu_rvz,vx,vy,vz,x,y,z,w,i,j,k,delta"
+        "imu_ax,imu_ay,imu_az,imu_rvw,imu_rvi,imu_rvj,imu_rvk,vx,vy,vz,x,y,z,w,i,j,k,delta"
     )
     .unwrap();
-    let mut imu_sub = camera.imu_frame_received().watch();
+    let mut imu_sub = Subscriber::default();
+    camera.accept_imu_frame_received_sub(imu_sub.create_subscription(32));
     let dumper = FnNode::new(|_| async move {
         let start = Instant::now();
         let mut elapsed = Duration::ZERO;
 
         loop {
-            let imu = imu_sub.wait_for_change().await;
+            let imu = imu_sub.recv().await;
             let Isometry {
                 translation: pos,
                 rotation,
@@ -155,13 +135,14 @@ async fn main() -> anyhow::Result<()> {
             let now = start.elapsed();
             writeln!(
                 data_dump,
-                "{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
+                "{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
                 imu.acceleration.x,
                 imu.acceleration.y,
                 imu.acceleration.z,
-                imu.angular_velocity.x,
-                imu.angular_velocity.y,
-                imu.angular_velocity.z,
+                imu.angular_velocity.w,
+                imu.angular_velocity.i,
+                imu.angular_velocity.j,
+                imu.angular_velocity.k,
                 vel.x, vel.y, vel.z,
                 pos.x, pos.y, pos.z,
                 rotation.w, rotation.i, rotation.j, rotation.k,

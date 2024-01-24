@@ -132,9 +132,12 @@ impl AprilTagDetector {
         );
     }
 
-    /// Gets a reference to the `Signal` that represents detected tags.
     pub fn accept_tag_detected_sub(&mut self, sub: Subscription<PoseObservation>) {
         self.tag_detected.accept_subscription(sub);
+    }
+
+    pub fn create_image_subscription(&mut self) -> Subscription<Arc<DynamicImage>> {
+        self.image_sub.create_subscription(1)
     }
 }
 

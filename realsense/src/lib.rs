@@ -19,7 +19,7 @@ use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveP
 use image::{DynamicImage, ImageBuffer, Luma, Rgb};
 use iter::ArcIter;
 use localization::IMUFrame;
-use nalgebra::{Dyn, Matrix, Point3, VecStorage, Vector3, U2};
+use nalgebra::{Dyn, Matrix, Point3, Quaternion, UnitQuaternion, VecStorage, Vector3, U2};
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -31,7 +31,7 @@ use realsense_rust::{
 use rig::RobotElementRef;
 use unros_core::{
     anyhow, async_trait,
-    pubsub::{Publisher, SignalRef},
+    pubsub::{Publisher, Subscription},
     rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
@@ -88,14 +88,12 @@ impl RealSenseCamera {
         })
     }
 
-    /// Gets a reference to the `Signal` that represents received images.
-    pub fn image_received_signal(&mut self) -> SignalRef<Arc<DynamicImage>> {
-        self.image_received.get_ref()
+    pub fn accept_image_received_sub(&mut self, sub: Subscription<Arc<DynamicImage>>) {
+        self.image_received.accept_subscription(sub);
     }
 
-    /// Gets a reference to the `Signal` that represents received point clouds.
-    pub fn point_cloud_received_signal(&mut self) -> SignalRef<PointCloud> {
-        self.point_cloud_received.get_ref()
+    pub fn accept_cloud_received_sub(&mut self, sub: Subscription<PointCloud>) {
+        self.point_cloud_received.accept_subscription(sub);
     }
 
     pub fn get_path(&self) -> &Path {
@@ -116,12 +114,10 @@ impl RealSenseCamera {
         Path::new(OsStr::from_bytes(path))
     }
 
-    /// Gets a reference to the `Signal` that represents received imu frames.
-    ///
     /// IMU frames are in global space, according to the rigid body
     /// provided to the RealSense camera.
-    pub fn imu_frame_received(&mut self) -> SignalRef<IMUFrame> {
-        self.imu_frame_received.get_ref()
+    pub fn accept_imu_frame_received_sub(&mut self, sub: Subscription<IMUFrame>) {
+        self.imu_frame_received.accept_subscription(sub);
     }
 
     /// Sets the robot element that represents this camera.
@@ -141,7 +137,7 @@ impl RealSenseCamera {
 impl Node for RealSenseCamera {
     const DEFAULT_NAME: &'static str = "realsense";
 
-    async fn run(self, context: RuntimeContext) -> anyhow::Result<()> {
+    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
         let pipeline = InactivePipeline::try_from(self.context.lock().unwrap().deref())?;
         let mut config = Config::new();
@@ -176,8 +172,8 @@ impl Node for RealSenseCamera {
         let mut last_img = None;
 
         tokio_rayon::spawn(move || {
-            let mut last_accel: Vector3<f64> = Default::default();
-            let mut last_ang_vel: Vector3<f64> = Default::default();
+            let mut last_accel: Vector3<f32> = Default::default();
+            let mut last_ang_vel: Vector3<f32> = Default::default();
 
             // Create Resizer instance and resize source image
             // into buffer of destination image
@@ -227,13 +223,13 @@ impl Node for RealSenseCamera {
                     last_accel = nalgebra::convert(Vector3::from(*frame.acceleration()));
                 }
 
+                let (w, [i, j, k]) = quaternion_core::from_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, [last_ang_vel.x, last_ang_vel.y, last_ang_vel.z]);
+
                 self.imu_frame_received.set(IMUFrame {
                     acceleration: last_accel,
-                    angular_velocity: last_ang_vel,
-                    rotation_sequence: rig::RotationSequence::XYZ,
-                    rotation_type: rig::RotationType::Intrinsic,
-                    acceleration_variance: Vector3::new(1.0, 1.0, 1.0) * 0.65,
-                    angular_velocity_variance: Vector3::new(1.0, 1.0, 1.0) * 1.5,
+                    angular_velocity: UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k)),
+                    acceleration_variance: 0.65,
+                    angular_velocity_variance: 1.5,
                     robot_element: robot_element.clone(),
                 });
 

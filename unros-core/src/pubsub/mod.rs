@@ -130,11 +130,18 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
                 return Some(x);
             }
             futs.push(async {
-                if sub.watch.changed().await.is_ok() {
-                    Some(sub.queue.pop().unwrap())
-                } else {
-                    None
+                loop {
+                    break if sub.watch.changed().await.is_ok() {
+                        let Some(value) = sub.queue.pop() else {
+                            println!("fwfw");
+                            continue;
+                        };
+                        Some(value)
+                    } else {
+                        None
+                    };
                 }
+                
             });
         }
 
