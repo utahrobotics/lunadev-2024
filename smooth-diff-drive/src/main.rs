@@ -3,7 +3,6 @@ use std::path::Path;
 use clap::{command, Parser, Subcommand};
 use machine_academy::{
     burn::{backend::Autodiff, config::Config},
-    burn_ndarray::{NdArray, NdArrayDevice},
     common::time_series::{GruNetwork, GruNetworkSuperConfig},
     data::create_dataset,
     super_train_regression, SuperTrainingConfig,

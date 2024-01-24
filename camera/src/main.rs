@@ -2,7 +2,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use camera::discover_all_cameras;
 use unros_core::{
-    anyhow::{self, Context}, async_run_all, default_run_options, log::info, pubsub::Subscriber, tokio
+    anyhow::{self, Context},
+    async_run_all, default_run_options,
+    log::info,
+    pubsub::Subscriber,
+    tokio,
 };
 
 #[tokio::main]

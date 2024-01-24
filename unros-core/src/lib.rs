@@ -28,8 +28,8 @@ use std::{
 
 pub mod logging;
 pub mod pubsub;
-pub mod task;
 pub mod rng;
+pub mod task;
 
 pub use anyhow;
 pub use async_trait::async_trait;

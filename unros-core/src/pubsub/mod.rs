@@ -16,7 +16,10 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use rand::seq::SliceRandom;
 use tokio::sync::watch;
 
-use crate::{logging::{dump::DataDump, START_TIME}, rng::QuickRng};
+use crate::{
+    logging::{dump::DataDump, START_TIME},
+    rng::QuickRng,
+};
 
 /// An essential component that promotes separation of concerns, and is
 /// an intrinsic element of the ROS framework.

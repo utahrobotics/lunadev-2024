@@ -7,14 +7,25 @@ use std::{
     time::{Duration, Instant},
 };
 
+use eigenvalues::{Davidson, DavidsonCorrection, SpectrumTarget};
 use fxhash::FxHashMap;
-use nalgebra::{Isometry, Isometry3 as I3, Matrix3, Matrix4, Point3, Quaternion, Translation3, UnitQuaternion as UQ, UnitVector3, Vector3 as V3};
+use nalgebra::{
+    DMatrix, Isometry, Isometry3 as I3, Matrix4, Point3, Quaternion, Translation3,
+    UnitQuaternion as UQ, UnitVector3, Vector3 as V3,
+};
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
-use rig::{RobotBase, RobotElementRef, RotationSequence, RotationType};
+use rig::{RobotBase, RobotElementRef};
 use smach::{start_machine, Transition};
 use unros_core::{
-    anyhow, async_trait, pubsub::{Subscriber, Subscription}, rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator, IndexedParallelIterator}, rng::QuickRng, setup_logging, tokio, Node, RuntimeContext
+    anyhow, async_trait,
+    pubsub::{Subscriber, Subscription},
+    rayon::iter::{
+        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
+        ParallelIterator,
+    },
+    rng::QuickRng,
+    setup_logging, tokio, Node, RuntimeContext,
 };
 
 type Float = f32;
@@ -64,6 +75,7 @@ pub struct Localizer {
     pub calibration_duration: Duration,
     pub start_position: Point3<Float>,
     pub start_variance: Float,
+    pub max_delta: Duration,
 
     recalibrate_sub: Subscriber<()>,
 
@@ -86,6 +98,7 @@ impl Localizer {
             position_sub: Subscriber::default(),
             orientation_sub: Subscriber::default(),
             robot_base,
+            max_delta: Duration::from_millis(50)
         }
     }
 
@@ -128,6 +141,7 @@ struct LocalizerBlackboard {
     point_count: usize,
     start_position: Point3<Float>,
     start_std_dev: Float,
+    max_delta: Duration,
 
     calibration_duration: Duration,
 
@@ -194,7 +208,13 @@ async fn calibrate_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboar
             let calibrated = CalibratedImu {
                 accel_scale: 9.81 / calibrating.accel.magnitude() * calibrating.count as Float,
                 accel_correction,
-                angular_velocity_bias: UnitQuaternion::default().try_slerp(&calibrating.angular_velocity, 1.0 / calibrating.count as Float, 0.01).unwrap_or_default(),
+                angular_velocity_bias: UnitQuaternion::default()
+                    .try_slerp(
+                        &calibrating.angular_velocity,
+                        1.0 / calibrating.count as Float,
+                        0.01,
+                    )
+                    .unwrap_or_default(),
             };
 
             (robot_element, calibrated)
@@ -207,15 +227,27 @@ async fn calibrate_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboar
     (bb, ())
 }
 
-
 const E: Float = std::f64::consts::E as Float;
 const TAU: Float = std::f64::consts::TAU as Float;
 
-
 fn normal(mean: Float, std_dev: Float, x: Float) -> Float {
-    E.powf(((x - mean) / std_dev).powi(2) / - 2.0) / std_dev / TAU.sqrt()
+    E.powf(((x - mean) / std_dev).powi(2) / -2.0) / std_dev / TAU.sqrt()
 }
 
+fn rand_quat(rng: &mut QuickRng) -> UnitQuaternion {
+    let u: Float = rng.gen_range(0.0..1.0);
+    let v: Float = rng.gen_range(0.0..1.0);
+    let w: Float = rng.gen_range(0.0..1.0);
+    // h = ( sqrt(1-u) sin(2πv), sqrt(1-u) cos(2πv), sqrt(u) sin(2πw), sqrt(u) cos(2πw))
+    UnitQuaternion::new_unchecked(
+        Quaternion::new(
+            (1.0 - u).sqrt() * (TAU * v).sin(),
+            (1.0 - u).sqrt() * (TAU * v).cos(),
+            u.sqrt() * (TAU * w).sin(),
+            u.sqrt() * (TAU * w).cos(),
+        )
+    )
+}
 
 #[derive(Clone, Copy, Default)]
 struct Particle {
@@ -225,37 +257,45 @@ struct Particle {
     acceleration: Vector3,
 }
 
-
 /// The active stage of the localizer.  
 /// During this stage, the localizer accepts observations and updates its estimate of the robot's Isometry.
 ///
 /// If recalibration is triggered, this stage exits. Otherwise, this stage runs forever.
-async fn run_localizer(
-    mut bb: LocalizerBlackboard,
-) -> (LocalizerBlackboard, ()) {
+async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ()) {
     let context = bb.context;
     setup_logging!(context);
 
-    let mut particles: Box<[_]> = (0..bb.point_count).map(|_| {
-        let mut rng = QuickRng::default();
+    let mut particles: Box<[_]> = (0..bb.point_count)
+        .map(|_| {
+            let mut rng = QuickRng::default();
 
-        let rotation = UnitQuaternion::from_axis_angle(&UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)), rng.gen_range(0.0..TAU));
+            let rotation = UnitQuaternion::from_axis_angle(
+                &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
+                rng.gen_range(0.0..TAU),
+            );
 
-        let x_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
-        let y_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
-        let z_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
-        let translation = Translation3::new(x_distr.sample(&mut rng), y_distr.sample(&mut rng), z_distr.sample(&mut rng));
+            let x_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
+            let y_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
+            let z_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
+            let translation = Translation3::new(
+                x_distr.sample(&mut rng),
+                y_distr.sample(&mut rng),
+                z_distr.sample(&mut rng),
+            );
 
-        Particle {
-            isometry: Isometry::from_parts(translation, rotation),
-            linear_velocity: Default::default(),
-            angular_velocity: Default::default(),
-            acceleration: Default::default()
-        }
-    }).collect();
+            Particle {
+                isometry: Isometry::from_parts(translation, rotation),
+                linear_velocity: Default::default(),
+                angular_velocity: Default::default(),
+                acceleration: Default::default(),
+            }
+        })
+        .collect();
 
     let mut start = Instant::now();
     let mut normals = vec![0.0 as Float; bb.point_count];
+    let mut accelerations = vec![Vector3::default(); bb.point_count];
+    let mut angular_velocities = vec![UnitQuaternion::default(); bb.point_count];
 
     loop {
         // Simultaneously watch three different subscriptions at once.
@@ -267,6 +307,8 @@ async fn run_localizer(
             () = bb.recalibrate_sub.recv() => {
                 break;
             }
+            // Process system if max_delta time has passed and no observations were received
+            () = tokio::time::sleep(bb.max_delta) => {}
             mut frame = bb.imu_sub.recv() => {
                 let Some(calibration) = bb.calibrations.get(&frame.robot_element) else {
                     error!("Unrecognized IMU message");
@@ -274,28 +316,57 @@ async fn run_localizer(
                 };
 
                 frame.angular_velocity = calibration.angular_velocity_bias.inverse() * frame.angular_velocity;
-                frame.acceleration = frame.robot_element.get_global_isometry() * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
 
                 {
                     let std_dev = frame.acceleration_variance.sqrt();
-    
-                    let x_distr = Normal::new(frame.acceleration.x, std_dev).unwrap();
-                    let y_distr = Normal::new(frame.acceleration.y, std_dev).unwrap();
-                    let z_distr = Normal::new(frame.acceleration.z, std_dev).unwrap();
-                
-                    let normals_sum: Float = particles.par_iter().zip(&mut normals).map(|(p, out)| {
-                        let distance = (frame.acceleration - p.acceleration).magnitude();
-                        let normal = normal(0.0, std_dev, distance);
-                        *out = normal;
-                        normal
+
+                    let normals_sum: Float = particles.par_iter().zip(&mut normals).zip(&mut accelerations).map(|((p, out_normal), acceleration)| {
+                        *acceleration = p.isometry.rotation * frame.robot_element.get_isometry_from_base().rotation * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
+                        let distance = (*acceleration - p.acceleration).magnitude();
+                        *out_normal = normal(0.0, std_dev, distance);
+                        *out_normal
                     }).sum();
 
                     particles.par_iter_mut().enumerate().for_each(|(i, p)| {
                         let mut rng = QuickRng::default();
-    
+
                         // Probability of resampling point
                         if rng.gen_bool(1.0 - (normals[i] / normals_sum) as f64) {
+                            let acceleration = accelerations[i];
+
+                            let x_distr = Normal::new(acceleration.x, std_dev).unwrap();
+                            let y_distr = Normal::new(acceleration.y, std_dev).unwrap();
+                            let z_distr = Normal::new(acceleration.z, std_dev).unwrap();
+
                             p.acceleration = Vector3::new(x_distr.sample(&mut rng), y_distr.sample(&mut rng), z_distr.sample(&mut rng));
+                        }
+                    });
+                }
+
+                {
+                    let std_dev = frame.angular_velocity_variance.sqrt();
+
+                    let normals_sum: Float = particles.par_iter().zip(&mut normals).zip(&mut angular_velocities).map(|((p, out_normal), angular_velocity)| {
+                        *angular_velocity = p.isometry.rotation * frame.robot_element.get_isometry_from_base().rotation * frame.angular_velocity;
+                        let distance = p.angular_velocity.angle_to(angular_velocity);
+                        *out_normal = normal(0.0, std_dev, distance);
+                        *out_normal
+                    }).sum();
+
+                    let ang_distr = Normal::new(0.0, std_dev).unwrap();
+
+                    particles.par_iter_mut().enumerate().for_each(|(i, p)| {
+                        let mut rng = QuickRng::default();
+
+                        // Probability of resampling point
+                        if rng.gen_bool(1.0 - (normals[i] / normals_sum) as f64) {
+                            let angular_velocity = angular_velocities[i];
+
+                            let target_ang = ang_distr.sample(&mut rng);
+                            let rand_quat = rand_quat(&mut rng);
+                            let rand_ang = angular_velocity.angle_to(&rand_quat);
+                            let t = target_ang / rand_ang;
+                            p.angular_velocity = angular_velocity.slerp(&rand_quat, t);
                         }
                     });
                 }
@@ -310,7 +381,7 @@ async fn run_localizer(
                 let x_distr = Normal::new(frame.position.x, std_dev).unwrap();
                 let y_distr = Normal::new(frame.position.y, std_dev).unwrap();
                 let z_distr = Normal::new(frame.position.z, std_dev).unwrap();
-                
+
                 let normals_sum: Float = particles.par_iter().zip(&mut normals).map(|(p, out)| {
                     let distance = (frame.position.coords - p.isometry.translation.vector).magnitude();
                     let normal = normal(0.0, std_dev, distance);
@@ -344,18 +415,52 @@ async fn run_localizer(
         particles.par_iter_mut().for_each(|p| {
             p.linear_velocity += p.acceleration * delta;
             p.isometry.translation.vector += p.linear_velocity * delta;
-            p.isometry.rotation = UnitQuaternion::default().try_slerp(&p.angular_velocity, delta, 0.001).unwrap_or_default() * p.isometry.rotation;
+            p.isometry.rotation = UnitQuaternion::default()
+                .try_slerp(&p.angular_velocity, delta, 0.001)
+                .unwrap_or_default()
+                * p.isometry.rotation;
         });
 
         let mut rotation_matrix = Matrix4::<Float>::default();
+        let mut position = Vector3::default();
+        let mut velocity = Vector3::default();
+
         particles.iter().for_each(|p| {
             let q_vec = p.isometry.rotation.as_vector();
             rotation_matrix += q_vec * q_vec.transpose() / bb.point_count as Float;
+            position += p.isometry.translation.vector;
+            velocity += p.linear_velocity;
         });
-        Davidson::new(matrix.clone(), 2, DavidsonCorrection::DPR, SpectrumTarget::Lowest, tolerance).unwrap();
 
-        // bb.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
-        // bb.robot_base.set_linear_velocity(eskf.velocity);
+        position /= bb.point_count as Float;
+        velocity /= bb.point_count as Float;
+
+        let mut isometry = bb.robot_base.get_isometry();
+        isometry.translation.vector = position;
+
+        match Davidson::new::<DMatrix<f64>>(
+            nalgebra::convert(rotation_matrix),
+            1,
+            DavidsonCorrection::DPR,
+            SpectrumTarget::Highest,
+            0.0001,
+        ) {
+            Ok(x) => {
+                let ev = x.eigenvectors.column(0);
+                isometry.rotation = UnitQuaternion::new_normalize(Quaternion::new(
+                    ev[3] as Float,
+                    ev[0] as Float,
+                    ev[1] as Float,
+                    ev[2] as Float,
+                ))
+            }
+            Err(e) => {
+                error!("{e}");
+            }
+        }
+
+        bb.robot_base.set_isometry(isometry);
+        bb.robot_base.set_linear_velocity(velocity);
         start += delta_duration;
     }
     bb.context = context;
@@ -405,13 +510,10 @@ impl Node for Localizer {
             orientation_sub: self.orientation_sub,
             context,
             robot_base: self.robot_base,
+            max_delta: self.max_delta
         };
 
-        start_machine::<CalibrateTransition, _, _, _>(
-            bb,
-            calibrate_localizer,
-        )
-        .await;
+        start_machine::<CalibrateTransition, _, _, _>(bb, calibrate_localizer).await;
         unreachable!()
     }
 }

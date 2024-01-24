@@ -12,7 +12,6 @@ impl Default for QuickRng {
     }
 }
 
-
 impl Drop for QuickRng {
     fn drop(&mut self) {
         // 2% of not returning
@@ -21,7 +20,6 @@ impl Drop for QuickRng {
         }
     }
 }
-
 
 impl RngCore for QuickRng {
     fn next_u32(&mut self) -> u32 {
