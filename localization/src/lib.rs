@@ -480,7 +480,7 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
         let delta_duration = start.elapsed();
         let delta = delta_duration.as_secs_f64() as Float;
         particles.par_iter_mut().for_each(|p| {
-            p.linear_velocity += p.acceleration * delta;
+            p.linear_velocity += (p.acceleration + Vector3::new(0.0, 9.81, 0.0)) * delta;
             p.isometry.translation.vector += p.linear_velocity * delta;
             p.isometry.rotation = UnitQuaternion::default()
                 .try_slerp(&p.angular_velocity, delta, 0.001)
