@@ -26,3 +26,4 @@ spin_sleep = { workspace = true }
 tokio-rayon = { workspace = true }
 ffmpeg-sidecar = "0.5.1"
 srtlib = "0.1.7"
+sysinfo = "0.30.5"

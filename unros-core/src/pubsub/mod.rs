@@ -290,6 +290,13 @@ impl<'a, T: 'static> Subscription<'a, T> {
         }
     }
 
+    /// Provides a name to this subscription, which enables lag logging.
+    /// 
+    /// If the `Publisher` that accepts this `Subscription` cannot push
+    /// new messages into this `Subscription` without deleting old message,
+    /// we say that the `Subscription` is lagging. Catching lagging is important
+    /// as it indicates data loss and a lack of processing speed. With a name,
+    /// these lags will be logged as warnings in the standard log file (`.log`).
     pub fn set_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into().into_boxed_str());
         self

@@ -510,6 +510,7 @@ pub async fn async_run_all(
     }
 
     let mut ctrl_c_failed = false;
+    let mut sys = sysinfo::System::new();
 
     loop {
         let ctrl_c_fut: Pin<Box<dyn Future<Output = _>>> = if ctrl_c_failed {
@@ -528,6 +529,14 @@ pub async fn async_run_all(
                         error!("Critical node has terminated! Exiting...");
                         break;
                     }
+                }
+            }
+            _ = tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL) => {
+                sys.refresh_cpu(); // Refreshing CPU information.
+                let cpus = sys.cpus();
+                let usage = cpus.into_iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
+                if usage >= 70.0 {
+                    warn!("CPU Usage at {usage}%");
                 }
             }
             result = ctrl_c_fut => {
