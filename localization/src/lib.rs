@@ -8,16 +8,19 @@ use std::{
 };
 
 use fxhash::FxHashMap;
-use nalgebra::{Isometry3, Matrix3, Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3 as V3};
+use nalgebra::{Isometry, Isometry3 as I3, Matrix3, Matrix4, Point3, Quaternion, Translation3, UnitQuaternion as UQ, UnitVector3, Vector3 as V3};
+use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use rig::{RobotBase, RobotElementRef, RotationSequence, RotationType};
 use smach::{start_machine, Transition};
 use unros_core::{
-    anyhow, async_trait, pubsub::{Subscriber, Subscription}, rng::QuickRng, setup_logging, tokio, Node, RuntimeContext
+    anyhow, async_trait, pubsub::{Subscriber, Subscription}, rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator, IndexedParallelIterator}, rng::QuickRng, setup_logging, tokio, Node, RuntimeContext
 };
 
 type Float = f32;
 type Vector3 = V3<Float>;
+type Isometry3 = I3<Float>;
+type UnitQuaternion = UQ<Float>;
 
 /// A position and variance measurement.
 #[derive(Clone)]
@@ -32,7 +35,7 @@ pub struct PositionFrame {
 /// An orientation and variance measurement.
 #[derive(Clone)]
 pub struct OrientationFrame {
-    pub orientation: UnitQuaternion<Float>,
+    pub orientation: UnitQuaternion,
     /// Variance of orientation in radians
     pub variance: Float,
     pub robot_element: RobotElementRef,
@@ -45,7 +48,7 @@ pub struct IMUFrame {
     /// Variance centered around acceleration in meters
     pub acceleration_variance: Float,
 
-    pub angular_velocity: UnitQuaternion<Float>,
+    pub angular_velocity: UnitQuaternion,
     /// Variance of angular_velocity in radians
     pub angular_velocity_variance: Float,
 
@@ -111,14 +114,14 @@ impl Localizer {
 struct CalibratingImu {
     count: usize,
     accel: Vector3,
-    angular_velocity: UnitQuaternion<Float>,
+    angular_velocity: UnitQuaternion,
 }
 
 #[derive(Debug)]
 struct CalibratedImu {
     accel_scale: Float,
-    accel_correction: UnitQuaternion<Float>,
-    angular_velocity_bias: UnitQuaternion<Float>,
+    accel_correction: UnitQuaternion,
+    angular_velocity_bias: UnitQuaternion,
 }
 
 struct LocalizerBlackboard {
@@ -207,47 +210,19 @@ async fn calibrate_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboar
 
 const E: Float = std::f64::consts::E as Float;
 const TAU: Float = std::f64::consts::TAU as Float;
-const SQRT_TAU: Float = TAU.sqrt();
 
 
 fn normal(mean: Float, std_dev: Float, x: Float) -> Float {
-    E.powf(((x - mean) / std_dev).powi(2) / - 2.0) / std_dev / SQRT_TAU
+    E.powf(((x - mean) / std_dev).powi(2) / - 2.0) / std_dev / TAU.sqrt()
 }
 
 
-fn c_normal_sum(mean_a: Float, mean_b: Float, mean_c: Float, x: Float) -> Float {
-    normal(mean_c, x, mean_a) + normal(mean_c, x, mean_b)
-}
-
-
-fn c_normal_sum_deriv(mean_a: Float, mean_b: Float, mean_c: Float, x: Float) -> Float {
-    let e_a = E.powf(-(mean_a - mean_c).powi(2) / 2.0 / x.powi(2));
-    let e_b = E.powf(-(mean_b - mean_c).powi(2) / 2.0 / x.powi(2));
-    let x2 = x.powi(2);
-
-    - e_a / SQRT_TAU / x2 +
-    (mean_a - mean_c).powi(2) * e_a / SQRT_TAU / x2 / x2 -
-    e_b / SQRT_TAU / x2 +
-    (mean_b - mean_c).powi(2) * e_b / SQRT_TAU / x2 / x2
-}
-
-
-fn c_normal_sol(mean_a: Float, mean_b: Float, mean_c: Float, n: usize, start_x: Float) -> Float {
-    let mut x = start_x;
-    for _ in 0..n {
-        x = x - c_normal_sum(mean_a, mean_b, mean_c, x) / c_normal_sum_deriv(mean_a, mean_b, mean_c, x);
-    }
-    x
-}
-
-
-fn mean_means(mean_a: Float, std_dev_a: Float, mean_b: Float, std_dev_b: Float) -> Float {
-    (std_dev_a * mean_b + std_dev_b * mean_a) / (std_dev_a + std_dev_b)
-}
-
-
-fn lerp_std_dev(std_dev_a: Float, std_dev_b: Float, target_std_dev: Float) -> Float {
-    std_dev_a / std_dev_b * (target_std_dev - std_dev_a) + std_dev_a
+#[derive(Clone, Copy, Default)]
+struct Particle {
+    isometry: Isometry3,
+    linear_velocity: Vector3,
+    angular_velocity: UnitQuaternion,
+    acceleration: Vector3,
 }
 
 
@@ -261,77 +236,127 @@ async fn run_localizer(
     let context = bb.context;
     setup_logging!(context);
 
-    let mut position = bb.start_position;
-    let mut position_std_dev = bb.start_std_dev;
+    let mut particles: Box<[_]> = (0..bb.point_count).map(|_| {
+        let mut rng = QuickRng::default();
 
-    let start = Instant::now();
+        let rotation = UnitQuaternion::from_axis_angle(&UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)), rng.gen_range(0.0..TAU));
 
-    // Check for recalibration while simultaneously feeding observations into the Kalman Filter
-    tokio::select! {
-        () = bb.recalibrate_sub.recv() => {}
-        _ = async { loop {
-            // Simultaneously watch three different subscriptions at once.
-            // 1. IMU observations
-            // 2. Position observations
-            // 3. Orientation observations
-            tokio::select! {
-                mut frame = bb.imu_sub.recv() => {
-                    let Some(calibration) = bb.calibrations.get(&frame.robot_element) else {
-                        error!("Unrecognized IMU message");
-                        continue;
-                    };
+        let x_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
+        let y_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
+        let z_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
+        let translation = Translation3::new(x_distr.sample(&mut rng), y_distr.sample(&mut rng), z_distr.sample(&mut rng));
 
-                    frame.angular_velocity -= calibration.angular_velocity_bias;
+        Particle {
+            isometry: Isometry::from_parts(translation, rotation),
+            linear_velocity: Default::default(),
+            angular_velocity: Default::default(),
+            acceleration: Default::default()
+        }
+    }).collect();
 
-                    frame.acceleration = frame.robot_element.get_global_isometry() * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
+    let mut start = Instant::now();
+    let mut normals = vec![0.0 as Float; bb.point_count];
 
-                    let isometry = frame.robot_element.get_isometry_from_base();
+    loop {
+        // Simultaneously watch three different subscriptions at once.
+        // 1. IMU observations
+        // 2. Position observations
+        // 3. Orientation observations
+        tokio::select! {
+            // Check for recalibration while simultaneously feeding observations into the Kalman Filter
+            () = bb.recalibrate_sub.recv() => {
+                break;
+            }
+            mut frame = bb.imu_sub.recv() => {
+                let Some(calibration) = bb.calibrations.get(&frame.robot_element) else {
+                    error!("Unrecognized IMU message");
+                    continue;
+                };
 
-                    let delta = start.elapsed();
-                    // PREDICT
-                    start += delta;
+                frame.angular_velocity = calibration.angular_velocity_bias.inverse() * frame.angular_velocity;
+                frame.acceleration = frame.robot_element.get_global_isometry() * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
 
-                    // Apply the predicted position, orientation, and velocity onto the robot base such that
-                    // other nodes can observe it.
-                    bb.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
-                    bb.robot_base.set_linear_velocity(eskf.velocity);
-                }
-                mut frame = bb.position_sub.recv() => {
-                    // Find the position of the robot base based on the observation of the position of an element
-                    // attached to the robot base.
-                    let isometry = frame.robot_element.get_isometry_from_base().inverse();
-                    frame.position = isometry * frame.position;
+                {
+                    let std_dev = frame.acceleration_variance.sqrt();
+    
+                    let x_distr = Normal::new(frame.acceleration.x, std_dev).unwrap();
+                    let y_distr = Normal::new(frame.acceleration.y, std_dev).unwrap();
+                    let z_distr = Normal::new(frame.acceleration.z, std_dev).unwrap();
+                
+                    let normals_sum: Float = particles.par_iter().zip(&mut normals).map(|(p, out)| {
+                        let distance = (frame.acceleration - p.acceleration).magnitude();
+                        let normal = normal(0.0, std_dev, distance);
+                        *out = normal;
+                        normal
+                    }).sum();
 
-                    let mean_c_x = mean_means(position.x, position_std_dev, frame.position.x, frame.variance);
-                    let mean_c_y = mean_means(position.y, position_std_dev, frame.position.y, frame.variance);
-                    let mean_c_z = mean_means(position.z, position_std_dev, frame.position.z, frame.variance);
-
-                    let length
-
-                    // Apply the predicted position, orientation, and velocity onto the robot base such that
-                    // other nodes can observe it.
-                    bb.robot_base.set_isometry(Isometry3::from_parts(position.into(), eskf.orientation));
-                    bb.robot_base.set_linear_velocity(eskf.velocity);
-                }
-                mut frame = bb.orientation_sub.recv() => {
-                    // Find the orientation of the robot base based on the observation of the orientation of an element
-                    // attached to the robot base.
-                    let isometry = frame.robot_element.get_isometry_from_base().inverse();
-                    frame.orientation = isometry.rotation * frame.orientation;
-                    frame.variance = isometry.rotation.to_rotation_matrix() * frame.variance;
-
-                    if let Err(e) = eskf.observe_orientation(frame.orientation, frame.variance) {
-                        error!("Failed to observe orientation: {e:#?}");
-                        continue;
-                    }
-
-                    // Apply the predicted position, orientation, and velocity onto the robot base such that
-                    // other nodes can observe it.
-                    bb.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
-                    bb.robot_base.set_linear_velocity(eskf.velocity);
+                    particles.par_iter_mut().enumerate().for_each(|(i, p)| {
+                        let mut rng = QuickRng::default();
+    
+                        // Probability of resampling point
+                        if rng.gen_bool(1.0 - (normals[i] / normals_sum) as f64) {
+                            p.acceleration = Vector3::new(x_distr.sample(&mut rng), y_distr.sample(&mut rng), z_distr.sample(&mut rng));
+                        }
+                    });
                 }
             }
-        }}=> {}
+            mut frame = bb.position_sub.recv() => {
+                // Find the position of the robot base based on the observation of the position of an element
+                // attached to the robot base.
+                let isometry = frame.robot_element.get_isometry_from_base().inverse();
+                frame.position = isometry * frame.position;
+                let std_dev = frame.variance.sqrt();
+
+                let x_distr = Normal::new(frame.position.x, std_dev).unwrap();
+                let y_distr = Normal::new(frame.position.y, std_dev).unwrap();
+                let z_distr = Normal::new(frame.position.z, std_dev).unwrap();
+                
+                let normals_sum: Float = particles.par_iter().zip(&mut normals).map(|(p, out)| {
+                    let distance = (frame.position.coords - p.isometry.translation.vector).magnitude();
+                    let normal = normal(0.0, std_dev, distance);
+                    *out = normal;
+                    normal
+                }).sum();
+
+                particles.par_iter_mut().enumerate().for_each(|(i, p)| {
+                    let mut rng = QuickRng::default();
+
+                    // Probability of resampling point
+                    if rng.gen_bool(1.0 - (normals[i] / normals_sum) as f64) {
+                        p.isometry.translation = Translation3::new(x_distr.sample(&mut rng), y_distr.sample(&mut rng), z_distr.sample(&mut rng));
+                    }
+                });
+            }
+            mut frame = bb.orientation_sub.recv() => {
+                // Find the orientation of the robot base based on the observation of the orientation of an element
+                // attached to the robot base.
+                let isometry = frame.robot_element.get_isometry_from_base().inverse();
+                frame.orientation = isometry.rotation * frame.orientation;
+
+
+            }
+        }
+
+        // Apply the predicted position, orientation, and velocity onto the robot base such that
+        // other nodes can observe it.
+        let delta_duration = start.elapsed();
+        let delta = delta_duration.as_secs_f64() as Float;
+        particles.par_iter_mut().for_each(|p| {
+            p.linear_velocity += p.acceleration * delta;
+            p.isometry.translation.vector += p.linear_velocity * delta;
+            p.isometry.rotation = UnitQuaternion::default().try_slerp(&p.angular_velocity, delta, 0.001).unwrap_or_default() * p.isometry.rotation;
+        });
+
+        let mut rotation_matrix = Matrix4::<Float>::default();
+        particles.iter().for_each(|p| {
+            let q_vec = p.isometry.rotation.as_vector();
+            rotation_matrix += q_vec * q_vec.transpose() / bb.point_count as Float;
+        });
+        Davidson::new(matrix.clone(), 2, DavidsonCorrection::DPR, SpectrumTarget::Lowest, tolerance).unwrap();
+
+        // bb.robot_base.set_isometry(Isometry3::from_parts(eskf.position.into(), eskf.orientation));
+        // bb.robot_base.set_linear_velocity(eskf.velocity);
+        start += delta_duration;
     }
     bb.context = context;
     (bb, ())

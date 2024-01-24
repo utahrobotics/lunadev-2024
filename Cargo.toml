@@ -8,7 +8,7 @@ members = [
     "camera",
     "apriltag",
     # If you do not have the RealSense SDK, remove the realsense member
-    # "realsense",
+    "realsense",
     "localization",
     "serial",
     "navigator",
@@ -37,17 +37,18 @@ tokio-rayon = "2"
 serde-big-array = "0.5"
 rand_distr = "0.4"
 bytemuck = "1"
+eigenvalues = { git = "https://github.com/Masterchef365/eigenvalues.git" }
 
 # The following crates need to run at full power
 # in most contexts to be effective.
-[profile.dev.package.realsense]
-opt-level = 3
+# [profile.dev.package.realsense]
+# opt-level = 3
 
 [profile.dev.package.apriltag]
 opt-level = 3
 
-# [profile.dev.package.localization]
-# opt-level = 3
+[profile.dev.package.localization]
+opt-level = 3
 
 [profile.dev.package.camera]
 opt-level = 3

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 unros-core = { path = "../unros-core" }
-machine-academy = { git = "https://github.com/manglemix/machine-academy.git", features = ["burn-ndarray"] }
+machine-academy = { git = "https://github.com/manglemix/machine-academy.git" }
 serde = { workspace = true }
 rand = { workspace = true }
 clap = { workspace = true }

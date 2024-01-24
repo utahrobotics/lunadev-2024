@@ -13,3 +13,5 @@ quaternion-core = { workspace = true }
 smach = { path = "../smach" }
 fxhash = { workspace = true }
 rand_distr = { workspace = true }
+rand = { workspace = true }
+eigenvalues = { workspace = true }
