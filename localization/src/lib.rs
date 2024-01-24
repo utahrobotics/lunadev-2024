@@ -170,6 +170,7 @@ struct LocalizerBlackboard {
 
     recalibrate_sub: Subscriber<()>,
     calibrations: FxHashMap<RobotElementRef, CalibratedImu>,
+    start_orientation: UnitQuaternion,
 
     imu_sub: Subscriber<IMUFrame>,
     position_sub: Subscriber<PositionFrame>,
@@ -246,6 +247,10 @@ async fn calibrate_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboar
         .collect();
 
     bb.recalibrate_sub.try_recv();
+    bb.start_orientation = UnitQuaternion::from_axis_angle(
+        &UnitVector3::new_normalize(total_gravity.cross(&-Vector3::y_axis())),
+        total_gravity.angle(&-Vector3::y_axis()),
+    );
     info!("Localizer calibrated");
     bb.context = context;
     (bb, ())
@@ -272,7 +277,7 @@ fn rand_quat(rng: &mut QuickRng) -> UnitQuaternion {
 }
 
 #[derive(Clone, Copy, Default)]
-struct Particle {
+pub struct Particle {
     isometry: Isometry3,
     linear_velocity: Vector3,
     angular_velocity: UnitQuaternion,
@@ -295,7 +300,7 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
             //     &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
             //     rng.gen_range(0.0..TAU),
             // );
-            let rotation = UnitQuaternion::default();
+            // let rotation = UnitQuaternion::default();
 
             let x_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
             let y_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
@@ -307,10 +312,10 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
             );
 
             Particle {
-                isometry: Isometry::from_parts(translation, rotation),
+                isometry: Isometry::from_parts(translation, bb.start_orientation),
                 linear_velocity: Default::default(),
                 angular_velocity: Default::default(),
-                acceleration: Default::default(),
+                acceleration: Vector3::new(0.0, -9.81, 0.0),
             }
         })
         .collect();
@@ -564,6 +569,7 @@ impl Node for Localizer {
             robot_base: self.robot_base,
             max_delta: self.max_delta,
             velocity_sub: self.velocity_sub,
+            start_orientation: Default::default()
         };
 
         start_machine::<CalibrateTransition, _, _, _>(bb, calibrate_localizer).await;
@@ -609,6 +615,8 @@ where
         Err(e) => Some(Err(e)),
     }
 }
+
+
 
 #[cfg(test)]
 mod tests {
