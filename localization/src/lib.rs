@@ -401,10 +401,31 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
             mut frame = bb.orientation_sub.recv() => {
                 // Find the orientation of the robot base based on the observation of the orientation of an element
                 // attached to the robot base.
-                let isometry = frame.robot_element.get_isometry_from_base().inverse();
-                frame.orientation = isometry.rotation * frame.orientation;
+                let inv_rotation = frame.robot_element.get_isometry_from_base().rotation.inverse();
+                frame.orientation = inv_rotation * frame.orientation;
 
+                let std_dev = frame.variance.sqrt();
 
+                let normals_sum: Float = particles.par_iter().zip(&mut normals).map(|(p, out_normal)| {
+                    let distance = p.isometry.rotation.angle_to(&frame.orientation);
+                    *out_normal = normal(0.0, std_dev, distance);
+                    *out_normal
+                }).sum();
+
+                let ang_distr = Normal::new(0.0, std_dev).unwrap();
+
+                particles.par_iter_mut().enumerate().for_each(|(i, p)| {
+                    let mut rng = QuickRng::default();
+
+                    // Probability of resampling point
+                    if rng.gen_bool(1.0 - (normals[i] / normals_sum) as f64) {
+                        let target_ang = ang_distr.sample(&mut rng);
+                        let rand_quat = rand_quat(&mut rng);
+                        let rand_ang = p.isometry.rotation.angle_to(&rand_quat);
+                        let t = target_ang / rand_ang;
+                        p.isometry.rotation = p.isometry.rotation.slerp(&rand_quat, t);
+                    }
+                });
             }
         }
 
