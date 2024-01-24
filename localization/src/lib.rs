@@ -10,7 +10,7 @@ use std::{
 use eigenvalues::{Davidson, DavidsonCorrection, SpectrumTarget};
 use fxhash::FxHashMap;
 use nalgebra::{
-    DMatrix, Isometry, Isometry3 as I3, Matrix4, Point3, Quaternion, Translation3,
+    DMatrix, Isometry, Isometry3 as I3, Matrix4, Point3 as P3, Quaternion, Translation3,
     UnitQuaternion as UQ, UnitVector3, Vector3 as V3,
 };
 use rand::Rng;
@@ -32,13 +32,24 @@ type Float = f32;
 type Vector3 = V3<Float>;
 type Isometry3 = I3<Float>;
 type UnitQuaternion = UQ<Float>;
+type Point3 = P3<Float>;
 
 /// A position and variance measurement.
 #[derive(Clone)]
 pub struct PositionFrame {
     /// Position in meters
-    pub position: Point3<Float>,
+    pub position: Point3,
     /// Variance centered around position in meters
+    pub variance: Float,
+    pub robot_element: RobotElementRef,
+}
+
+/// A position and variance measurement.
+#[derive(Clone)]
+pub struct VelocityFrame {
+    /// Velocity in meters
+    pub velocity: Vector3,
+    /// Variance centered around velocity in meters
     pub variance: Float,
     pub robot_element: RobotElementRef,
 }
@@ -73,7 +84,7 @@ pub struct IMUFrame {
 pub struct Localizer {
     pub point_count: usize,
     pub calibration_duration: Duration,
-    pub start_position: Point3<Float>,
+    pub start_position: Point3,
     pub start_variance: Float,
     pub max_delta: Duration,
 
@@ -81,6 +92,7 @@ pub struct Localizer {
 
     imu_sub: Subscriber<IMUFrame>,
     position_sub: Subscriber<PositionFrame>,
+    velocity_sub: Subscriber<VelocityFrame>,
     orientation_sub: Subscriber<OrientationFrame>,
 
     robot_base: RobotBase,
@@ -97,6 +109,7 @@ impl Localizer {
             imu_sub: Subscriber::default(),
             position_sub: Subscriber::default(),
             orientation_sub: Subscriber::default(),
+            velocity_sub: Subscriber::default(),
             robot_base,
             max_delta: Duration::from_millis(50)
         }
@@ -114,6 +127,13 @@ impl Localizer {
     /// Some messages may be skipped if there are too many.
     pub fn create_position_sub(&mut self) -> Subscription<PositionFrame> {
         self.position_sub.create_subscription(1)
+    }
+
+    /// Provide a velocity subscription.
+    ///
+    /// Some messages may be skipped if there are too many.
+    pub fn create_velocity_sub(&mut self) -> Subscription<VelocityFrame> {
+        self.velocity_sub.create_subscription(1)
     }
 
     /// Provide an orientation subscription.
@@ -139,7 +159,7 @@ struct CalibratedImu {
 
 struct LocalizerBlackboard {
     point_count: usize,
-    start_position: Point3<Float>,
+    start_position: Point3,
     start_std_dev: Float,
     max_delta: Duration,
 
@@ -150,6 +170,7 @@ struct LocalizerBlackboard {
 
     imu_sub: Subscriber<IMUFrame>,
     position_sub: Subscriber<PositionFrame>,
+    velocity_sub: Subscriber<VelocityFrame>,
     orientation_sub: Subscriber<OrientationFrame>,
 
     robot_base: RobotBase,
@@ -398,6 +419,33 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
                     }
                 });
             }
+            mut frame = bb.velocity_sub.recv() => {
+                // Find the velocity of the robot base based on the observation of the position of an element
+                // attached to the robot base.
+                let inv_rotation = frame.robot_element.get_isometry_from_base().rotation.inverse();
+                frame.velocity = inv_rotation * frame.velocity;
+                let std_dev = frame.variance.sqrt();
+
+                let x_distr = Normal::new(frame.velocity.x, std_dev).unwrap();
+                let y_distr = Normal::new(frame.velocity.y, std_dev).unwrap();
+                let z_distr = Normal::new(frame.velocity.z, std_dev).unwrap();
+
+                let normals_sum: Float = particles.par_iter().zip(&mut normals).map(|(p, out)| {
+                    let distance = (frame.velocity - p.linear_velocity).magnitude();
+                    let normal = normal(0.0, std_dev, distance);
+                    *out = normal;
+                    normal
+                }).sum();
+
+                particles.par_iter_mut().enumerate().for_each(|(i, p)| {
+                    let mut rng = QuickRng::default();
+
+                    // Probability of resampling point
+                    if rng.gen_bool(1.0 - (normals[i] / normals_sum) as f64) {
+                        p.linear_velocity = Vector3::new(x_distr.sample(&mut rng), y_distr.sample(&mut rng), z_distr.sample(&mut rng));
+                    }
+                });
+            }
             mut frame = bb.orientation_sub.recv() => {
                 // Find the orientation of the robot base based on the observation of the orientation of an element
                 // attached to the robot base.
@@ -531,7 +579,8 @@ impl Node for Localizer {
             orientation_sub: self.orientation_sub,
             context,
             robot_base: self.robot_base,
-            max_delta: self.max_delta
+            max_delta: self.max_delta,
+            velocity_sub: self.velocity_sub,
         };
 
         start_machine::<CalibrateTransition, _, _, _>(bb, calibrate_localizer).await;
