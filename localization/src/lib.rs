@@ -111,7 +111,7 @@ impl Localizer {
             orientation_sub: Subscriber::default(),
             velocity_sub: Subscriber::default(),
             robot_base,
-            max_delta: Duration::from_millis(50)
+            max_delta: Duration::from_millis(50),
         }
     }
 
@@ -260,14 +260,12 @@ fn rand_quat(rng: &mut QuickRng) -> UnitQuaternion {
     let v: Float = rng.gen_range(0.0..1.0);
     let w: Float = rng.gen_range(0.0..1.0);
     // h = ( sqrt(1-u) sin(2πv), sqrt(1-u) cos(2πv), sqrt(u) sin(2πw), sqrt(u) cos(2πw))
-    UnitQuaternion::new_unchecked(
-        Quaternion::new(
-            (1.0 - u).sqrt() * (TAU * v).sin(),
-            (1.0 - u).sqrt() * (TAU * v).cos(),
-            u.sqrt() * (TAU * w).sin(),
-            u.sqrt() * (TAU * w).cos(),
-        )
-    )
+    UnitQuaternion::new_unchecked(Quaternion::new(
+        (1.0 - u).sqrt() * (TAU * v).sin(),
+        (1.0 - u).sqrt() * (TAU * v).cos(),
+        u.sqrt() * (TAU * w).sin(),
+        u.sqrt() * (TAU * w).cos(),
+    ))
 }
 
 #[derive(Clone, Copy, Default)]
@@ -489,6 +487,7 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
                 .unwrap_or_default()
                 * p.isometry.rotation;
         });
+        start += delta_duration;
 
         let mut rotation_matrix = Matrix4::<Float>::default();
         let mut position = Vector3::default();
@@ -530,7 +529,6 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
 
         bb.robot_base.set_isometry(isometry);
         bb.robot_base.set_linear_velocity(velocity);
-        start += delta_duration;
     }
     bb.context = context;
     (bb, ())
