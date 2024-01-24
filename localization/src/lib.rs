@@ -4,10 +4,13 @@
 
 use std::{
     collections::hash_map::Entry,
+    num::NonZeroUsize,
     time::{Duration, Instant},
 };
 
-use eigenvalues::{Davidson, DavidsonCorrection, SpectrumTarget};
+use eigenvalues::{
+    algorithms::davidson::DavidsonError, Davidson, DavidsonCorrection, SpectrumTarget,
+};
 use fxhash::FxHashMap;
 use nalgebra::{
     DMatrix, Isometry, Isometry3 as I3, Matrix4, Point3 as P3, Quaternion, Translation3,
@@ -82,7 +85,7 @@ pub struct IMUFrame {
 ///
 /// Processing does not occur until the node is running.
 pub struct Localizer {
-    pub point_count: usize,
+    pub point_count: NonZeroUsize,
     pub calibration_duration: Duration,
     pub start_position: Point3,
     pub start_variance: Float,
@@ -101,7 +104,7 @@ pub struct Localizer {
 impl Localizer {
     pub fn new(robot_base: RobotBase, start_variance: Float) -> Self {
         Self {
-            point_count: 30,
+            point_count: NonZeroUsize::new(30).unwrap(),
             start_position: Default::default(),
             start_variance,
             calibration_duration: Duration::from_secs(3),
@@ -288,10 +291,11 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
         .map(|_| {
             let mut rng = QuickRng::default();
 
-            let rotation = UnitQuaternion::from_axis_angle(
-                &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
-                rng.gen_range(0.0..TAU),
-            );
+            // let rotation = UnitQuaternion::from_axis_angle(
+            //     &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
+            //     rng.gen_range(0.0..TAU),
+            // );
+            let rotation = UnitQuaternion::default();
 
             let x_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
             let y_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
@@ -489,13 +493,10 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
         });
         start += delta_duration;
 
-        let mut rotation_matrix = Matrix4::<Float>::default();
         let mut position = Vector3::default();
         let mut velocity = Vector3::default();
 
         particles.iter().for_each(|p| {
-            let q_vec = p.isometry.rotation.as_vector();
-            rotation_matrix += q_vec * q_vec.transpose() / bb.point_count as Float;
             position += p.isometry.translation.vector;
             velocity += p.linear_velocity;
         });
@@ -506,26 +507,9 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
         let mut isometry = bb.robot_base.get_isometry();
         isometry.translation.vector = position;
 
-        // https://math.stackexchange.com/questions/61146/averaging-quaternions
-        match Davidson::new::<DMatrix<f64>>(
-            nalgebra::convert(rotation_matrix),
-            1,
-            DavidsonCorrection::DPR,
-            SpectrumTarget::Highest,
-            0.0001,
-        ) {
-            Ok(x) => {
-                let ev = x.eigenvectors.column(0);
-                isometry.rotation = UnitQuaternion::new_normalize(Quaternion::new(
-                    ev[3] as Float,
-                    ev[0] as Float,
-                    ev[1] as Float,
-                    ev[2] as Float,
-                ))
-            }
-            Err(e) => {
-                error!("{e}");
-            }
+        match quat_mean(particles.iter().map(|x| x.isometry.rotation)).unwrap() {
+            Ok(x) => isometry.rotation = x,
+            Err(e) => error!("{e}"),
         }
 
         bb.robot_base.set_isometry(isometry);
@@ -567,7 +551,7 @@ impl Node for Localizer {
         setup_logging!(context);
 
         let bb = LocalizerBlackboard {
-            point_count: self.point_count,
+            point_count: self.point_count.get(),
             start_position: self.start_position,
             start_std_dev: self.start_variance.sqrt(),
             calibration_duration: self.calibration_duration,
@@ -584,5 +568,89 @@ impl Node for Localizer {
 
         start_machine::<CalibrateTransition, _, _, _>(bb, calibrate_localizer).await;
         unreachable!()
+    }
+}
+
+fn quat_mean<T, I>(quats: T) -> Option<Result<UnitQuaternion, DavidsonError>>
+where
+    T: IntoIterator<Item = UnitQuaternion, IntoIter = I>,
+    I: ExactSizeIterator<Item = UnitQuaternion>,
+{
+    let quats = quats.into_iter();
+    let n = quats.len();
+    if n == 0 {
+        return None;
+    }
+
+    let rotation_matrix: Matrix4<Float> = quats
+        .map(|q| {
+            let q_vec = q.as_vector();
+            q_vec * q_vec.transpose() / n as Float
+        })
+        .sum();
+
+    // https://math.stackexchange.com/questions/61146/averaging-quaternions
+    match Davidson::new::<DMatrix<f64>>(
+        nalgebra::convert(rotation_matrix),
+        1,
+        DavidsonCorrection::DPR,
+        SpectrumTarget::Highest,
+        0.0001,
+    ) {
+        Ok(x) => {
+            let ev = x.eigenvectors.column(0);
+            Some(Ok(UnitQuaternion::new_normalize(Quaternion::new(
+                ev[3] as Float,
+                ev[0] as Float,
+                ev[1] as Float,
+                ev[2] as Float,
+            ))))
+        }
+        Err(e) => Some(Err(e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nalgebra::{UnitQuaternion, UnitVector3};
+
+    use crate::{quat_mean, Float, Vector3};
+
+    const EPSILON: Float = 0.001;
+
+    #[test]
+    fn quat_mean_zeroes() {
+        assert_eq!(
+            quat_mean([Default::default(); 30]).unwrap().unwrap(),
+            Default::default()
+        );
+    }
+
+    #[test]
+    fn quat_mean_all_equal() {
+        let quat = UnitQuaternion::from_axis_angle(
+            &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
+            0.4,
+        );
+        assert!(quat_mean([quat; 30]).unwrap().unwrap().angle_to(&quat) < EPSILON);
+    }
+
+    #[test]
+    fn quat_mean_all_opposing() {
+        let quat01 = UnitQuaternion::from_axis_angle(
+            &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
+            0.4,
+        );
+        let quat02 = UnitQuaternion::from_axis_angle(
+            &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
+            -0.4,
+        );
+        assert!(
+            quat_mean([quat01, quat02])
+                .unwrap()
+                .unwrap()
+                .angle_to(&Default::default())
+                < EPSILON
+        );
     }
 }

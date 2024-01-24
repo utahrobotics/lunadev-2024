@@ -12,10 +12,14 @@ use navigator::{pid, WaypointDriver};
 use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use unros_core::{
-    anyhow, async_run_all, default_run_options, logging::{
+    anyhow, async_run_all, default_run_options,
+    logging::{
         dump::{DataDump, VideoDataDump},
         init_logger,
-    }, pubsub::Subscriber, rayon::iter::ParallelIterator, tokio, FnNode
+    },
+    pubsub::Subscriber,
+    rayon::iter::ParallelIterator,
+    tokio, FnNode,
 };
 
 #[tokio::main]
@@ -35,7 +39,11 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
 
     camera.set_robot_element_ref(camera_element.get_ref());
-    camera.accept_cloud_received_sub(costmap.create_points_sub().map(|x: PointCloud| x.par_iter().map(|x| x.0)));
+    camera.accept_cloud_received_sub(
+        costmap
+            .create_points_sub()
+            .map(|x: PointCloud| x.par_iter().map(|x| x.0)),
+    );
     let costmap_ref = costmap.get_ref();
 
     let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
@@ -54,12 +62,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let mut apriltag = AprilTagDetector::new(
-        640.0,
-        1280,
-        720,
-        camera_element.get_ref(),
-    );
+    let mut apriltag = AprilTagDetector::new(640.0, 1280, 720, camera_element.get_ref());
     apriltag.add_tag(Default::default(), Default::default(), 0.134, 0);
     // let mut pc_sub = camera.point_cloud_received_signal().watch();
 
@@ -86,26 +89,22 @@ async fn main() -> anyhow::Result<()> {
     // });
 
     let mut positioning = Localizer::new(robot_base, 0.4);
-    
-    apriltag.accept_tag_detected_sub(
-        positioning.create_position_sub().map(|pose: PoseObservation| 
-            PositionFrame {
-                position: nalgebra::convert(pose.position),
-                variance: 0.1,
-                robot_element: pose.robot_element,
-            }
-        )
-    );
-    
-    apriltag.accept_tag_detected_sub(
-        positioning.create_orientation_sub().map(|pose: PoseObservation| 
-            OrientationFrame {
-                orientation: nalgebra::convert(pose.orientation),
-                variance: 0.1,
-                robot_element: pose.robot_element,
-            },
-        )
-    );
+
+    apriltag.accept_tag_detected_sub(positioning.create_position_sub().map(
+        |pose: PoseObservation| PositionFrame {
+            position: nalgebra::convert(pose.position),
+            variance: 0.1,
+            robot_element: pose.robot_element,
+        },
+    ));
+
+    apriltag.accept_tag_detected_sub(positioning.create_orientation_sub().map(
+        |pose: PoseObservation| OrientationFrame {
+            orientation: nalgebra::convert(pose.orientation),
+            variance: 0.1,
+            robot_element: pose.robot_element,
+        },
+    ));
 
     camera.accept_imu_frame_received_sub(positioning.create_imu_sub());
 

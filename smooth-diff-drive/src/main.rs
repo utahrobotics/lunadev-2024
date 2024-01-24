@@ -2,7 +2,13 @@ use std::path::Path;
 
 use clap::{command, Parser, Subcommand};
 use machine_academy::{
-    burn::{backend::{wgpu::{AutoGraphicsApi, WgpuDevice}, Autodiff, Wgpu}, config::Config},
+    burn::{
+        backend::{
+            wgpu::{AutoGraphicsApi, WgpuDevice},
+            Autodiff, Wgpu,
+        },
+        config::Config,
+    },
     common::time_series::{GruNetwork, GruNetworkSuperConfig},
     data::create_dataset,
     super_train_regression, SuperTrainingConfig,

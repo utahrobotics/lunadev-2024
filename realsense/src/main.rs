@@ -1,5 +1,7 @@
 use realsense::discover_all_realsense;
-use unros_core::{anyhow, async_run_all, default_run_options, pubsub::Subscriber, tokio, FinalizedNode};
+use unros_core::{
+    anyhow, async_run_all, default_run_options, pubsub::Subscriber, tokio, FinalizedNode,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

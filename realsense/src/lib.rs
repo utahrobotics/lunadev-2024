@@ -223,13 +223,17 @@ impl Node for RealSenseCamera {
                     last_accel = nalgebra::convert(Vector3::from(*frame.acceleration()));
                 }
 
-                let (w, [i, j, k]) = quaternion_core::from_euler_angles(quaternion_core::RotationType::Intrinsic, quaternion_core::RotationSequence::XYZ, [last_ang_vel.x, last_ang_vel.y, last_ang_vel.z]);
+                let (w, [i, j, k]) = quaternion_core::from_euler_angles(
+                    quaternion_core::RotationType::Intrinsic,
+                    quaternion_core::RotationSequence::XYZ,
+                    [last_ang_vel.x, last_ang_vel.y, last_ang_vel.z],
+                );
 
                 self.imu_frame_received.set(IMUFrame {
                     acceleration: last_accel,
                     angular_velocity: UnitQuaternion::new_normalize(Quaternion::new(w, i, j, k)),
                     acceleration_variance: 0.65,
-                    angular_velocity_variance: 1.5,
+                    angular_velocity_variance: 0.005,
                     robot_element: robot_element.clone(),
                 });
 

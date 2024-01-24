@@ -141,7 +141,6 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
                         None
                     };
                 }
-                
             });
         }
 
