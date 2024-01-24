@@ -21,7 +21,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     thread::JoinHandle,
 };
@@ -34,6 +34,7 @@ pub mod task;
 pub use anyhow;
 pub use async_trait::async_trait;
 pub use bytes;
+use config::Config;
 use crossbeam::queue::SegQueue;
 use fxhash::FxHashMap;
 pub use log;
@@ -592,4 +593,22 @@ pub async fn async_run_all(
     }
 
     Ok(())
+}
+
+static CONFIG: OnceLock<Config> = OnceLock::new();
+
+pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
+    CONFIG
+        .get_or_try_init(|| {
+            Config::builder()
+                // Add in `./Settings.toml`
+                .add_source(config::File::with_name(".env"))
+                // Add in settings from the environment (with a prefix of APP)
+                // Eg.. `APP_DEBUG=1 ./target/app` would set the `debug` key
+                .add_source(config::Environment::with_prefix("APP"))
+                .build()
+        })?
+        .clone()
+        .try_deserialize()
+        .map_err(Into::into)
 }

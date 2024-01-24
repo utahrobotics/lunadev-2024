@@ -9,11 +9,11 @@ use std::{
     sync::Arc,
 };
 
-use portable_atomic::AtomicF32;
 use crossbeam::atomic::AtomicCell;
 use fxhash::FxHashMap;
 use joints::{Joint, JointMut};
 use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, Vector3};
+use portable_atomic::AtomicF32;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 

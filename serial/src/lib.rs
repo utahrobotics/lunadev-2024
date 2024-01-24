@@ -116,7 +116,7 @@ impl Node for SerialConnection {
                     }
                 }
             };
-            
+
             if self.tolerate_error {
                 error!(
                     "Encountered the following error while communicating with: {}: {e}",
@@ -128,7 +128,6 @@ impl Node for SerialConnection {
         }
     }
 }
-
 
 /// A single `VESC` connection to a serial port.
 pub struct VescConnection {
@@ -187,7 +186,7 @@ impl Node for VescConnection {
                     }
                 }
             };
-            
+
             if self.serial.tolerate_error {
                 error!(
                     "Encountered the following error while communicating with: {}: {e}",
