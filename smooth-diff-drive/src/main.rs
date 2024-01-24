@@ -2,7 +2,7 @@ use std::path::Path;
 
 use clap::{command, Parser, Subcommand};
 use machine_academy::{
-    burn::{backend::Autodiff, config::Config},
+    burn::{backend::{wgpu::{AutoGraphicsApi, WgpuDevice}, Autodiff, Wgpu}, config::Config},
     common::time_series::{GruNetwork, GruNetworkSuperConfig},
     data::create_dataset,
     super_train_regression, SuperTrainingConfig,
@@ -26,7 +26,7 @@ enum Commands {
 
 const BLOCK_MEM_SIZE: usize = 10_000_000;
 const SUPER_DIR: &str = "smooth-diff-drive-academy";
-type MyBackend = NdArray;
+type MyBackend = Wgpu<AutoGraphicsApi, f32, i32>;
 type MyAutodiffBackend = Autodiff<MyBackend>;
 
 fn main() {
@@ -54,7 +54,7 @@ fn main() {
             );
         }
         Commands::Train => {
-            let device = NdArrayDevice::default();
+            let device = WgpuDevice::default();
             let config = SuperTrainingConfig::<GruNetworkSuperConfig>::load(
                 Path::new(SUPER_DIR).join("super-config.json"),
             )
@@ -75,7 +75,7 @@ fn main() {
             );
         }
         Commands::Test => {
-            let _device = NdArrayDevice::default();
+            let _device = WgpuDevice::default();
             // smooth_diff_drive::test::<MyAutodiffBackend>("/tmp/smooth_diff_drive", device);
         }
         Commands::Sample => {}
