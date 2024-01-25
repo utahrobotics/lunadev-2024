@@ -6,11 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apriltag = "0.4"
+apriltag-inner = { version = "0.4", package = "apriltag" }
 apriltag-image = "0.1"
 apriltag-nalgebra = "0.1"
 unros-core = { path = "../unros-core" }
 rig = { path = "../rig" }
 nalgebra = { workspace = true }
 fxhash = { workspace = true }
-# crossbeam = "0.8"
+
+[dev-dependencies]
+camera = { path = "../camera" }
+rig = { path = "../rig" }
+toml = { workspace = true }

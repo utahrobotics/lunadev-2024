@@ -133,7 +133,9 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             .apply()
             .expect("Logger should have initialized correctly");
 
-        console_subscriber::init();
+        if run_options.enable_console_subscriber {
+            console_subscriber::init();
+        }
         Ok(log_folder_name)
     })?;
 

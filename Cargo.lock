@@ -160,9 +160,11 @@ dependencies = [
  "apriltag 0.4.0",
  "apriltag-image",
  "apriltag-nalgebra",
+ "camera",
  "fxhash",
  "nalgebra",
  "rig",
+ "toml 0.8.8",
  "unros-core",
 ]
 

@@ -8,7 +8,7 @@ use std::{
     time::Instant,
 };
 
-use apriltag::{families::Tag16h5, DetectorBuilder, Image, TagParams};
+use apriltag_inner::{families::Tag16h5, DetectorBuilder, Image, TagParams};
 use apriltag_image::{image::DynamicImage, ImageExt};
 use apriltag_nalgebra::PoseExt;
 use fxhash::FxHashMap;

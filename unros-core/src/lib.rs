@@ -325,9 +325,16 @@ pub struct RunOptions {
     /// lost.
     #[serde(default = "default_auxilliary_control")]
     pub auxilliary_control: bool,
+
+    #[serde(default = "default_enable_console_subscriber")]
+    pub enable_console_subscriber: bool
 }
 
 fn default_auxilliary_control() -> bool {
+    true
+}
+
+fn default_enable_console_subscriber() -> bool {
     true
 }
 
@@ -344,6 +351,7 @@ macro_rules! default_run_options {
         $crate::RunOptions {
             runtime_name: env!("CARGO_PKG_NAME").into(),
             auxilliary_control: true,
+            enable_console_subscriber: true
         }
     };
 }
