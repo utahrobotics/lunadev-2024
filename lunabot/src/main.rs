@@ -7,7 +7,7 @@ use apriltag::{AprilTagDetector, PoseObservation};
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
 use localization::{Localizer, OrientationFrame, PositionFrame};
-use nalgebra::Isometry;
+use nalgebra::{Isometry, Point3};
 use navigator::{pid, WaypointDriver};
 use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
 
     apriltag.accept_tag_detected_sub(localizer.create_position_sub().map(
         |pose: PoseObservation| PositionFrame {
-            position: nalgebra::convert(pose.position),
+            position: nalgebra::convert(Point3::from(pose.pose.translation.vector)),
             variance: 0.1,
             robot_element: pose.robot_element,
         },
@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
 
     apriltag.accept_tag_detected_sub(localizer.create_orientation_sub().map(
         |pose: PoseObservation| OrientationFrame {
-            orientation: nalgebra::convert(pose.orientation),
+            orientation: nalgebra::convert(pose.pose.rotation),
             variance: 0.1,
             robot_element: pose.robot_element,
         },
