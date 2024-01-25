@@ -178,7 +178,7 @@ func _update() -> void:
 script/source = "extends VBoxContainer
 
 
-const DATA_STRIDE := 17
+const DATA_STRIDE := 18
 
 var data: PackedFloat32Array
 var data_index := 0
