@@ -3,7 +3,7 @@ use camera::discover_all_cameras;
 use fxhash::FxBuildHasher;
 use rig::Robot;
 use unros_core::{
-    anyhow::{self, Context}, async_run_all, default_run_options, logging::init_logger, pubsub::Subscriber, tokio
+    anyhow::{self, Context}, async_run_all, default_run_options, logging::init_logger, pubsub::Subscriber, tokio, FnNode
 };
 
 #[tokio::main]
@@ -18,8 +18,14 @@ async fn main() -> anyhow::Result<()> {
     let mut camera = discover_all_cameras().context("Failed to discover cameras")?.next().context("No camera found")?;
     camera.accept_image_received_sub(apriltag.create_image_subscription());
     let mut pose_sub = Subscriber::default();
+    apriltag.add_tag(Default::default(), Default::default(), 0.12, 0);
     apriltag.accept_tag_detected_sub(pose_sub.create_subscription(1));
-    pose_sub.into_logger(|x| x.to_string(), "poses.log").await.context("Unable to create poses.log")?;
+    let pose_sub = FnNode::new(|_| async move {
+        loop {
+            let pose = pose_sub.recv().await;
+            println!("{pose}");
+        }
+    });
 
-    async_run_all([camera.into(), apriltag.into()], run_options).await
+    async_run_all([camera.into(), apriltag.into(), pose_sub.into()], run_options).await
 }
