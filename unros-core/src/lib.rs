@@ -326,6 +326,11 @@ pub struct RunOptions {
     #[serde(default = "default_auxilliary_control")]
     pub auxilliary_control: bool,
 
+    /// Enablinng console subscriber allows you to view the state of
+    /// each `tokio` task as the program is running. However, under
+    /// certain circumstances (such as running in `examples`) may lead
+    /// to an irrecoverable panic from `console-subscriber`. To avoid this,
+    /// simply set this field to `false`.
     #[serde(default = "default_enable_console_subscriber")]
     pub enable_console_subscriber: bool
 }
@@ -611,9 +616,7 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
             Config::builder()
                 // Add in `./Settings.toml`
                 .add_source(config::File::with_name(".env"))
-                // Add in settings from the environment (with a prefix of APP)
-                // Eg.. `APP_DEBUG=1 ./target/app` would set the `debug` key
-                .add_source(config::Environment::with_prefix("APP"))
+                .add_source(config::Environment::with_prefix(""))
                 .build()
         })?
         .clone()
