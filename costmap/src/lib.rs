@@ -16,8 +16,7 @@ use unros_core::{
     rayon::{
         self,
         iter::{
-            IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-            ParallelIterator,
+            IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator
         },
     },
     setup_logging, Node, RuntimeContext,
@@ -116,6 +115,7 @@ impl Costmap {
             counts: self.counts.clone(),
             area_length: self.area_length,
             area_width: self.area_width,
+            cell_width: self.cell_width,
         }
     }
 }
@@ -125,6 +125,7 @@ pub struct CostmapRef {
     area_length: usize,
     heights: Arc<[AtomicIsize]>,
     counts: Arc<[AtomicUsize]>,
+    cell_width: f32,
 }
 
 impl CostmapRef {
@@ -150,12 +151,40 @@ impl CostmapRef {
         ))
     }
 
-    // #[cfg(feature = "image")]
-    pub fn get_costmap_img(&self) -> image::GrayImage {
-        self.matrix_to_img(self.get_costmap()).0
+    pub fn costmap_to_obstacle(
+        &self,
+        mut matrix: Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>,
+        max_diff: f32,
+        current_height: f32,
+        agent_radius: f32
+    ) -> Matrix<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>> {
+        matrix.iter_mut().for_each(|x| {
+            *x -= current_height;
+        });
+        let agent_radius: usize = (agent_radius / self.cell_width as f32).round() as usize;
+        let tmp = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(matrix.nrows(), matrix.ncols(), matrix.into_iter().map(|x| x.abs() <= max_diff));
+        let mut out = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(matrix.nrows(), matrix.ncols(), std::iter::repeat(true));
+
+        tmp.row_iter().enumerate().for_each(|(y, row)| {
+            row.into_iter()
+                .enumerate()
+                .for_each(|(x, safe)| if !safe {
+                    for n_y in (y.saturating_sub(agent_radius))..(y + agent_radius) {
+                        for n_x in (x.saturating_sub(agent_radius))..(x + agent_radius) {
+                            let Some(mutref) = out.get_mut((n_x, n_y)) else { continue; };
+                            if ((n_x - x).pow(2) as f32 + (n_y - y).pow(2) as f32).sqrt() > agent_radius as f32 {
+                                continue;
+                            }
+                            *mutref = false;
+                        }
+                    }
+                });
+        });
+
+        out
     }
 
-    pub fn matrix_to_img(
+    pub fn costmap_to_img(
         &self,
         matrix: Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>,
     ) -> (image::GrayImage, f32) {
@@ -180,8 +209,8 @@ impl CostmapRef {
         let buf = matrix
             .row_iter()
             .flat_map(|x| {
-                x.column_iter()
-                    .map(|x| (x[0].abs() / max * 255.0) as u8)
+                x.into_iter()
+                    .map(|x| (x.abs() / max * 255.0) as u8)
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -191,6 +220,29 @@ impl CostmapRef {
                 .unwrap(),
             max,
         )
+    }
+
+    pub fn obstacles_to_img(
+        &self,
+        matrix: Matrix<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>,
+    ) -> image::GrayImage {
+        let buf = matrix
+            .row_iter()
+            .flat_map(|x| {
+                x.into_iter()
+                    .copied()
+                    .map(|x| if x {
+                        255
+                    } else {
+                        0
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        
+            image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf)
+                .unwrap()
     }
 }
 

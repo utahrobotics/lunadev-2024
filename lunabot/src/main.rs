@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
             tokio::time::sleep(Duration::from_millis(42)).await;
             let costmap = costmap_ref.get_costmap();
 
-            let (img, max) = costmap_ref.matrix_to_img(costmap);
+            let (img, max) = costmap_ref.costmap_to_img(costmap);
 
             costmap_writer.write_frame(img.into()).unwrap();
 
