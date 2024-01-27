@@ -332,7 +332,7 @@ pub struct RunOptions {
     /// to an irrecoverable panic from `console-subscriber`. To avoid this,
     /// simply set this field to `false`.
     #[serde(default = "default_enable_console_subscriber")]
-    pub enable_console_subscriber: bool
+    pub enable_console_subscriber: bool,
 }
 
 fn default_auxilliary_control() -> bool {
@@ -356,7 +356,7 @@ macro_rules! default_run_options {
         $crate::RunOptions {
             runtime_name: env!("CARGO_PKG_NAME").into(),
             auxilliary_control: true,
-            enable_console_subscriber: true
+            enable_console_subscriber: true,
         }
     };
 }

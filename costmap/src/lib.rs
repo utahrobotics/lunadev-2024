@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nalgebra::{Dyn, Matrix, Point3, VecStorage};
+use nalgebra::{Dyn, Matrix, Point2, Point3, VecStorage};
 use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros_core::{
@@ -16,7 +16,8 @@ use unros_core::{
     rayon::{
         self,
         iter::{
-            IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator
+            IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+            ParallelIterator,
         },
     },
     setup_logging, Node, RuntimeContext,
@@ -116,6 +117,8 @@ impl Costmap {
             area_length: self.area_length,
             area_width: self.area_width,
             cell_width: self.cell_width,
+            x_offset: self.x_offset,
+            y_offset: self.y_offset,
         }
     }
 }
@@ -126,6 +129,8 @@ pub struct CostmapRef {
     heights: Arc<[AtomicIsize]>,
     counts: Arc<[AtomicUsize]>,
     cell_width: f32,
+    x_offset: f32,
+    y_offset: f32,
 }
 
 impl CostmapRef {
@@ -151,34 +156,76 @@ impl CostmapRef {
         ))
     }
 
+    pub fn get_area_width(&self) -> usize {
+        self.area_width
+    }
+
+    pub fn get_area_length(&self) -> usize {
+        self.area_length
+    }
+
+    pub fn get_cell_width(&self) -> f32 {
+        self.cell_width
+    }
+
+    pub fn get_x_offset(&self) -> f32 {
+        self.x_offset
+    }
+
+    pub fn get_y_offset(&self) -> f32 {
+        self.y_offset
+    }
+
+    pub fn global_to_local(&self, global: Point2<f32>) -> Point2<isize> {
+        let x = global.x + self.x_offset;
+        let y = global.y + self.y_offset;
+
+        Point2::new(
+            (x / self.cell_width).round() as isize,
+            (y / self.cell_width).round() as isize,
+        )
+    }
+
     pub fn costmap_to_obstacle(
         &self,
         mut matrix: Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>,
         max_diff: f32,
         current_height: f32,
-        agent_radius: f32
+        agent_radius: f32,
     ) -> Matrix<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>> {
         matrix.iter_mut().for_each(|x| {
             *x -= current_height;
         });
         let agent_radius: usize = (agent_radius / self.cell_width as f32).round() as usize;
-        let tmp = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(matrix.nrows(), matrix.ncols(), matrix.into_iter().map(|x| x.abs() <= max_diff));
-        let mut out = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(matrix.nrows(), matrix.ncols(), std::iter::repeat(true));
+        let tmp = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(
+            matrix.nrows(),
+            matrix.ncols(),
+            matrix.into_iter().map(|x| x.abs() <= max_diff),
+        );
+        let mut out = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(
+            matrix.nrows(),
+            matrix.ncols(),
+            std::iter::repeat(true),
+        );
 
         tmp.row_iter().enumerate().for_each(|(y, row)| {
-            row.into_iter()
-                .enumerate()
-                .for_each(|(x, safe)| if !safe {
+            row.into_iter().enumerate().for_each(|(x, safe)| {
+                if !safe {
                     for n_y in (y.saturating_sub(agent_radius))..(y + agent_radius) {
                         for n_x in (x.saturating_sub(agent_radius))..(x + agent_radius) {
-                            let Some(mutref) = out.get_mut((n_x, n_y)) else { continue; };
-                            if ((n_x - x).pow(2) as f32 + (n_y - y).pow(2) as f32).sqrt() > agent_radius as f32 {
+                            let Some(mutref) = out.get_mut((n_x, n_y)) else {
+                                continue;
+                            };
+                            if ((n_x - x).pow(2) as f32 + (n_y - y).pow(2) as f32).sqrt()
+                                > agent_radius as f32
+                            {
                                 continue;
                             }
                             *mutref = false;
                         }
                     }
-                });
+                }
+            });
         });
 
         out
@@ -231,18 +278,12 @@ impl CostmapRef {
             .flat_map(|x| {
                 x.into_iter()
                     .copied()
-                    .map(|x| if x {
-                        255
-                    } else {
-                        0
-                    })
+                    .map(|x| if x { 255 } else { 0 })
                     .collect::<Vec<_>>()
             })
             .collect();
 
-        
-            image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf)
-                .unwrap()
+        image::GrayImage::from_vec(self.area_width as u32, self.area_length as u32, buf).unwrap()
     }
 }
 

@@ -8,8 +8,8 @@ use std::{
     // time::Instant,
 };
 
-use apriltag_inner::{families::Tag16h5, DetectorBuilder, Image, TagParams};
 use apriltag_image::{image::DynamicImage, ImageExt};
+use apriltag_inner::{families::Tag16h5, DetectorBuilder, Image, TagParams};
 use apriltag_nalgebra::PoseExt;
 use fxhash::FxHashMap;
 use nalgebra::{Isometry3, Point3, UnitQuaternion, Vector3};
@@ -46,7 +46,11 @@ impl Debug for PoseObservation {
 
 impl Display for PoseObservation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let axis = self.pose.rotation.axis().unwrap_or_else(|| Vector3::x_axis());
+        let axis = self
+            .pose
+            .rotation
+            .axis()
+            .unwrap_or_else(|| Vector3::x_axis());
         write!(f, "Observer pos: ({:.2}, {:.2}, {:.2}), axis: ({:.2}, {:.2}, {:.2}), angle: {:.0}, margin: {:.0}", self.pose.translation.x, self.pose.translation.y, self.pose.translation.z, axis.x, axis.y, axis.z, self.pose.rotation.angle() / PI * 180.0, self.decision_margin)
         // write!(f, "Observer pos: ({:.2}, {:.2}, {:.2}), quat: ({:.2}, {:.2}, {:.2}, {:.2}), margin: {:.0}", self.pose.translation.x, self.pose.translation.y, self.pose.translation.z, self.pose.rotation.w, self.pose.rotation.i, self.pose.rotation.j, self.pose.rotation.k, self.decision_margin)
     }
@@ -194,8 +198,16 @@ impl Node for AprilTagDetector {
 
                     let mut robot_pose = robot_pose.to_na();
 
-                    robot_pose.translation.vector = known.pose.translation.vector + known.pose.rotation * robot_pose.rotation.inverse() * robot_pose.translation.vector;
-                    robot_pose.rotation = known.pose.rotation * UnitQuaternion::from_axis_angle(&(robot_pose.rotation * Vector3::y_axis()), PI) * robot_pose.rotation;
+                    robot_pose.translation.vector = known.pose.translation.vector
+                        + known.pose.rotation
+                            * robot_pose.rotation.inverse()
+                            * robot_pose.translation.vector;
+                    robot_pose.rotation = known.pose.rotation
+                        * UnitQuaternion::from_axis_angle(
+                            &(robot_pose.rotation * Vector3::y_axis()),
+                            PI,
+                        )
+                        * robot_pose.rotation;
                     // let velocity;
 
                     // if let Some((time, old_pos)) = seen.get_mut(&detection.id()) {

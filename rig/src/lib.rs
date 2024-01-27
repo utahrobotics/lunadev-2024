@@ -12,7 +12,7 @@ use std::{
 use crossbeam::atomic::AtomicCell;
 use fxhash::FxHashMap;
 use joints::{Joint, JointMut};
-use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Isometry3, Point3, Quaternion, RealField, UnitQuaternion, Vector3};
 use portable_atomic::AtomicF32;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
@@ -437,5 +437,17 @@ impl RobotBaseRef {
             .changed()
             .await
             .expect("Sender should not be dropped");
+    }
+}
+
+
+pub trait RigSpace<T> {
+    fn get_forward_vector(&self) -> Vector3<T>;
+}
+
+
+impl<T: RealField + Copy> RigSpace<T> for Isometry3<T> {
+    fn get_forward_vector(&self) -> Vector3<T> {
+        (self.rotation * - Vector3::z_axis()).into_inner()
     }
 }
