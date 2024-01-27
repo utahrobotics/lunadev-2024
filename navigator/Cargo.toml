@@ -14,3 +14,4 @@ ordered-float = { workspace = true }
 costmap = { path = "../costmap" }
 spin_sleep = { workspace = true }
 pathfinding = "4"
+fxhash = { workspace = true }

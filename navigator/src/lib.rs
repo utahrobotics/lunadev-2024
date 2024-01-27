@@ -11,7 +11,7 @@ use nalgebra::{wrap, Isometry3, Point2, UnitVector2, UnitVector3, Vector2, Vecto
 use ordered_float::NotNan;
 use pathfinding::directed::astar::astar;
 use rig::{RigSpace, RobotBaseRef};
-use successors::SUCCESSORS;
+use successors::{successors, RobotState, SUCCESSORS};
 use unros_core::{
     anyhow, async_trait,
     pubsub::{Publisher, Subscription},
@@ -87,17 +87,21 @@ pub struct WaypointDriver {
     pub completion_distance: Float,
     costmap_ref: CostmapRef,
     pub refresh_rate: Duration,
-    pub agent_radius: f32,
-    pub max_height_diff: f32,
-    // pub max_
+    pub agent_radius: Float,
+    pub max_height_diff: Float,
+    pub can_reverse: bool,
+    pub side_speed: Float,
+    pub width: Float,
 }
 
 impl WaypointDriver {
     pub fn new(
         robot_base: RobotBaseRef,
         costmap_ref: CostmapRef,
-        agent_radius: f32,
-        max_height_diff: f32,
+        agent_radius: Float,
+        max_height_diff: Float,
+        side_speed: Float,
+        width: Float
     ) -> Self {
         let (task_sender, task_receiver) = mpsc::sync_channel(0);
         assert!(agent_radius >= 0.0);
@@ -112,6 +116,9 @@ impl WaypointDriver {
             refresh_rate: Duration::from_millis(60),
             agent_radius,
             max_height_diff,
+            can_reverse: true,
+            side_speed,
+            width,
         }
     }
 
@@ -147,23 +154,23 @@ impl Node for WaypointDriver {
                             self.agent_radius,
                         );
 
-                        let mut origin = self.costmap_ref.global_to_local(Point2::new(
+                        let mut position = self.costmap_ref.global_to_local(Point2::new(
                             isometry.translation.x,
                             isometry.translation.y,
                         ));
-                        if origin.x < 0 {
-                            origin.x = 0;
+                        if position.x < 0 {
+                            position.x = 0;
                         }
-                        if origin.y < 0 {
-                            origin.y = 0;
+                        if position.y < 0 {
+                            position.y = 0;
                         }
-                        let mut origin: Vector2<usize> =
-                            Vector2::new(origin.x as usize, origin.y as usize);
-                        if origin.x >= self.costmap_ref.get_area_width() {
-                            origin.x = self.costmap_ref.get_area_width() - 1;
+                        let mut position: Vector2<usize> =
+                            Vector2::new(position.x as usize, position.y as usize);
+                        if position.x >= self.costmap_ref.get_area_width() {
+                            position.x = self.costmap_ref.get_area_width() - 1;
                         }
-                        if origin.y >= self.costmap_ref.get_area_length() {
-                            origin.y = self.costmap_ref.get_area_length() - 1;
+                        if position.y >= self.costmap_ref.get_area_length() {
+                            position.y = self.costmap_ref.get_area_length() - 1;
                         }
 
                         let mut waypoint = self.costmap_ref.global_to_local(waypoint);
@@ -181,38 +188,25 @@ impl Node for WaypointDriver {
                         if waypoint.y >= self.costmap_ref.get_area_length() {
                             waypoint.y = self.costmap_ref.get_area_length() - 1;
                         }
+                        let forward = self.robot_base.get_isometry().get_forward_vector();
+                        let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
+                        let zero_turn_speed = self.side_speed / self.width;
 
                         let Some((raw_path, _distance)) = astar(
-                            &origin,
-                            |p| {
-                                let p: Vector2<isize> = p.cast();
-                                SUCCESSORS
-                                    .into_iter()
-                                    .map(move |(x, c)| (x + p, c))
-                                    .filter_map(|(p, c)|
-                                        if p.x < 0 || p.y < 0 {
-                                            None
-                                        } else {
-                                            let p = Vector2::new(p.x as usize, p.y as usize);
-                                            if *obstacles.get((p.x, p.y))? {
-                                                Some((p, NotNan::new(c).unwrap()))
-                                            } else {
-                                                None
-                                            }
-                                        }
-                                    )
+                            &RobotState {
+                                position,
+                                forward
                             },
-                            |p| NotNan::new((p - waypoint).cast::<f32>().magnitude()).unwrap(),
-                            |p| p == &waypoint,
+                            |current| successors(current, &obstacles, true, zero_turn_speed, self.side_speed, self.width),
+                            |current| NotNan::new((current.position.cast::<f32>() - waypoint.cast()).magnitude()).unwrap(),
+                            |current| current.position == waypoint,
                         ) else {
                             todo!("Failed to find path")
                         };
 
-                        let raw_path: Box<[_]> = raw_path.into_iter().map(|x| x.cast::<f32>()).collect();
+                        // let raw_path: Box<[_]> = raw_path.into_iter().map(|x| x.cast::<f32>()).collect();
 
-                        let mut travel = UnitVector2::new_normalize(raw_path[1] - raw_path[0]);
-                        let forward = self.robot_base.get_isometry().get_forward_vector();
-                        let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
+                        // let mut travel = UnitVector2::new_normalize(raw_path[1] - raw_path[0]);
 
                         // if forward.angle(&travel) {
 
