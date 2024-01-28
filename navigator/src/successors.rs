@@ -4,7 +4,7 @@ use unros_core::rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::Float;
 
-pub(super) const SUCCESSORS: [Vector2<isize>; 80] = [
+pub const SUCCESSORS: [Vector2<isize>; 80] = [
     Vector2::new(-5, 0),
     Vector2::new(-4, -3),
     Vector2::new(-4, -2),
@@ -92,6 +92,10 @@ pub(super) const SUCCESSORS: [Vector2<isize>; 80] = [
 pub(super) struct RobotState {
     pub(super) position: Vector2<usize>,
     pub(super) forward: UnitVector2<Float>,
+    pub(super) reversing: bool,
+    pub(super) arc_angle: Float,
+    pub(super) turn_first: bool,
+    pub(super) radius: Float
 }
 
 
@@ -123,19 +127,13 @@ pub(super) fn successors(current: &RobotState, obstacles: &DMatrix<bool>, can_re
                 }
             }
             let direct = UnitVector2::new_normalize(cell.cast::<Float>() - current.position.cast());
-            if let Some((state, mut cost, _)) = traverse_to(current.position, cell, direct, obstacles, can_reverse, side_speed, width) {
+            if let Some((mut state, mut cost, _)) = traverse_to(current.position, cell, direct, obstacles, can_reverse, side_speed, width) {
                 cost += direct.angle(&current.forward) / zero_turn_speed;
+                state.turn_first = true;
                 let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
             }
         });
 
-    // let mut seen = FxHashSet::default();
-    // successor_recv.into_iter()
-    //     .filter_map(move |x| if seen.insert(x) {
-    //         Some(x)
-    //     } else {
-    //         None
-    //     })
     successor_recv
 }
 
@@ -164,7 +162,12 @@ fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, forward: UnitVector2<Fl
         return Some((
             RobotState {
                 position: to,
-                forward
+                forward,
+                reversing,
+                arc_angle: 0.0,
+                turn_first: false,
+                // A straight line is just a segment of an infinitely large circle
+                radius: Float::INFINITY
             },
             distance / side_speed,
             true
@@ -201,7 +204,11 @@ fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, forward: UnitVector2<Fl
     Some((
         RobotState {
             position: to,
-            forward: Rotation2::new(cross * full_arc_angle) * forward
+            forward: Rotation2::new(cross * full_arc_angle) * forward,
+            reversing,
+            arc_angle: cross * full_arc_angle,
+            turn_first: false,
+            radius
         },
         (radius + width / 2.0) * full_arc_angle / side_speed,
         false

@@ -22,6 +22,18 @@ impl Debug for Steering {
 }
 
 impl Steering {
+    /// Shorthand to make this struct if you know the given values are not `NaN`.
+    /// 
+    /// # Panics
+    /// Panics if either left or right are `NaN`. To handle this possibility gracefully,
+    /// you should just construct this struct normally as the fields are public.
+    pub fn new(left: f32, right: f32) -> Self {
+        Self {
+            left: NotNan::new(left).unwrap(),
+            right: NotNan::new(right).unwrap(),
+        }
+    }
+
     pub fn from_drive_and_steering(drive: NotNan<f32>, steering: NotNan<f32>) -> Self {
         let mut left = drive;
         let mut right = drive;

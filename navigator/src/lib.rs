@@ -1,5 +1,4 @@
 use std::{
-    f32::consts::PI,
     fmt::{Debug, Display},
     sync::mpsc,
     time::Duration,
@@ -7,16 +6,16 @@ use std::{
 
 use costmap::CostmapRef;
 use global_msgs::Steering;
-use nalgebra::{wrap, Isometry3, Point2, UnitVector2, UnitVector3, Vector2, Vector3};
+use nalgebra::{Point2, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use pathfinding::directed::astar::astar;
 use rig::{RigSpace, RobotBaseRef};
-use successors::{successors, RobotState, SUCCESSORS};
+use successors::{successors, RobotState};
 use unros_core::{
     anyhow, async_trait,
     pubsub::{Publisher, Subscription},
     task::{Task, TaskHandle},
-    tokio::{self, sync::oneshot},
+    tokio::sync::oneshot,
     tokio_rayon, Node, RuntimeContext,
 };
 
@@ -92,6 +91,7 @@ pub struct WaypointDriver {
     pub can_reverse: bool,
     pub side_speed: Float,
     pub width: Float,
+    pub angle_epsilon: Float
 }
 
 impl WaypointDriver {
@@ -119,6 +119,8 @@ impl WaypointDriver {
             can_reverse: true,
             side_speed,
             width,
+            // 10 degrees
+            angle_epsilon: 0.1745329
         }
     }
 
@@ -164,7 +166,7 @@ impl Node for WaypointDriver {
                         if position.y < 0 {
                             position.y = 0;
                         }
-                        let mut position: Vector2<usize> =
+                        let mut position =
                             Vector2::new(position.x as usize, position.y as usize);
                         if position.x >= self.costmap_ref.get_area_width() {
                             position.x = self.costmap_ref.get_area_width() - 1;
@@ -180,7 +182,7 @@ impl Node for WaypointDriver {
                         if waypoint.y < 0 {
                             waypoint.y = 0;
                         }
-                        let mut waypoint: Vector2<usize> =
+                        let mut waypoint =
                             Vector2::new(waypoint.x as usize, waypoint.y as usize);
                         if waypoint.x >= self.costmap_ref.get_area_width() {
                             waypoint.x = self.costmap_ref.get_area_width() - 1;
@@ -195,7 +197,12 @@ impl Node for WaypointDriver {
                         let Some((raw_path, _distance)) = astar(
                             &RobotState {
                                 position,
-                                forward
+                                forward,
+                                // The following values are ignored on the starting state
+                                reversing: false,
+                                arc_angle: 0.0,
+                                turn_first: false,
+                                radius: 0.0
                             },
                             |current| successors(current, &obstacles, true, zero_turn_speed, self.side_speed, self.width),
                             |current| NotNan::new((current.position.cast::<f32>() - waypoint.cast()).magnitude()).unwrap(),
@@ -204,13 +211,41 @@ impl Node for WaypointDriver {
                             todo!("Failed to find path")
                         };
 
-                        // let raw_path: Box<[_]> = raw_path.into_iter().map(|x| x.cast::<f32>()).collect();
+                        let next = &raw_path[1];
 
-                        // let mut travel = UnitVector2::new_normalize(raw_path[1] - raw_path[0]);
-
-                        // if forward.angle(&travel) {
-
-                        // }
+                        if next.turn_first {
+                            // We don't need any logic for actually driving straight after the turn is complete
+                            // Because by that point the pathfinding algorithm will have changed the next
+                            // action to not turn first but instead swerve drive.
+                            //
+                            // But of course, that is just a hypothesis.
+                            if next.arc_angle > 0.0 {
+                                self.steering_signal.set(Steering::new(-1.0, 1.0));
+                            } else {
+                                self.steering_signal.set(Steering::new(1.0, -1.0));
+                            }
+                        } else if next.arc_angle.abs() <= self.angle_epsilon {
+                            if next.reversing {
+                                self.steering_signal.set(Steering::new(-1.0, -1.0));
+                            } else {
+                                self.steering_signal.set(Steering::new(1.0, 1.0));
+                            }
+                        } else {
+                            let smaller_ratio = (next.radius - self.width / 2.0) / (next.radius + self.width / 2.0);
+                            if next.arc_angle > 0.0 {
+                                if next.reversing {
+                                    self.steering_signal.set(Steering::new(-smaller_ratio, -1.0));
+                                } else {
+                                    self.steering_signal.set(Steering::new(smaller_ratio, 1.0));
+                                }
+                            } else {
+                                if next.reversing {
+                                    self.steering_signal.set(Steering::new(1.0, smaller_ratio));
+                                } else {
+                                    self.steering_signal.set(Steering::new(-1.0, -smaller_ratio));
+                                }
+                            }
+                        }
 
                         sleeper.sleep(self.refresh_rate);
                     }
