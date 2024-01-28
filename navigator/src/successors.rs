@@ -109,7 +109,7 @@ impl std::hash::Hash for RobotState {
     }
 }
 
-pub(super) fn successors(current: &RobotState, obstacles: &DMatrix<bool>, can_reverse: bool, zero_turn_speed: Float, side_speed: Float, width: Float) -> impl IntoIterator<Item=(RobotState, NotNan<Float>)> {
+pub(super) fn successors(current: &RobotState, obstacles: &DMatrix<bool>, can_reverse: bool, width: Float) -> impl IntoIterator<Item=(RobotState, NotNan<Float>)> {
     let (successor_sender, successor_recv) = std::sync::mpsc::sync_channel(SUCCESSORS.len());
 
     SUCCESSORS
@@ -120,15 +120,15 @@ pub(super) fn successors(current: &RobotState, obstacles: &DMatrix<bool>, can_re
                 return;
             }
             let cell = Vector2::new(cell.x as usize, cell.y as usize);
-            if let Some((state, cost, is_direct)) = traverse_to(current.position, cell, current.forward, obstacles, can_reverse, side_speed, width) {
+            if let Some((state, cost, is_direct)) = traverse_to(current.position, cell, current.forward, obstacles, can_reverse, width) {
                 let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
                 if is_direct {
                     return;
                 }
             }
             let direct = UnitVector2::new_normalize(cell.cast::<Float>() - current.position.cast());
-            if let Some((mut state, mut cost, _)) = traverse_to(current.position, cell, direct, obstacles, can_reverse, side_speed, width) {
-                cost += direct.angle(&current.forward) / zero_turn_speed;
+            if let Some((mut state, mut cost, _)) = traverse_to(current.position, cell, direct, obstacles, can_reverse, width) {
+                cost += direct.angle(&current.forward) * width / 2.0;
                 state.turn_first = true;
                 let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
             }
@@ -140,7 +140,7 @@ pub(super) fn successors(current: &RobotState, obstacles: &DMatrix<bool>, can_re
 const PI: Float = std::f64::consts::PI as Float;
 
 #[inline]
-fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, forward: UnitVector2<Float>, obstacles: &DMatrix<bool>, can_reverse: bool, side_speed: Float, width: Float) -> Option<(RobotState, Float, bool)> {
+fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, forward: UnitVector2<Float>, obstacles: &DMatrix<bool>, can_reverse: bool, width: Float) -> Option<(RobotState, Float, bool)> {
     if obstacles.get((to.x, to.y)).copied() == Some(false) {
         return None;
     }
@@ -169,7 +169,7 @@ fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, forward: UnitVector2<Fl
                 // A straight line is just a segment of an infinitely large circle
                 radius: Float::INFINITY
             },
-            distance / side_speed,
+            distance,
             true
         ));
     }
@@ -210,7 +210,7 @@ fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, forward: UnitVector2<Fl
             turn_first: false,
             radius
         },
-        (radius + width / 2.0) * full_arc_angle / side_speed,
+        (radius + width / 2.0) * full_arc_angle,
         false
     ))
 }

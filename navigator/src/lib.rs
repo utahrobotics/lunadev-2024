@@ -89,7 +89,6 @@ pub struct WaypointDriver {
     pub agent_radius: Float,
     pub max_height_diff: Float,
     pub can_reverse: bool,
-    pub side_speed: Float,
     pub width: Float,
     pub angle_epsilon: Float
 }
@@ -100,7 +99,6 @@ impl WaypointDriver {
         costmap_ref: CostmapRef,
         agent_radius: Float,
         max_height_diff: Float,
-        side_speed: Float,
         width: Float
     ) -> Self {
         let (task_sender, task_receiver) = mpsc::sync_channel(0);
@@ -117,7 +115,6 @@ impl WaypointDriver {
             agent_radius,
             max_height_diff,
             can_reverse: true,
-            side_speed,
             width,
             // 10 degrees
             angle_epsilon: 0.1745329
@@ -192,7 +189,6 @@ impl Node for WaypointDriver {
                         }
                         let forward = self.robot_base.get_isometry().get_forward_vector();
                         let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
-                        let zero_turn_speed = self.side_speed / self.width;
 
                         let Some((raw_path, _distance)) = astar(
                             &RobotState {
@@ -204,7 +200,7 @@ impl Node for WaypointDriver {
                                 turn_first: false,
                                 radius: 0.0
                             },
-                            |current| successors(current, &obstacles, true, zero_turn_speed, self.side_speed, self.width),
+                            |current| successors(current, &obstacles, true, self.width),
                             |current| NotNan::new((current.position.cast::<f32>() - waypoint.cast()).magnitude()).unwrap(),
                             |current| current.position == waypoint,
                         ) else {
@@ -219,10 +215,15 @@ impl Node for WaypointDriver {
                             // action to not turn first but instead swerve drive.
                             //
                             // But of course, that is just a hypothesis.
-                            if next.arc_angle > 0.0 {
-                                self.steering_signal.set(Steering::new(-1.0, 1.0));
+                            let value = if next.reversing {
+                                -1.0
                             } else {
-                                self.steering_signal.set(Steering::new(1.0, -1.0));
+                                1.0
+                            };
+                            if next.arc_angle > 0.0 {
+                                self.steering_signal.set(Steering::new(-value, value));
+                            } else {
+                                self.steering_signal.set(Steering::new(value, -value));
                             }
                         } else if next.arc_angle.abs() <= self.angle_epsilon {
                             if next.reversing {
