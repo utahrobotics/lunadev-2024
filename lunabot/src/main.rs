@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let camera_element = elements.remove("camera").unwrap();
     let robot_base_ref = robot_base.get_ref();
 
-    let mut costmap = Costmap::new(40, 40, 0.05, 1.0, 1.9, 0.01);
+    let mut costmap = Costmap::new(80, 80, 0.05, 2.0, 3.9, 0.01);
 
     let mut camera = discover_all_realsense()?
         .next()
@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
         loop {
             tokio::time::sleep(Duration::from_millis(42)).await;
             let costmap = costmap_ref.get_costmap();
-            let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 30.0, 0.0, 0.5);
+            let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
             let img = costmap_ref.obstacles_to_img(&obstacles);
 
             costmap_writer.write_frame(img.into()).unwrap();

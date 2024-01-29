@@ -239,12 +239,9 @@ impl VideoDataDump {
                 "rgb24",
                 "-s",
                 &format!("{width}x{height}"),
-                "-r",
-                "60",
-                "-use_wallclock_as_timestamps",
-                "1",
             ])
             .input("-")
+            .args(["-vf", "fps=60"])
             .args(["-c:v", "libx265"])
             .args(["-y".as_ref(), path.as_os_str()])
             .spawn()

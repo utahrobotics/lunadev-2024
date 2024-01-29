@@ -126,6 +126,7 @@ impl Costmap {
             x_offset: self.x_offset,
             y_offset: self.y_offset,
             min_frequency: self.min_frequency,
+            height_step: self.height_step,
         }
     }
 }
@@ -139,6 +140,7 @@ pub struct CostmapRef {
     x_offset: f32,
     y_offset: f32,
     min_frequency: f32,
+    height_step: f32,
 }
 
 impl CostmapRef {
@@ -164,7 +166,7 @@ impl CostmapRef {
                 if count == 0 || count < min_count {
                     0.0
                 } else {
-                    height.load(Ordering::Relaxed) as f32 / count as f32
+                    height.load(Ordering::Relaxed) as f32 / count as f32 * self.height_step
                 }
             })
             .collect();
