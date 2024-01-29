@@ -40,7 +40,7 @@ async fn main() -> anyhow::Result<()> {
         loop {
             tokio::time::sleep(Duration::from_millis(42)).await;
             let costmap = costmap_ref.get_costmap();
-            let (img, max) = costmap_ref.costmap_to_img(costmap);
+            let (img, max) = costmap_ref.costmap_to_img(&costmap);
             i += 1;
             let _ = img.save(format!("img{i}.png"));
 

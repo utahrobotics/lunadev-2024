@@ -90,7 +90,7 @@ pub struct WaypointDriver {
     pub max_height_diff: Float,
     pub can_reverse: bool,
     pub width: Float,
-    pub angle_epsilon: Float
+    pub angle_epsilon: Float,
 }
 
 impl WaypointDriver {
@@ -99,7 +99,7 @@ impl WaypointDriver {
         costmap_ref: CostmapRef,
         agent_radius: Float,
         max_height_diff: Float,
-        width: Float
+        width: Float,
     ) -> Self {
         let (task_sender, task_receiver) = mpsc::sync_channel(0);
         assert!(agent_radius >= 0.0);
@@ -117,7 +117,7 @@ impl WaypointDriver {
             can_reverse: true,
             width,
             // 10 degrees
-            angle_epsilon: 0.1745329
+            angle_epsilon: 0.1745329,
         }
     }
 
@@ -130,7 +130,6 @@ impl WaypointDriver {
     }
 }
 
-
 mod successors;
 
 #[async_trait]
@@ -141,13 +140,15 @@ impl Node for WaypointDriver {
         tokio_rayon::spawn(move || {
             let sleeper = spin_sleep::SpinSleeper::default();
             loop {
-                let init = self.task_receiver.recv().unwrap();
+                let Ok(init) = self.task_receiver.recv() else {
+                    break Ok(());
+                };
 
                 for waypoint in init.data.waypoints {
                     loop {
                         let isometry = self.robot_base.get_isometry();
                         let obstacles = self.costmap_ref.costmap_to_obstacle(
-                            self.costmap_ref.get_costmap(),
+                            &self.costmap_ref.get_costmap(),
                             self.max_height_diff,
                             isometry.translation.y,
                             self.agent_radius,
@@ -163,8 +164,7 @@ impl Node for WaypointDriver {
                         if position.y < 0 {
                             position.y = 0;
                         }
-                        let mut position =
-                            Vector2::new(position.x as usize, position.y as usize);
+                        let mut position = Vector2::new(position.x as usize, position.y as usize);
                         if position.x >= self.costmap_ref.get_area_width() {
                             position.x = self.costmap_ref.get_area_width() - 1;
                         }
@@ -179,8 +179,7 @@ impl Node for WaypointDriver {
                         if waypoint.y < 0 {
                             waypoint.y = 0;
                         }
-                        let mut waypoint =
-                            Vector2::new(waypoint.x as usize, waypoint.y as usize);
+                        let mut waypoint = Vector2::new(waypoint.x as usize, waypoint.y as usize);
                         if waypoint.x >= self.costmap_ref.get_area_width() {
                             waypoint.x = self.costmap_ref.get_area_width() - 1;
                         }
@@ -188,7 +187,8 @@ impl Node for WaypointDriver {
                             waypoint.y = self.costmap_ref.get_area_length() - 1;
                         }
                         let forward = self.robot_base.get_isometry().get_forward_vector();
-                        let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
+                        let forward =
+                            UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
                         let Some((raw_path, _distance)) = astar(
                             &RobotState {
@@ -198,10 +198,15 @@ impl Node for WaypointDriver {
                                 reversing: false,
                                 arc_angle: 0.0,
                                 turn_first: false,
-                                radius: 0.0
+                                radius: 0.0,
                             },
                             |current| successors(current, &obstacles, true, self.width),
-                            |current| NotNan::new((current.position.cast::<f32>() - waypoint.cast()).magnitude()).unwrap(),
+                            |current| {
+                                NotNan::new(
+                                    (current.position.cast::<f32>() - waypoint.cast()).magnitude(),
+                                )
+                                .unwrap()
+                            },
                             |current| current.position == waypoint,
                         ) else {
                             todo!("Failed to find path")
@@ -215,11 +220,7 @@ impl Node for WaypointDriver {
                             // action to not turn first but instead swerve drive.
                             //
                             // But of course, that is just a hypothesis.
-                            let value = if next.reversing {
-                                -1.0
-                            } else {
-                                1.0
-                            };
+                            let value = if next.reversing { -1.0 } else { 1.0 };
                             if next.arc_angle > 0.0 {
                                 self.steering_signal.set(Steering::new(-value, value));
                             } else {
@@ -232,10 +233,12 @@ impl Node for WaypointDriver {
                                 self.steering_signal.set(Steering::new(1.0, 1.0));
                             }
                         } else {
-                            let smaller_ratio = (next.radius - self.width / 2.0) / (next.radius + self.width / 2.0);
+                            let smaller_ratio =
+                                (next.radius - self.width / 2.0) / (next.radius + self.width / 2.0);
                             if next.arc_angle > 0.0 {
                                 if next.reversing {
-                                    self.steering_signal.set(Steering::new(-smaller_ratio, -1.0));
+                                    self.steering_signal
+                                        .set(Steering::new(-smaller_ratio, -1.0));
                                 } else {
                                     self.steering_signal.set(Steering::new(smaller_ratio, 1.0));
                                 }
@@ -243,7 +246,8 @@ impl Node for WaypointDriver {
                                 if next.reversing {
                                     self.steering_signal.set(Steering::new(1.0, smaller_ratio));
                                 } else {
-                                    self.steering_signal.set(Steering::new(-1.0, -smaller_ratio));
+                                    self.steering_signal
+                                        .set(Steering::new(-1.0, -smaller_ratio));
                                 }
                             }
                         }

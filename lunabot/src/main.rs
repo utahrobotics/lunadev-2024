@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let camera_element = elements.remove("camera").unwrap();
     let robot_base_ref = robot_base.get_ref();
 
-    let mut costmap = Costmap::new(40, 40, 0.05, 1.9, 0.0, 0.01);
+    let mut costmap = Costmap::new(40, 40, 0.05, 1.0, 1.9, 0.01);
 
     let mut camera = discover_all_realsense()?
         .next()
@@ -47,30 +47,29 @@ async fn main() -> anyhow::Result<()> {
     let costmap_ref = costmap.get_ref();
 
     let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
-    let mut subtitle_writer = costmap_writer.init_subtitles().await?;
+    // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
     let video_maker = FnNode::new(|_| async move {
         loop {
             tokio::time::sleep(Duration::from_millis(42)).await;
             let costmap = costmap_ref.get_costmap();
-
-            let (img, max) = costmap_ref.costmap_to_img(costmap);
+            let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 30.0, 0.0, 0.5);
+            let img = costmap_ref.obstacles_to_img(&obstacles);
 
             costmap_writer.write_frame(img.into()).unwrap();
-
-            subtitle_writer.write_subtitle(format!("{max:.2}")).unwrap();
         }
     });
 
     let mut apriltag = AprilTagDetector::new(640.0, 1280, 720, camera_element.get_ref());
     apriltag.add_tag(Default::default(), Default::default(), 0.134, 0);
-    // let mut pc_sub = camera.point_cloud_received_signal().watch();
+    // let mut pc_sub = Subscriber::default();
+    // camera.accept_cloud_received_sub(pc_sub.create_subscription(1));
 
     // let las_node = FnNode::new(|_| async move {
     //     let mut i = 0;
     //     loop {
-    //         let PointCloud { points } = pc_sub.wait_for_change().await;
-    //         tokio_rayon::spawn(move || {
+    //         let PointCloud { points } = pc_sub.recv().await;
+    //         unros_core::tokio_rayon::spawn(move || {
     //             let mut header = las::Builder::default();
     //             header.point_format = las::point::Format {
     //                 has_color: true,
@@ -79,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
     //             let mut writer = las::Writer::from_path(format!("{i}.las"), header.into_header().unwrap()).unwrap();
     //             use las::Write;
     //             for (point, color) in points.iter() {
-    //                 let mut point = las::Point { x: point.x as f64, y: point.y as f64, z: point.z as f64, ..Default::default() };
+    //                 let mut point = las::Point { x: point.x as f64, z: point.y as f64, y: point.z as f64, ..Default::default() };
     //                 point.color = Some(las::Color { red: color.0[0] as u16 * 255, green: color.0[1] as u16 * 255, blue: color.0[2] as u16 * 255 });
     //                 writer.write(point).unwrap();
     //             }
@@ -111,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
             .create_image_subscription()
             .set_name("RealSense Apriltag Image"),
     );
-    camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
+    // camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
 
     let navigator = WaypointDriver::new(robot_base_ref.clone(), costmap.get_ref(), 0.5, 0.2, 1.0);
 

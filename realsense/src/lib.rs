@@ -6,6 +6,7 @@
 
 use std::{
     collections::HashSet,
+    f32::consts::PI,
     ffi::OsStr,
     num::NonZeroU32,
     ops::Deref,
@@ -263,7 +264,6 @@ impl Node for RealSenseCamera {
                     let global_isometry = robot_element.get_global_isometry();
                     let frame_width = frame.width() as u32;
                     let frame_height = frame.height() as u32;
-                    let min_distance = self.min_distance;
 
                     let (frame_bytes, raw_rays) = join(
                         || {
@@ -291,6 +291,10 @@ impl Node for RealSenseCamera {
                             dst_image.into_vec()
                         },
                         || {
+                            let mut isometry = global_isometry;
+                            isometry.rotation = UnitQuaternion::from_scaled_axis(
+                                isometry.rotation * Vector3::y_axis().into_inner() * PI,
+                            ) * isometry.rotation;
                             let cam_geom = cam_geom::Camera::new(
                                 IntrinsicParametersPerspective::from(PerspectiveParams {
                                     fx: focal_length,
@@ -299,13 +303,14 @@ impl Node for RealSenseCamera {
                                     cx: frame_width as f32 / 8.0,
                                     cy: frame_height as f32 / 8.0,
                                 }),
-                                ExtrinsicParameters::from_pose(&nalgebra::convert(global_isometry)),
+                                ExtrinsicParameters::from_pose(&nalgebra::convert(isometry)),
                             );
-                            let pixel_coords = (0..frame_height / 4).into_iter().flat_map(|y| {
-                                (0..frame_width / 4)
-                                    .into_iter()
-                                    .flat_map(move |x| [x as f32, y as f32])
-                            });
+                            let pixel_coords =
+                                (0..frame_height / 4).into_iter().rev().flat_map(|y| {
+                                    (0..frame_width / 4)
+                                        .into_iter()
+                                        .flat_map(move |x| [x as f32, y as f32])
+                                });
 
                             let pixel_coords = Pixels::new(Matrix::<
                                 f32,
@@ -333,7 +338,7 @@ impl Node for RealSenseCamera {
                             }
                             let depth = *depth as f32 * scale;
 
-                            if depth < min_distance {
+                            if depth < self.min_distance {
                                 return None;
                             }
 
@@ -348,6 +353,17 @@ impl Node for RealSenseCamera {
                             ))
                         })
                         .collect();
+
+                    // let min_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).min().unwrap().into_inner();
+                    // let max_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).max().unwrap().into_inner();
+                    // let min_y = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.y).unwrap()).min().unwrap().into_inner();
+                    // let max_y = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.y).unwrap()).max().unwrap().into_inner();
+                    // let min_z = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.z).unwrap()).min().unwrap().into_inner();
+                    // let max_z = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.z).unwrap()).max().unwrap().into_inner();
+                    // println!("{min_x:.2} {max_x:.2} {min_y:.2} {max_y:.2}");
+                    // let mut total: Vector3<f32> = points.into_par_iter().map(|p| (p.0.coords - origin).normalize()).sum();
+                    // total.normalize_mut();
+                    // println!("{total}");
                     self.point_cloud_received.set(PointCloud { points });
                 }
             }

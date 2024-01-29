@@ -440,14 +440,12 @@ impl RobotBaseRef {
     }
 }
 
-
 pub trait RigSpace<T> {
     fn get_forward_vector(&self) -> Vector3<T>;
 }
 
-
 impl<T: RealField + Copy> RigSpace<T> for Isometry3<T> {
     fn get_forward_vector(&self) -> Vector3<T> {
-        (self.rotation * - Vector3::z_axis()).into_inner()
+        (self.rotation * -Vector3::z_axis()).into_inner()
     }
 }

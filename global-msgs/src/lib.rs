@@ -23,7 +23,7 @@ impl Debug for Steering {
 
 impl Steering {
     /// Shorthand to make this struct if you know the given values are not `NaN`.
-    /// 
+    ///
     /// # Panics
     /// Panics if either left or right are `NaN`. To handle this possibility gracefully,
     /// you should just construct this struct normally as the fields are public.

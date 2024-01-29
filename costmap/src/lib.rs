@@ -1,4 +1,8 @@
+#![feature(binary_heap_drain_sorted)]
+
 use std::{
+    cmp::Reverse,
+    collections::BinaryHeap,
     sync::{
         atomic::{AtomicIsize, AtomicUsize, Ordering},
         mpsc::channel,
@@ -30,6 +34,7 @@ struct PointMeasurement {
 
 pub struct Costmap {
     pub window_duration: Duration,
+    pub min_frequency: f32,
     area_width: usize,
     area_length: usize,
     cell_width: f32,
@@ -52,6 +57,7 @@ impl Costmap {
     ) -> Self {
         Self {
             window_duration: Duration::from_secs(5),
+            min_frequency: 0.33,
             area_width,
             area_length,
             height_step,
@@ -119,6 +125,7 @@ impl Costmap {
             cell_width: self.cell_width,
             x_offset: self.x_offset,
             y_offset: self.y_offset,
+            min_frequency: self.min_frequency,
         }
     }
 }
@@ -131,17 +138,30 @@ pub struct CostmapRef {
     cell_width: f32,
     x_offset: f32,
     y_offset: f32,
+    min_frequency: f32,
 }
 
 impl CostmapRef {
     pub fn get_costmap(&self) -> Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>> {
+        let mut counts: BinaryHeap<_> = self
+            .counts
+            .par_iter()
+            .map(|count| Reverse(count.load(Ordering::Relaxed)))
+            .collect();
+
+        for _ in 0..((counts.len() as f32 * self.min_frequency).ceil() as usize - 1) {
+            counts.pop();
+        }
+
+        let min_count = counts.pop().unwrap().0;
+
         let data = self
             .heights
             .par_iter()
             .zip(self.counts.par_iter())
             .map(|(height, count)| {
                 let count = count.load(Ordering::Relaxed);
-                if count == 0 {
+                if count == 0 || count < min_count {
                     0.0
                 } else {
                     height.load(Ordering::Relaxed) as f32 / count as f32
@@ -188,40 +208,36 @@ impl CostmapRef {
 
     pub fn costmap_to_obstacle(
         &self,
-        mut matrix: Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>,
+        matrix: &Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>,
         max_diff: f32,
         current_height: f32,
         agent_radius: f32,
     ) -> Matrix<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>> {
-        matrix.iter_mut().for_each(|x| {
-            *x -= current_height;
-        });
         let agent_radius: usize = (agent_radius / self.cell_width as f32).round() as usize;
         let tmp = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(
             matrix.nrows(),
             matrix.ncols(),
-            matrix.into_iter().map(|x| x.abs() <= max_diff),
+            matrix
+                .into_iter()
+                .map(|x| (x - current_height).abs() <= max_diff),
         );
-        let mut out = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(
-            matrix.nrows(),
-            matrix.ncols(),
-            std::iter::repeat(true),
-        );
+        let mut out = tmp.clone();
 
         tmp.row_iter().enumerate().for_each(|(y, row)| {
             row.into_iter().enumerate().for_each(|(x, safe)| {
                 if !safe {
                     for n_y in (y.saturating_sub(agent_radius))..(y + agent_radius) {
                         for n_x in (x.saturating_sub(agent_radius))..(x + agent_radius) {
-                            let Some(mutref) = out.get_mut((n_x, n_y)) else {
+                            let Some(mutref) = out.get_mut((n_y, n_x)) else {
                                 continue;
                             };
-                            if ((n_x - x).pow(2) as f32 + (n_y - y).pow(2) as f32).sqrt()
-                                > agent_radius as f32
+                            if ((n_x as isize - x as isize).pow(2) as f32
+                                + (n_y as isize - y as isize).pow(2) as f32)
+                                .sqrt()
+                                <= agent_radius as f32
                             {
-                                continue;
+                                *mutref = false;
                             }
-                            *mutref = false;
                         }
                     }
                 }
@@ -233,7 +249,7 @@ impl CostmapRef {
 
     pub fn costmap_to_img(
         &self,
-        matrix: Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>,
+        matrix: &Matrix<f32, Dyn, Dyn, VecStorage<f32, Dyn, Dyn>>,
     ) -> (image::GrayImage, f32) {
         let max = matrix
             .data
@@ -271,14 +287,14 @@ impl CostmapRef {
 
     pub fn obstacles_to_img(
         &self,
-        matrix: Matrix<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>,
+        matrix: &Matrix<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>,
     ) -> image::GrayImage {
         let buf = matrix
             .row_iter()
             .flat_map(|x| {
                 x.into_iter()
                     .copied()
-                    .map(|x| if x { 255 } else { 0 })
+                    .map(|x| if x { 0 } else { 255 })
                     .collect::<Vec<_>>()
             })
             .collect();
