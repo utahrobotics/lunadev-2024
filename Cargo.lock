@@ -3822,9 +3822,9 @@ dependencies = [
 
 [[package]]
 name = "realsense-rust"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1ba27e5abca782cc35a718f69cfe6e12df18ad1542c0a4d0d0e6991d03fe5f4"
+checksum = "95159b103df756ebef1f007c236a45f7ca4ac23f1eb74c288e8df21301683aa0"
 dependencies = [
  "anyhow",
  "num-derive",
