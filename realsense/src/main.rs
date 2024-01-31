@@ -1,8 +1,8 @@
 #[cfg(unix)]
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+#[unros_core::tokio::main]
+async fn main() -> unros_core::anyhow::Result<()> {
     use unros_core::{
-        anyhow, async_run_all, default_run_options, pubsub::Subscriber, tokio, FinalizedNode,
+        async_run_all, default_run_options, pubsub::Subscriber, tokio, FinalizedNode,
     };
     let cameras = realsense::discover_all_realsense()?;
 
@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 
+#[cfg(not(unix))]
 fn main() {
     unimplemented!("Realsense is not implemented on non-unix systems")
 }
