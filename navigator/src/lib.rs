@@ -51,7 +51,7 @@ impl std::error::Error for DrivingIsBusy {}
 
 pub struct DrivingTaskScheduleData {
     pub destination: Point2<Float>,
-    pub orientation: Option<UnitQuaternion<Float>>
+    pub orientation: Option<UnitQuaternion<Float>>,
 }
 
 #[async_trait]
@@ -167,7 +167,11 @@ impl Node for WaypointDriver {
                 loop {
                     let isometry = self.robot_base.get_isometry();
 
-                    if (init.data.destination.coords - Vector2::new(isometry.translation.x, isometry.translation.z)).magnitude() <= self.completion_distance {
+                    if (init.data.destination.coords
+                        - Vector2::new(isometry.translation.x, isometry.translation.z))
+                    .magnitude()
+                        <= self.completion_distance
+                    {
                         break;
                     }
 
@@ -197,8 +201,7 @@ impl Node for WaypointDriver {
                     }
 
                     let forward = isometry.get_forward_vector();
-                    let forward =
-                        UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
+                    let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
                     let Some((raw_path, _distance)) = astar(
                         &RobotState {
@@ -277,8 +280,10 @@ impl Node for WaypointDriver {
                         let forward = self.robot_base.get_isometry().get_forward_vector();
                         let forward =
                             UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
-                        
-                        let arc_angle = (forward.x * goal_forward.y - forward.y * goal_forward.x).signum() * forward.angle(&goal_forward);
+
+                        let arc_angle = (forward.x * goal_forward.y - forward.y * goal_forward.x)
+                            .signum()
+                            * forward.angle(&goal_forward);
 
                         if arc_angle.abs() < self.angle_epsilon {
                             break;
