@@ -1,11 +1,10 @@
-use realsense::discover_all_realsense;
-use unros_core::{
-    anyhow, async_run_all, default_run_options, pubsub::Subscriber, tokio, FinalizedNode,
-};
-
+#[cfg(unix)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cameras = discover_all_realsense()?;
+    use unros_core::{
+        anyhow, async_run_all, default_run_options, pubsub::Subscriber, tokio, FinalizedNode,
+    };
+    let cameras = realsense::discover_all_realsense()?;
 
     // let frame_count = AtomicUsize::new(0);
     // let frame_count: &_ = Box::leak(Box::new(frame_count));
@@ -34,4 +33,9 @@ async fn main() -> anyhow::Result<()> {
         default_run_options!(),
     )
     .await
+}
+
+
+fn main() {
+    unimplemented!("Realsense is not implemented on non-unix systems")
 }

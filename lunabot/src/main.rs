@@ -6,9 +6,10 @@ use std::{
 use apriltag::{AprilTagDetector, PoseObservation};
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use localization::{Localizer, OrientationFrame, PositionFrame};
+use localization::{IMUFrame, Localizer, OrientationFrame, PositionFrame};
 use nalgebra::{Isometry, Point3};
 use navigator::WaypointDriver;
+#[cfg(unix)]
 use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use unros_core::{
@@ -18,7 +19,6 @@ use unros_core::{
         init_logger,
     },
     pubsub::Subscriber,
-    rayon::iter::ParallelIterator,
     tokio, FnNode,
 };
 
@@ -32,18 +32,28 @@ async fn main() -> anyhow::Result<()> {
     let camera_element = elements.remove("camera").unwrap();
     let robot_base_ref = robot_base.get_ref();
 
-    let mut costmap = Costmap::new(80, 80, 0.05, 2.0, 3.9, 0.01);
+    let costmap = Costmap::new(80, 80, 0.05, 2.0, 3.9, 0.01);
+    
+    #[cfg(unix)]
+    let mut costmap = costmap;
 
-    let mut camera = discover_all_realsense()?
+    #[cfg(unix)]
+    let mut camera = {
+        use unros_core::rayon::iter::ParallelIterator;
+        let mut camera = discover_all_realsense()?
         .next()
         .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
 
-    camera.set_robot_element_ref(camera_element.get_ref());
-    camera.accept_cloud_received_sub(
-        costmap
-            .create_points_sub()
-            .map(|x: PointCloud| x.par_iter().map(|x| x.0)),
-    );
+        camera.set_robot_element_ref(camera_element.get_ref());
+        camera.accept_cloud_received_sub(
+            costmap
+                .create_points_sub()
+                .map(|x: PointCloud| x.par_iter().map(|x| x.0)),
+        );
+
+        camera
+    };
+    
     let costmap_ref = costmap.get_ref();
 
     let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
@@ -105,12 +115,15 @@ async fn main() -> anyhow::Result<()> {
         },
     ));
 
-    camera.accept_image_received_sub(
-        apriltag
-            .create_image_subscription()
-            .set_name("RealSense Apriltag Image"),
-    );
-    // camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
+    #[cfg(unix)]
+    {
+        camera.accept_image_received_sub(
+            apriltag
+                .create_image_subscription()
+                .set_name("RealSense Apriltag Image"),
+        );
+        // camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
+    }
 
     let navigator = WaypointDriver::new(robot_base_ref.clone(), costmap.get_ref(), 0.5, 0.2, 1.0);
 
@@ -120,7 +133,8 @@ async fn main() -> anyhow::Result<()> {
         "imu_ax,imu_ay,imu_az,imu_rvw,imu_rvi,imu_rvj,imu_rvk,vx,vy,vz,x,y,z,w,i,j,k,delta"
     )
     .unwrap();
-    let mut imu_sub = Subscriber::default();
+    let mut imu_sub = Subscriber::<IMUFrame>::default();
+    #[cfg(unix)]
     camera.accept_imu_frame_received_sub(imu_sub.create_subscription(32));
     let dumper = FnNode::new(|_| async move {
         let start = Instant::now();
@@ -153,17 +167,21 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    let nodes = [
+        apriltag.into(),
+        localizer.into(),
+        video_maker.into(),
+        navigator.into(),
+        costmap.into(),
+        dumper.into(),
+        // las_node.into()
+    ];
+
+    #[cfg(unix)]
+    let nodes = nodes.into_iter().chain(std::iter::once(camera.into()));
+
     async_run_all(
-        [
-            camera.into(),
-            apriltag.into(),
-            localizer.into(),
-            video_maker.into(),
-            navigator.into(),
-            costmap.into(),
-            dumper.into(),
-            // las_node.into()
-        ],
+        nodes,
         run_options,
     )
     .await

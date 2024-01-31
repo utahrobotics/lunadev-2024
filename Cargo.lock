@@ -2745,6 +2745,7 @@ dependencies = [
  "costmap",
  "fxhash",
  "nalgebra",
+ "navigator",
  "rig",
  "toml 0.8.8",
  "unros-core",
