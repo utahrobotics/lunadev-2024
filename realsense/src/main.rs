@@ -35,7 +35,6 @@ async fn main() -> unros_core::anyhow::Result<()> {
     .await
 }
 
-
 #[cfg(not(unix))]
 fn main() {
     unimplemented!("Realsense is not implemented on non-unix systems")

@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use nalgebra::{DMatrix, Rotation2, UnitVector2, Vector2};
 use ordered_float::NotNan;
-use unros_core::rayon::iter::{IntoParallelIterator, ParallelIterator};
+use unros_core::rayon::{self, iter::{IntoParallelIterator, ParallelIterator}};
 
 use crate::Float;
 
@@ -108,45 +110,47 @@ impl std::hash::Hash for RobotState {
 }
 
 pub(super) fn successors(
-    current: &RobotState,
-    obstacles: &DMatrix<bool>,
+    current: RobotState,
+    obstacles: Arc<DMatrix<bool>>,
     can_reverse: bool,
     width: Float,
 ) -> impl IntoIterator<Item = (RobotState, NotNan<Float>)> {
-    let (successor_sender, successor_recv) = std::sync::mpsc::sync_channel(SUCCESSORS.len());
+    let (successor_sender, successor_recv) = std::sync::mpsc::sync_channel(SUCCESSORS.len() * 2);
 
-    SUCCESSORS.into_par_iter().for_each(|mut cell| {
-        cell += current.position.cast();
-        if cell.x < 0 || cell.y < 0 {
-            return;
-        }
-        let cell = Vector2::new(cell.x as usize, cell.y as usize);
-        if let Some((state, cost, is_direct)) = traverse_to(
-            current.position,
-            cell,
-            current.forward,
-            obstacles,
-            can_reverse,
-            width,
-        ) {
-            let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
-            if is_direct {
+    rayon::spawn(move || {
+        SUCCESSORS.into_par_iter().for_each(|mut cell| {
+            cell += current.position.cast();
+            if cell.x < 0 || cell.y < 0 {
                 return;
             }
-        }
-        let direct = UnitVector2::new_normalize(cell.cast::<Float>() - current.position.cast());
-        if let Some((mut state, mut cost, _)) = traverse_to(
-            current.position,
-            cell,
-            direct,
-            obstacles,
-            can_reverse,
-            width,
-        ) {
-            cost += direct.angle(&current.forward) * width / 2.0;
-            state.turn_first = true;
-            let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
-        }
+            let cell = Vector2::new(cell.x as usize, cell.y as usize);
+            if let Some((state, cost, is_direct)) = traverse_to(
+                current.position,
+                cell,
+                current.forward,
+                &obstacles,
+                can_reverse,
+                width,
+            ) {
+                let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
+                if is_direct {
+                    return;
+                }
+            }
+            let direct = UnitVector2::new_normalize(cell.cast::<Float>() - current.position.cast());
+            if let Some((mut state, mut cost, _)) = traverse_to(
+                current.position,
+                cell,
+                direct,
+                &obstacles,
+                can_reverse,
+                width,
+            ) {
+                cost += direct.angle(&current.forward) * width / 2.0;
+                state.turn_first = true;
+                let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
+            }
+        });
     });
 
     successor_recv

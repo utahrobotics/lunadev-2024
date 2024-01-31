@@ -12,7 +12,6 @@ serde = { workspace = true }
 fxhash = { workspace = true }
 anyhow = { workspace = true }
 crossbeam = { workspace = true }
-eskf = { git = "https://github.com/manglemix/eskf-rs.git" }
 portable-atomic = { version = "1.6.0", features = ["float"]}
 quaternion-core = { workspace = true }
 tokio = { workspace = true }
