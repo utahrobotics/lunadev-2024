@@ -3,10 +3,6 @@
 version = 3
 
 [[package]]
-name = "Cargo"
-version = "0.1.0"
-
-[[package]]
 name = "addr2line"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1052,6 +1048,10 @@ name = "com-rs"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf43edc576402991846b093a7ca18a3477e0ef9c588cde84964b5d3e43016642"
+
+[[package]]
+name = "commands_architecture"
+version = "0.1.0"
 
 [[package]]
 name = "config"

@@ -46,3 +46,8 @@ If you need a display soon, please let me know as there are temporary solutions.
 13. [tools](https://github.com/utahrobotics/lunadev-2024/tree/main/tools) - Command Line Application for controlling Unros externally
 14. [lunabot](https://github.com/utahrobotics/lunadev-2024/tree/main/lunabot) - The final executable for lunabot
 15. [lunadev](https://github.com/utahrobotics/lunadev-2024/tree/main/lunadev) - Some stuff that help with development
+
+## Downloading Proprietary Software
+### Realsense
+**Linux** https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md
+**Windows** https://github.com/IntelRealSense/librealsense

@@ -1,7 +1,7 @@
 use commands_architecture::command::Command;
 
-struct CommandsRunner {
-    commands: Vec<Command>,
+struct CommandsRunner<T: Command> {
+    commands: Vec<T>,
     current_state: RobotStates,
 }
 
@@ -14,7 +14,7 @@ enum RobotStates {
 }
 
 /// Runs all the commands of the robot
-impl CommandsRunner {
+impl CommandsRunner<T: Command> {
     pub fn new() -> Self {
         CommandsRunner {
             commands: Vec::new(),
@@ -23,7 +23,7 @@ impl CommandsRunner {
     }
 
     /// Changes the commands that should be run
-    pub fn change_commands(&mut self, new_commands: Vec<Command>) {
+    pub fn change_commands(&mut self, new_commands: Vec<T>) {
         self.commands = new_commands;
     }
 
