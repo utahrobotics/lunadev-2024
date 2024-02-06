@@ -1,3 +1,5 @@
+use commands_architecture::command::Command;
+
 struct CommandsRunner {
     commands: Vec<Command>,
     current_state: RobotStates,
@@ -16,6 +18,7 @@ impl CommandsRunner {
     pub fn new() -> Self {
         CommandsRunner {
             commands: Vec::new(),
+            current_state: RobotStates::Autonomous,
         }
     }
 
@@ -31,6 +34,7 @@ impl CommandsRunner {
             RobotStates::Autonomous => self.run_commands(),
             RobotStates::Teleoperated => self.run_commands(),
             RobotStates::Test => self.run_commands(),
+            _ => {}  // By default do nothing
         }
     }
 
@@ -42,6 +46,7 @@ impl CommandsRunner {
                 // Stop all motors and other processes, so no more commands exist
                 self.commands.clear();  // Nothing else should be running on the robot
             }
+            _ => {}  // By default do nothing
         }
     }
 
