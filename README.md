@@ -5,7 +5,7 @@ If you are a student (ie. not an active contributor) you will find more value on
 
 ## Quickstart
 
-You will need Visual Studio Code (We'll call it VSCode).
+You will need Visual Studio Code (We'll call it VSCode). Any other IDE that can do remote development will also work, but these instructions are for VSCode specifically.
 
 Lunaserver is the computer that will run on the robot on competition day, but until then is just a computer that is on 24/7.
 It will be connected to all the sensors we will use, and maybe a microcontroller for you to test stuff on. You will use a technique called SSH to connect to Lunaserver. There is a dedicated extension in VScode for this that you should use. [Here is a guide](https://code.visualstudio.com/docs/remote/ssh#_connect-to-a-remote-host).
