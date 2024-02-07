@@ -1,16 +1,16 @@
-use std::time::Duration;
-
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use nalgebra::{Isometry, Point3, Quaternion, Translation3, UnitQuaternion};
+use nalgebra::{Isometry, Point2, Point3, Quaternion, Translation3, UnitQuaternion};
+use navigator::{DrivingTaskScheduleData, WaypointDriver};
 use rig::Robot;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
-    logging::{dump::VideoDataDump, init_logger},
-    pubsub::Publisher,
+    logging::init_logger,
+    pubsub::{Publisher, Subscriber},
+    task::Task,
     tokio::{
         self,
-        io::{AsyncReadExt, BufReader},
+        io::{AsyncReadExt, AsyncWriteExt, BufStream},
         net::TcpListener,
     },
     FnNode,
@@ -30,25 +30,30 @@ async fn main() -> anyhow::Result<()> {
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
     points_signal.accept_subscription(costmap.create_points_sub());
-    let costmap_ref = costmap.get_ref();
+    // let costmap_ref = costmap.get_ref();
 
-    let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
-    let mut subtitle_writer = costmap_writer.init_subtitles().await?;
+    // let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
 
-    let video_maker = FnNode::new(|_| async move {
-        let mut i = 0;
-        loop {
-            tokio::time::sleep(Duration::from_millis(42)).await;
-            let costmap = costmap_ref.get_costmap();
-            let (img, max) = costmap_ref.costmap_to_img(&costmap);
-            i += 1;
-            let _ = img.save(format!("img{i}.png"));
+    // let video_maker = FnNode::new(|_| async move {
+    //     let mut i = 0;
+    //     loop {
+    //         tokio::time::sleep(Duration::from_millis(42)).await;
+    //         let costmap = costmap_ref.get_costmap();
+    //         let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.2, 0.0, 0.3);
+    //         let img = costmap_ref.obstacles_to_img(&obstacles);
 
-            costmap_writer.write_frame(img.into()).unwrap();
+    //         i += 1;
+    //         let _ = img.save(format!("img{i}.png"));
 
-            subtitle_writer.write_subtitle(format!("{max:.2}")).unwrap();
-        }
-    });
+    //         // costmap_writer.write_frame(img.into()).unwrap();
+    //     }
+    // });
+
+    let mut navigator = WaypointDriver::new(robot_base.get_ref(), costmap.get_ref(), 0.3, 0.2, 0.3);
+    let nav_task = navigator.get_driving_task().clone();
+
+    let mut steering_sub = Subscriber::default();
+    navigator.accept_steering_sub(steering_sub.create_subscription(1));
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
     let sim_conn = FnNode::new(|_| async move {
@@ -57,50 +62,107 @@ async fn main() -> anyhow::Result<()> {
                 .accept()
                 .await
                 .expect("Connection should have succeeded");
-            let mut stream = BufReader::new(stream);
-            let mut buf = [0u8; 32];
+            let mut stream = BufStream::new(stream);
             let mut points = vec![];
 
             loop {
-                stream
-                    .read_exact(&mut buf)
+                let x = stream
+                    .read_f32_le()
                     .await
-                    .expect("Failed to receive packet");
-                let x = f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as Float;
-                let y = f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as Float;
-                let z = f32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as Float;
-                let w = f32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]) as Float;
-                let i = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]) as Float;
-                let j = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]) as Float;
-                let k = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]) as Float;
-                let n = u32::from_le_bytes([buf[28], buf[29], buf[30], buf[31]]) as usize;
+                    .expect("Failed to receive packet") as Float;
+                let _y = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let z = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let w = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let i = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let j = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let k = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let n = stream
+                    .read_u32_le()
+                    .await
+                    .expect("Failed to receive packet") as usize;
                 robot_base.set_isometry(Isometry {
                     rotation: UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)),
-                    translation: Translation3::new(x, y, z),
+                    translation: Translation3::new(x, 0.0, z),
                 });
 
                 points.reserve(n.saturating_sub(points.capacity()));
-                let mut buf = [0u8; 12];
                 for _ in 0..n {
-                    stream
-                        .read_exact(&mut buf)
-                        .await
-                        .expect("Failed to receive point");
-                    let x = f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
-                    let y = f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
-                    let z = f32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
+                    let x = stream.read_f32_le().await.expect("Failed to receive point");
+                    let y = stream.read_f32_le().await.expect("Failed to receive point");
+                    let z = stream.read_f32_le().await.expect("Failed to receive point");
                     points.push(Point3::new(x, y, z));
                 }
 
                 let capacity = points.capacity();
                 points_signal.set(points);
                 points = Vec::with_capacity(capacity);
+
+                if stream
+                    .read_u8()
+                    .await
+                    .expect("Failed to receive waypoint byte")
+                    == 255
+                {
+                    let x = stream.read_f32_le().await.expect("Failed to receive point");
+                    let y = stream.read_f32_le().await.expect("Failed to receive point");
+                    nav_task
+                        .try_schedule(DrivingTaskScheduleData {
+                            destination: Point2::new(x, y),
+                            orientation: None,
+                        })
+                        .await
+                        .unwrap();
+                }
+
+                if let Some(steering) = steering_sub.try_recv() {
+                    stream
+                        .write_f32_le(steering.left.into_inner())
+                        .await
+                        .expect("Failed to write steering");
+                    stream
+                        .write_f32_le(steering.right.into_inner())
+                        .await
+                        .expect("Failed to write steering");
+                } else {
+                    stream
+                        .write_f32_le(0.0)
+                        .await
+                        .expect("Failed to write steering");
+                    stream
+                        .write_f32_le(0.0)
+                        .await
+                        .expect("Failed to write steering");
+                }
+                stream.flush().await.expect("Failed to write steering");
             }
         }
     });
 
     async_run_all(
-        [video_maker.into(), costmap.into(), sim_conn.into()],
+        [
+            // video_maker.into(),
+            costmap.into(),
+            sim_conn.into(),
+            navigator.into(),
+        ],
         run_options,
     )
     .await

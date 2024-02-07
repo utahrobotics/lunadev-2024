@@ -1,10 +1,11 @@
-[gd_scene load_steps=34 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=35 format=3 uid="uid://b8qgudi6vkflb"]
 
 [ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_1xyvq"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="1_hl7kb"]
 [ext_resource type="PackedScene" uid="uid://s8kxwa7b8f1t" path="res://ray_scanner.tscn" id="2_jsa7e"]
 [ext_resource type="AudioStream" uid="uid://cephremnedhtp" path="res://addons/kenney_interface_sounds/error_002.wav" id="2_kejy0"]
 [ext_resource type="PackedScene" uid="uid://br8rl5vykae1n" path="res://boulder.tscn" id="3_02f7a"]
+[ext_resource type="PackedScene" uid="uid://c5hn62wsy0afm" path="res://waypoint.tscn" id="3_b4xjj"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_f0mli"]
 
@@ -364,14 +365,22 @@ height = 0.1
 script/source = "extends CharacterBody3D
 
 
+const WHEEL_SEPARATION := 0.3
 const MOUSE_SENSITIVITY := 0.3
-const SPEED := 1.2
+const SPEED := 0.5
 const CONN_DELAY := 0.1
 
 var conn: StreamPeerTCP
 
 var conn_timer := CONN_DELAY
+
+var waypoint: Vector2
+var waypoint_provided := false
+var send_waypoint := false
+var user_velocity: Vector3
+
 @onready var scanner: RayScanner = $RayScanner
+@onready var waypoint_mesh: Node3D = $Node/Waypoint
 
 
 func _input(event: InputEvent) -> void:
@@ -386,6 +395,19 @@ func _input(event: InputEvent) -> void:
 		global_rotate(Vector3.UP, event.relative.x)
 		rotate_object_local(Vector3.RIGHT, event.relative.y)
 	
+	elif event.is_action_pressed(\"PlaceWaypoint\"):
+		waypoint = Vector2(global_position.x, global_position.z)
+		waypoint_provided = true
+		waypoint_mesh.visible = true
+		waypoint_mesh.global_position.x = global_position.x
+		waypoint_mesh.global_position.z = global_position.z
+		waypoint_mesh.global_position.y = 0
+		return
+	
+	elif event.is_action_pressed(\"StartNavigation\"):
+		send_waypoint = waypoint_provided
+		return
+	
 	elif event.is_action(\"WalkForward\"):
 		pass
 	elif event.is_action(\"WalkBackwards\"):
@@ -398,9 +420,10 @@ func _input(event: InputEvent) -> void:
 		return
 	
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	velocity = global_transform.basis.z * (Input.get_action_strength(\"WalkBackwards\") - Input.get_action_strength(\"WalkForward\")) + global_transform.basis.x * (Input.get_action_strength(\"WalkRight\") - Input.get_action_strength(\"WalkLeft\"))
-	velocity = velocity.slide(Vector3.UP).normalized() * SPEED
-	velocity += Vector3.DOWN * 9.81
+	
+	user_velocity = global_transform.basis.z * (Input.get_action_strength(\"WalkBackwards\") - Input.get_action_strength(\"WalkForward\")) + global_transform.basis.x * (Input.get_action_strength(\"WalkRight\") - Input.get_action_strength(\"WalkLeft\"))
+	user_velocity = user_velocity.slide(Vector3.UP).normalized() * SPEED
+	user_velocity += Vector3.DOWN * 9.81
 	
 	if conn == null:
 		conn = StreamPeerTCP.new()
@@ -410,7 +433,12 @@ func _input(event: InputEvent) -> void:
 			conn = null
 
 
+var left_steering := 0.0
+var right_steering := 0.0
+
+
 func _physics_process(delta: float) -> void:
+	velocity = user_velocity
 	if conn != null:
 		conn.poll()
 	
@@ -432,6 +460,22 @@ func _physics_process(delta: float) -> void:
 				conn.put_float(point.x)
 				conn.put_float(point.y)
 				conn.put_float(point.z)
+			if send_waypoint:
+				conn.put_8(255)
+				conn.put_float(waypoint.x)
+				conn.put_float(waypoint.y)
+				send_waypoint = false
+			else:
+				conn.put_8(0)
+			
+			left_steering = conn.get_float()
+			right_steering = conn.get_float()
+	
+	velocity += - global_transform.basis.z * SPEED * (left_steering + right_steering) / 2
+	var angle := (right_steering - left_steering) * SPEED / WHEEL_SEPARATION
+	global_rotate(Vector3.UP, - angle * delta)
+	prints(left_steering, right_steering)
+	
 	move_and_slide()
 "
 
@@ -677,6 +721,12 @@ script = SubResource("GDScript_0y6bh")
 shape = SubResource("CapsuleShape3D_u861d")
 
 [node name="RayScanner" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D" instance=ExtResource("2_jsa7e")]
+
+[node name="Node" type="Node" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
+
+[node name="Waypoint" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node" instance=ExtResource("3_b4xjj")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+visible = false
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
 layers = 2

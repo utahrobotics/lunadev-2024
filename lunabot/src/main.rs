@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     let robot_base_ref = robot_base.get_ref();
 
     let costmap = Costmap::new(80, 80, 0.05, 2.0, 3.9, 0.01);
-    
+
     #[cfg(unix)]
     let mut costmap = costmap;
 
@@ -41,8 +41,8 @@ async fn main() -> anyhow::Result<()> {
     let mut camera = {
         use unros_core::rayon::iter::ParallelIterator;
         let mut camera = discover_all_realsense()?
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
 
         camera.set_robot_element_ref(camera_element.get_ref());
         camera.accept_cloud_received_sub(
@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
 
         camera
     };
-    
+
     let costmap_ref = costmap.get_ref();
 
     let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
@@ -180,9 +180,5 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(unix)]
     let nodes = nodes.into_iter().chain(std::iter::once(camera.into()));
 
-    async_run_all(
-        nodes,
-        run_options,
-    )
-    .await
+    async_run_all(nodes, run_options).await
 }

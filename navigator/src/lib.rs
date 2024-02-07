@@ -1,6 +1,6 @@
 use std::{
     fmt::{Debug, Display},
-    sync::mpsc,
+    sync::{mpsc, Arc},
     time::Duration,
 };
 
@@ -122,7 +122,7 @@ impl WaypointDriver {
         }
     }
 
-    pub fn accept_steering_signal(&mut self, sub: Subscription<Steering>) {
+    pub fn accept_steering_sub(&mut self, sub: Subscription<Steering>) {
         self.steering_signal.accept_subscription(sub);
     }
 
@@ -181,6 +181,7 @@ impl Node for WaypointDriver {
                         isometry.translation.y,
                         self.agent_radius,
                     );
+                    let obstacles = Arc::new(obstacles);
 
                     let mut position = self.costmap_ref.global_to_local(Point2::new(
                         isometry.translation.x,
@@ -213,7 +214,7 @@ impl Node for WaypointDriver {
                             turn_first: false,
                             radius: 0.0,
                         },
-                        |current| successors(current, &obstacles, true, self.width),
+                        |current| successors(*current, obstacles.clone(), true, self.width),
                         |current| {
                             let mut cost = NotNan::new(
                                 (current.position.cast::<f32>() - waypoint.cast()).magnitude(),
@@ -230,6 +231,10 @@ impl Node for WaypointDriver {
                     ) else {
                         todo!("Failed to find path")
                     };
+
+                    if raw_path.len() <= 1 {
+                        break;
+                    }
 
                     let next = &raw_path[1];
 

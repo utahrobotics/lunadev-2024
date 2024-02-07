@@ -1573,14 +1573,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eskf"
-version = "0.2.0"
-source = "git+https://github.com/manglemix/eskf-rs.git#ea3fd3ef19e85f73843defbdeddb57ee936c625f"
-dependencies = [
- "nalgebra",
-]
-
-[[package]]
 name = "exr"
 version = "1.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2745,6 +2737,7 @@ dependencies = [
  "costmap",
  "fxhash",
  "nalgebra",
+ "navigator",
  "rig",
  "toml 0.8.8",
  "unros-core",
@@ -3934,7 +3927,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossbeam",
- "eskf",
  "fxhash",
  "nalgebra",
  "portable-atomic",

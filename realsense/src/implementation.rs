@@ -9,10 +9,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::iter::ArcIter;
 use bytemuck::cast_slice;
 use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
 use image::{DynamicImage, ImageBuffer, Luma, Rgb};
-use crate::iter::ArcIter;
 use localization::IMUFrame;
 use nalgebra::{Dyn, Matrix, Point3, Quaternion, UnitQuaternion, VecStorage, Vector3, U2};
 use realsense_rust::{
@@ -33,7 +33,6 @@ use unros_core::{
     },
     setup_logging, tokio_rayon, DropCheck, Node, RuntimeContext,
 };
-
 
 #[derive(Clone)]
 pub struct PointCloud {
