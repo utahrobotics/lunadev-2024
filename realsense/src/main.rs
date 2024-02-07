@@ -1,5 +1,8 @@
 #[cfg(unix)]
-#[unros_core::tokio::main]
+use unros_core::tokio;
+
+#[cfg(unix)]
+#[tokio::main]
 async fn main() -> unros_core::anyhow::Result<()> {
     use unros_core::{
         async_run_all, default_run_options, pubsub::Subscriber, tokio, FinalizedNode,
