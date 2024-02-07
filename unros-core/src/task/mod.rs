@@ -6,6 +6,8 @@
 //! was an error (such as the arm getting stuck), the task may returrn an error
 //! to the autonomous process, allowing it to intelligently handle it.
 
+use std::{borrow::Cow, fmt::Display};
+
 use async_trait::async_trait;
 use log::error;
 use tokio::sync::{mpsc, oneshot};
@@ -38,6 +40,92 @@ pub trait Task: Sync {
         data: Self::ScheduleData,
     ) -> Result<TaskHandle<Self>, Self::ScheduleError>;
 }
+
+
+pub struct PendingChannelTask<T> {
+    sender: oneshot::Sender<T>
+}
+
+
+impl<T> PendingChannelTask<T> {
+    pub fn finish(self, data: T) {
+        let _ = self.sender.send(data);
+    }
+}
+
+
+pub struct ChannelTaskInit<TD, T> {
+    task_data_sender: oneshot::Sender<(TD, oneshot::Receiver<T>)>
+}
+
+
+impl<TD, T> ChannelTaskInit<TD, T> {
+    pub fn send_task_data(self, data: TD) -> Option<PendingChannelTask<T>> {
+        let (sender, recv) = oneshot::channel();
+        self.task_data_sender.send((data, recv)).ok()?;
+        Some(PendingChannelTask { sender })
+    }
+}
+
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChannelTaskError {
+    TaskQueueFull,
+    TaskDropped
+}
+
+
+impl Display for ChannelTaskError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TaskQueueFull => write!(f, "The queue of scheduled tasks is full"),
+            Self::TaskDropped => write!(f, "The task itself has been dropped")
+        }
+    }
+}
+
+
+impl std::error::Error for ChannelTaskError {}
+
+
+#[derive(Clone)]
+pub struct ChannelTask<T, SD, TD=()>{
+    sender: mpsc::Sender<(SD, ChannelTaskInit<TD, T>)>,
+    task_name: Cow<'static, str>
+}
+
+
+impl<T, SD, TD> ChannelTask<T, SD, TD> {
+    pub fn new(size: usize, task_name: impl Into<Cow<'static, str>>) -> (Self, mpsc::Receiver<(SD, ChannelTaskInit<TD, T>)>) {
+        let (sender, receiver) = mpsc::channel(size);
+        (Self { sender, task_name: task_name.into() })
+    }
+}
+
+
+#[async_trait]
+impl<T: Send + 'static, SD: Send, TD: Send> Task for ChannelTask<T, SD, TD> {
+    type Output = T;
+    type ScheduleData = SD;
+    type TaskData = TD;
+    type ScheduleError = ChannelTaskError;
+    
+    async fn try_schedule(
+        &self,
+        schedule_data: Self::ScheduleData,
+    ) -> Result<TaskHandle<Self>, Self::ScheduleError> {
+        let (task_data_sender, task_data_receiver) = oneshot::channel();
+        self.sender.try_send((schedule_data, ChannelTaskInit { task_data_sender })).map_err(|e| match e {
+                mpsc::error::TrySendError::Full(_) => ChannelTaskError::TaskQueueFull,
+                mpsc::error::TrySendError::Closed(_) => ChannelTaskError::TaskDropped,
+            }
+        )?;
+        let (task_data, done_recv) = task_data_receiver.await.map_err(|_| ChannelTaskError::TaskDropped)?;
+
+        Ok(TaskHandle::from_oneshot_receiver(done_recv, task_data, self.task_name.to_string()).await)
+    }
+}
+
 
 /// The task failed to complete, or it already completed and should not be waited for again.
 pub enum TaskCompletionError {
