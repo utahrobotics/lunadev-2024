@@ -1,7 +1,10 @@
 use std::fmt;
 use std::fmt::Write;
 
-use color_eyre::{owo_colors::{style, OwoColorize}, section::PanicMessage};
+use color_eyre::{
+    owo_colors::{style, OwoColorize},
+    section::PanicMessage,
+};
 use log::error;
 
 #[derive(Clone, Copy)]
@@ -16,10 +19,7 @@ impl PanicMessage for UnrosEyreMessage {
             "{}",
             "The application panicked (crashed).".style(style().red())
         )?;
-        writeln!(
-            log,
-            "The application panicked (crashed)."
-        )?;
+        writeln!(log, "The application panicked (crashed).")?;
 
         // Print panic message.
         let payload = pi

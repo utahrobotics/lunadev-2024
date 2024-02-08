@@ -8,7 +8,7 @@ use costmap::CostmapRef;
 use global_msgs::Steering;
 use nalgebra::{Point2, UnitQuaternion, UnitVector2, Vector2, Vector3};
 use ordered_float::NotNan;
-use pathfinding::directed::astar::astar;
+use pathfinding::directed::{astar::astar, fringe::fringe};
 use rig::{RigSpace, RobotBaseRef};
 use successors::{successors, RobotState};
 use unros_core::{
@@ -18,8 +18,6 @@ use unros_core::{
     tokio::sync::oneshot,
     tokio_rayon, Node, RuntimeContext,
 };
-
-use crate::successors::traverse_to;
 
 type Float = f32;
 
@@ -115,7 +113,7 @@ impl WaypointDriver {
             task_receiver,
             completion_distance: 0.15,
             costmap_ref,
-            refresh_rate: Duration::from_millis(60),
+            refresh_rate: Duration::from_millis(120),
             agent_radius,
             max_height_diff,
             can_reverse: true,
@@ -217,18 +215,15 @@ impl Node for WaypointDriver {
                             position,
                             forward,
                             // The following values are ignored on the starting state
-                            reversing: false,
                             arc_angle: 0.0,
-                            turn_first: false,
                             radius: 0.0,
+                            reversing: false
                         },
                         |current| {
                             successors(
                                 *current,
                                 obstacles.clone(),
                                 self.can_reverse,
-                                self.width,
-                                self.min_turn_angle,
                             )
                         },
                         |current| {
@@ -249,35 +244,25 @@ impl Node for WaypointDriver {
                     };
 
                     let next;
-                    if raw_path.len() == 2 {
-                        next = traverse_to(
-                            position,
-                            waypoint,
-                            forward,
-                            &obstacles,
-                            self.can_reverse,
-                            self.width,
-                        )
-                        .unwrap()
-                        .0;
+                    if raw_path.len() == 1 {
+                        break;
+                    // } else if raw_path.len() == 2 {
+                    //     next = traverse_to(
+                    //         position,
+                    //         waypoint,
+                    //         forward,
+                    //         &obstacles,
+                    //         self.can_reverse,
+                    //         self.width,
+                    //     )
+                    //     .unwrap()
+                    //     .0;
                     } else {
                         next = *raw_path.get(1).unwrap();
                     }
                     println!("{next:?}");
 
-                    if next.turn_first {
-                        // We don't need any logic for actually driving straight after the turn is complete
-                        // Because by that point the pathfinding algorithm will have changed the next
-                        // action to not turn first but instead swerve drive.
-                        //
-                        // But of course, that is just a hypothesis.
-                        let value = if next.reversing { -1.0 } else { 1.0 };
-                        if next.arc_angle > 0.0 {
-                            self.steering_signal.set(Steering::new(-value, value));
-                        } else {
-                            self.steering_signal.set(Steering::new(value, -value));
-                        }
-                    } else if next.arc_angle.abs() <= self.angle_epsilon {
+                    if next.arc_angle.abs() <= self.angle_epsilon {
                         if next.reversing {
                             self.steering_signal.set(Steering::new(-1.0, -1.0));
                         } else {
@@ -295,10 +280,10 @@ impl Node for WaypointDriver {
                             }
                         } else {
                             if next.reversing {
-                                self.steering_signal.set(Steering::new(1.0, smaller_ratio));
-                            } else {
                                 self.steering_signal
                                     .set(Steering::new(-1.0, -smaller_ratio));
+                            } else {
+                                self.steering_signal.set(Steering::new(1.0, smaller_ratio));
                             }
                         }
                     }
@@ -329,6 +314,7 @@ impl Node for WaypointDriver {
 
                         sleeper.sleep(self.refresh_rate);
                     }
+                    self.steering_signal.set(Steering::new(0.0, 0.0));
                 }
 
                 let _ = init.sender.send(());

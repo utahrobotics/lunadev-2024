@@ -23,7 +23,8 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
     },
-    thread::JoinHandle, time::Instant,
+    thread::JoinHandle,
+    time::Instant,
 };
 
 pub mod logging;

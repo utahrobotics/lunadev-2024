@@ -65,6 +65,8 @@ async fn main() -> anyhow::Result<()> {
                 .expect("Connection should have succeeded");
             let mut stream = BufStream::new(stream);
             let mut points = vec![];
+            let mut last_left_steering = 0.0;
+            let mut last_right_steering = 0.0;
 
             loop {
                 let x = stream
@@ -134,21 +136,23 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 if let Some(steering) = steering_sub.try_recv() {
+                    last_left_steering = steering.left.into_inner();
+                    last_right_steering = steering.right.into_inner();
                     stream
-                        .write_f32_le(steering.left.into_inner())
+                        .write_f32_le(last_left_steering)
                         .await
                         .expect("Failed to write steering");
                     stream
-                        .write_f32_le(steering.right.into_inner())
+                        .write_f32_le(last_right_steering)
                         .await
                         .expect("Failed to write steering");
                 } else {
                     stream
-                        .write_f32_le(0.0)
+                        .write_f32_le(last_left_steering)
                         .await
                         .expect("Failed to write steering");
                     stream
-                        .write_f32_le(0.0)
+                        .write_f32_le(last_right_steering)
                         .await
                         .expect("Failed to write steering");
                 }

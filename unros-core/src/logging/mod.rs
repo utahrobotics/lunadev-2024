@@ -10,8 +10,8 @@ use chrono::{Datelike, Timelike};
 use crate::{logging::eyre::UnrosEyreMessage, RunOptions};
 
 pub mod dump;
-pub mod rate;
 mod eyre;
+pub mod rate;
 
 /// Sets up a locally available set of logging macros.
 ///
@@ -71,7 +71,10 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     const LOGS_DIR: &str = "logs";
 
     SUB_LOGGING_DIR.get_or_try_init::<_, anyhow::Error>(|| {
-        color_eyre::config::HookBuilder::default().panic_message(UnrosEyreMessage).install().map_err(|e| anyhow::anyhow!(e))?;
+        color_eyre::config::HookBuilder::default()
+            .panic_message(UnrosEyreMessage)
+            .install()
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         if !AsRef::<Path>::as_ref(LOGS_DIR)
             .try_exists()

@@ -130,10 +130,10 @@ pub struct ChannelTask<T, SD, TD = ()> {
 
 impl<T, SD, TD> ChannelTask<T, SD, TD> {
     /// Creates a new `ChannelTask` and the receiving end of the underlying channel.
-    /// 
+    ///
     /// Users of `ChannelTask` would use this method to construct it, then use the
     /// `Receiver` to receive scheduling requests.
-    /// 
+    ///
     /// `size` is the maximum number of scheduling requests that can be queued up. Any
     /// requests that could not fit would cause an error on the scheduler's end (through `ChannelTaskError`).
     pub fn new(
