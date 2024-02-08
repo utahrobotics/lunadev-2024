@@ -8,7 +8,7 @@ use costmap::CostmapRef;
 use global_msgs::Steering;
 use nalgebra::{Point2, UnitQuaternion, UnitVector2, Vector2, Vector3};
 use ordered_float::NotNan;
-use pathfinding::directed::{astar::astar, fringe::fringe};
+use pathfinding::directed::astar::astar;
 use rig::{RigSpace, RobotBaseRef};
 use successors::{successors, RobotState};
 use unros_core::{

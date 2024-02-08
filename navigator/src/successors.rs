@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use nalgebra::{distance, DMatrix, Rotation2, UnitVector2, Vector2};
+use nalgebra::{DMatrix, Rotation2, UnitVector2, Vector2};
 use ordered_float::NotNan;
 
 use crate::Float;

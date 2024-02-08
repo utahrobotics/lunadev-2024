@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::Context;
 use chrono::{Datelike, Timelike};
+use fern::colors::{Color, ColoredLevelConfig};
 
 use crate::{logging::eyre::UnrosEyreMessage, RunOptions};
 
@@ -107,28 +108,34 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             .create(&log_folder_name)
             .context("Failed to create sub-logging directory. Do we have permissions?")?;
 
+        let colors = ColoredLevelConfig::new()
+            .warn(Color::Yellow)
+            .error(Color::Red)
+            .trace(Color::BrightBlack);
+
         let _ = START_TIME.set(Instant::now());
 
         fern::Dispatch::new()
-            .format(move |out, message, record| {
-                let secs = START_TIME.get().unwrap().elapsed().as_secs_f32();
-                out.finish(format_args!(
-                    "[{:0>1}:{:.2} {} {}] {}",
-                    (secs / 60.0).floor(),
-                    secs % 60.0,
-                    record.level(),
-                    record.target(),
-                    message
-                ))
-            })
             // Add blanket level filter -
             .level(log::LevelFilter::Debug)
             // Output to stdout, files, and other Dispatch configurations
             .chain(
-                fern::Dispatch::new().chain(
-                    fern::log_file(log_folder_name.join(".log"))
-                        .context("Failed to create log file. Do we have permissions?")?,
-                ),
+                fern::Dispatch::new()
+                    .format(move |out, message, record| {
+                        let secs = START_TIME.get().unwrap().elapsed().as_secs_f32();
+                        out.finish(format_args!(
+                            "[{:0>1}:{:.2} {} {}] {}",
+                            (secs / 60.0).floor(),
+                            secs % 60.0,
+                            record.level(),
+                            record.target(),
+                            message
+                        ))
+                    })
+                    .chain(
+                        fern::log_file(log_folder_name.join(".log"))
+                            .context("Failed to create log file. Do we have permissions?")?,
+                    )
             )
             .chain(
                 fern::Dispatch::new()
@@ -136,6 +143,17 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                     // This filter is to avoid logging panics to the console, since rust already does that.
                     // Note that the 'panic' target is set by us in eyre.rs.
                     .filter(|x| x.target() != "panic")
+                    .format(move |out, message, record| {
+                        let secs = START_TIME.get().unwrap().elapsed().as_secs_f32();
+                        out.finish(format_args!(
+                            "\x1B[{}m[{:0>1}:{:.2} {}] {}\x1B[0m",
+                            colors.get_color(&record.level()).to_fg_str(),
+                            (secs / 60.0).floor(),
+                            secs % 60.0,
+                            record.target(),
+                            message
+                        ))
+                    })
                     .chain(std::io::stdout()),
             )
             // Apply globally
