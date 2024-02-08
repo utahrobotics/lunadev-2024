@@ -200,12 +200,16 @@ impl CostmapRef {
     }
 
     pub fn global_to_local(&self, global: Point2<f32>) -> Point2<isize> {
-        let x = global.x + self.x_offset;
-        let y = global.y + self.y_offset;
-
         Point2::new(
-            (x / self.cell_width).round() as isize,
-            (y / self.cell_width).round() as isize,
+            ((global.x + self.x_offset) / self.cell_width).round() as isize,
+            ((global.y + self.y_offset) / self.cell_width).round() as isize,
+        )
+    }
+
+    pub fn local_to_global(&self, local: Point2<isize>) -> Point2<f32> {
+        Point2::new(
+            local.x as f32 * self.cell_width - self.x_offset,
+            local.y as f32 * self.cell_width - self.y_offset,
         )
     }
 

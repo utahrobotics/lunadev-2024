@@ -8,15 +8,11 @@ use costmap::CostmapRef;
 use global_msgs::Steering;
 use nalgebra::{Point2, UnitQuaternion, UnitVector2, Vector2, Vector3};
 use ordered_float::NotNan;
-use pathfinding::directed::astar::astar;
+use pathfinding::directed::{astar::astar, fringe::fringe};
 use rig::{RigSpace, RobotBaseRef};
 use successors::{successors, RobotState};
 use unros_core::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscription},
-    task::{Task, TaskHandle},
-    tokio::{self, sync::oneshot},
-    tokio_rayon, Node, RuntimeContext,
+    anyhow, async_trait, pubsub::{Publisher, Subscription}, setup_logging, task::{Task, TaskHandle}, tokio::{self, sync::oneshot}, tokio_rayon, Node, RuntimeContext
 };
 
 type Float = f32;
@@ -105,6 +101,7 @@ impl WaypointDriver {
         let (task_sender, task_receiver) = mpsc::sync_channel(0);
         assert!(agent_radius >= 0.0);
         assert!(max_height_diff >= 0.0);
+        assert!(width >= 0.0);
         Self {
             driving_task: DrivingTask { task_sender },
             steering_signal: Default::default(),
@@ -137,12 +134,12 @@ mod successors;
 impl Node for WaypointDriver {
     const DEFAULT_NAME: &'static str = "waypoint-driver";
 
-    async fn run(mut self, _context: RuntimeContext) -> anyhow::Result<()> {
+    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+        setup_logging!(context);
         let (path_sender, path_recv) = std::sync::mpsc::sync_channel(0);
         let completed = Arc::new(AtomicBool::default());
         let driver_completed = completed.clone();
         let robot_base = self.robot_base.clone();
-        let costmap_ref = self.costmap_ref.clone();
 
         let pathfinder = tokio_rayon::spawn(move || {
             let mut job_counter = 0usize;
@@ -173,25 +170,16 @@ impl Node for WaypointDriver {
                 loop {
                     let isometry = self.robot_base.get_isometry();
 
-                    if (init.data.destination.coords
-                        - Vector2::new(isometry.translation.x, isometry.translation.z))
-                    .magnitude()
-                        <= self.completion_distance
-                    {
-                        break;
-                    }
-
                     let obstacles = self.costmap_ref.costmap_to_obstacle(
                         &self.costmap_ref.get_costmap(),
                         self.max_height_diff,
                         isometry.translation.y,
                         self.agent_radius,
                     );
-                    let obstacles = Arc::new(obstacles);
 
                     let mut position = self.costmap_ref.global_to_local(Point2::new(
                         isometry.translation.x,
-                        isometry.translation.y,
+                        isometry.translation.z,
                     ));
                     if position.x < 0 {
                         position.x = 0;
@@ -219,13 +207,13 @@ impl Node for WaypointDriver {
                             radius: 0.0,
                             reversing: false
                         },
-                        |current| {
+                        |current|
                             successors(
                                 *current,
-                                obstacles.clone(),
+                                &obstacles,
                                 self.can_reverse,
                             )
-                        },
+                        ,
                         |current| {
                             let mut cost = NotNan::new(
                                 (current.position.cast::<f32>() - waypoint.cast()).magnitude(),
@@ -242,6 +230,14 @@ impl Node for WaypointDriver {
                     ) else {
                         todo!("Failed to find path")
                     };
+
+                    let mut path: Vec<RobotState<Float>> = path.into_iter().map(|RobotState { position, forward, arc_angle, radius, reversing } | RobotState { position: self.costmap_ref.local_to_global(position.cast().into()).coords, forward, arc_angle, radius, reversing }).collect();
+
+                    path.first_mut().unwrap().position = Vector2::new(
+                        isometry.translation.x,
+                        isometry.translation.z,
+                    );
+                    path.last_mut().unwrap().position = init.data.destination.coords;
 
                     if path_sender.send((job_counter, Some((path, goal_forward)))).is_err() {
                         return Ok(());
@@ -272,9 +268,9 @@ impl Node for WaypointDriver {
     
                 loop {
                     match path_recv.try_recv() {
-                        Ok((new_job_index, x)) => if let Some(x) = x {
+                        Ok((new_job_index, x)) => if let Some((new_path, _)) = x {
                             assert_eq!(new_job_index, job_counter);
-                            path = x.0;
+                            path = new_path;
                         } else {
                             continue 'main;
                         }
@@ -283,35 +279,28 @@ impl Node for WaypointDriver {
                         }
                     }
                     let isometry = robot_base.get_isometry();
+                    let position = Vector2::new(isometry.translation.x, isometry.translation.z);
 
-                    let mut position = costmap_ref.global_to_local(Point2::new(
-                        isometry.translation.x,
-                        isometry.translation.y,
-                    ));
-                    if position.x < 0 {
-                        position.x = 0;
-                    }
-                    if position.y < 0 {
-                        position.y = 0;
-                    }
-                    let mut position = Vector2::new(position.x as usize, position.y as usize);
-                    if position.x >= costmap_ref.get_area_width() {
-                        position.x = costmap_ref.get_area_width() - 1;
-                    }
-                    if position.y >= costmap_ref.get_area_length() {
-                        position.y = costmap_ref.get_area_length() - 1;
+                    let (next_i, distance, next) = path.iter().enumerate().skip(1).map(|(i, x)| (i, (x.position - position).magnitude_squared(), x)).min_by_key(|(_, d, _)| NotNan::new(*d).unwrap()).unwrap();
+
+                    if distance > self.completion_distance {
+                        error!("Exceeded max offset from path: {distance}");
+                        self.steering_signal.set(Steering::new(0.0, 0.0));
+                        let Ok(item) = path_recv.recv() else { return Ok(()); };
+                        let (new_job_index, item) = item;
+                        if new_job_index != job_counter {
+                            continue;
+                        }
+                        let Some((new_path, _)) = item else { continue 'main; };
+                        path = new_path;
+                        continue;
                     }
 
-                    let next = path.iter().skip(1).min_by_key(|x| NotNan::new((x.position.cast::<Float>() - position.cast::<Float>()).magnitude_squared()).unwrap()).unwrap();
-
-                    if next == path.last().unwrap() {
+                    if next_i == path.len() - 1 {
                         break next.forward;
                     }
 
-                    // println!("{}", path.len());
-                    // println!("{:?}", path);
-
-                    if next.arc_angle.abs() <= self.angle_epsilon {
+                    if !next.radius.is_finite() {
                         if next.reversing {
                             self.steering_signal.set(Steering::new(-1.0, -1.0));
                         } else {
@@ -320,6 +309,7 @@ impl Node for WaypointDriver {
                     } else {
                         let smaller_ratio =
                             (next.radius - self.width / 2.0) / (next.radius + self.width / 2.0);
+                        println!("{:.2}", next.arc_angle);
                         if next.arc_angle > 0.0 {
                             if next.reversing {
                                 self.steering_signal
