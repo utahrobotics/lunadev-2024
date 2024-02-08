@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use nalgebra::{DMatrix, Rotation2, UnitVector2, Vector2};
 use ordered_float::NotNan;
-use unros_core::rayon::{self, iter::{IntoParallelIterator, ParallelIterator}};
+use unros_core::rayon::{
+    self,
+    iter::{IntoParallelIterator, ParallelIterator},
+};
 
 use crate::Float;
 
@@ -89,7 +92,7 @@ pub const SUCCESSORS: [Vector2<isize>; 80] = [
     Vector2::new(5, 0),
 ];
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct RobotState {
     pub(super) position: Vector2<usize>,
     pub(super) forward: UnitVector2<Float>,
@@ -97,6 +100,12 @@ pub(super) struct RobotState {
     pub(super) arc_angle: Float,
     pub(super) turn_first: bool,
     pub(super) radius: Float,
+}
+
+impl PartialEq for RobotState {
+    fn eq(&self, other: &Self) -> bool {
+        self.position == other.position
+    }
 }
 
 impl Eq for RobotState {}
@@ -114,8 +123,9 @@ pub(super) fn successors(
     obstacles: Arc<DMatrix<bool>>,
     can_reverse: bool,
     width: Float,
+    min_turn_angle: Float,
 ) -> impl IntoIterator<Item = (RobotState, NotNan<Float>)> {
-    let (successor_sender, successor_recv) = std::sync::mpsc::sync_channel(SUCCESSORS.len() * 2);
+    let (successor_sender, successor_recv) = std::sync::mpsc::sync_channel(SUCCESSORS.len());
 
     rayon::spawn(move || {
         SUCCESSORS.into_par_iter().for_each(|mut cell| {
@@ -124,7 +134,7 @@ pub(super) fn successors(
                 return;
             }
             let cell = Vector2::new(cell.x as usize, cell.y as usize);
-            if let Some((state, cost, is_direct)) = traverse_to(
+            if let Some((state, cost)) = traverse_to(
                 current.position,
                 cell,
                 current.forward,
@@ -133,23 +143,28 @@ pub(super) fn successors(
                 width,
             ) {
                 let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
-                if is_direct {
-                    return;
-                }
             }
-            let direct = UnitVector2::new_normalize(cell.cast::<Float>() - current.position.cast());
-            if let Some((mut state, mut cost, _)) = traverse_to(
-                current.position,
-                cell,
-                direct,
-                &obstacles,
-                can_reverse,
-                width,
-            ) {
-                cost += direct.angle(&current.forward) * width / 2.0;
-                state.turn_first = true;
-                let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
-            }
+            // let direct = UnitVector2::new_normalize(cell.cast::<Float>() - current.position.cast());
+            // let angle = direct.angle(&current.forward);
+
+            // if angle < min_turn_angle {
+            //     return;
+            // }
+
+            // if let Some((mut state, mut cost)) = traverse_to(
+            //     current.position,
+            //     cell,
+            //     direct,
+            //     &obstacles,
+            //     can_reverse,
+            //     width,
+            // ) {
+            //     let cross = (current.forward.x * direct.y - current.forward.y * direct.x).signum();
+            //     state.arc_angle = angle * cross;
+            //     cost += state.arc_angle.abs() * width / 2.0;
+            //     state.turn_first = true;
+            //     let _ = successor_sender.send((state, NotNan::new(cost).unwrap()));
+            // }
         });
     });
 
@@ -159,14 +174,14 @@ pub(super) fn successors(
 const PI: Float = std::f64::consts::PI as Float;
 
 #[inline]
-fn traverse_to(
+pub(super) fn traverse_to(
     from: Vector2<usize>,
     to: Vector2<usize>,
     forward: UnitVector2<Float>,
     obstacles: &DMatrix<bool>,
     can_reverse: bool,
     width: Float,
-) -> Option<(RobotState, Float, bool)> {
+) -> Option<(RobotState, Float)> {
     if obstacles.get((to.x, to.y)).copied() == Some(false) {
         return None;
     }
@@ -196,7 +211,6 @@ fn traverse_to(
                 radius: Float::INFINITY,
             },
             distance,
-            true,
         ));
     }
 
@@ -237,6 +251,5 @@ fn traverse_to(
             radius,
         },
         (radius + width / 2.0) * full_arc_angle,
-        false,
     ))
 }

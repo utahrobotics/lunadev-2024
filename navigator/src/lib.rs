@@ -19,6 +19,8 @@ use unros_core::{
     tokio_rayon, Node, RuntimeContext,
 };
 
+use crate::successors::traverse_to;
+
 type Float = f32;
 
 struct DrivingTaskInit {
@@ -64,7 +66,7 @@ impl Task for DrivingTask {
     async fn try_schedule(
         &self,
         data: Self::ScheduleData,
-    ) -> Result<TaskHandle<Self>, Self::ScheduleError> {
+    ) -> Result<TaskHandle<Self::Output, Self::TaskData>, Self::ScheduleError> {
         let (sender, recv) = oneshot::channel();
 
         if let Err(e) = self.task_sender.try_send(DrivingTaskInit { data, sender }) {
@@ -92,6 +94,7 @@ pub struct WaypointDriver {
     pub can_reverse: bool,
     pub width: Float,
     pub angle_epsilon: Float,
+    pub min_turn_angle: Float,
 }
 
 impl WaypointDriver {
@@ -117,6 +120,8 @@ impl WaypointDriver {
             max_height_diff,
             can_reverse: true,
             width,
+            // 30 degrees
+            min_turn_angle: 0.5235987,
             // 10 degrees
             angle_epsilon: 0.1745329,
         }
@@ -145,6 +150,7 @@ impl Node for WaypointDriver {
                     break Ok(());
                 };
 
+                // println!("{}", init.data.destination);
                 let mut waypoint = self.costmap_ref.global_to_local(init.data.destination);
                 if waypoint.x < 0 {
                     waypoint.x = 0;
@@ -152,6 +158,7 @@ impl Node for WaypointDriver {
                 if waypoint.y < 0 {
                     waypoint.y = 0;
                 }
+                // println!("{waypoint}");
                 let mut waypoint = Vector2::new(waypoint.x as usize, waypoint.y as usize);
                 if waypoint.x >= self.costmap_ref.get_area_width() {
                     waypoint.x = self.costmap_ref.get_area_width() - 1;
@@ -163,6 +170,7 @@ impl Node for WaypointDriver {
                     let forward = orientation * Vector3::z_axis();
                     UnitVector2::new_normalize(Vector2::new(forward.x, forward.z))
                 });
+                // println!("{waypoint}");
 
                 loop {
                     let isometry = self.robot_base.get_isometry();
@@ -214,7 +222,15 @@ impl Node for WaypointDriver {
                             turn_first: false,
                             radius: 0.0,
                         },
-                        |current| successors(*current, obstacles.clone(), true, self.width),
+                        |current| {
+                            successors(
+                                *current,
+                                obstacles.clone(),
+                                self.can_reverse,
+                                self.width,
+                                self.min_turn_angle,
+                            )
+                        },
                         |current| {
                             let mut cost = NotNan::new(
                                 (current.position.cast::<f32>() - waypoint.cast()).magnitude(),
@@ -232,11 +248,22 @@ impl Node for WaypointDriver {
                         todo!("Failed to find path")
                     };
 
-                    if raw_path.len() <= 1 {
-                        break;
+                    let next;
+                    if raw_path.len() == 2 {
+                        next = traverse_to(
+                            position,
+                            waypoint,
+                            forward,
+                            &obstacles,
+                            self.can_reverse,
+                            self.width,
+                        )
+                        .unwrap()
+                        .0;
+                    } else {
+                        next = *raw_path.get(1).unwrap();
                     }
-
-                    let next = &raw_path[1];
+                    println!("{next:?}");
 
                     if next.turn_first {
                         // We don't need any logic for actually driving straight after the turn is complete

@@ -26,30 +26,31 @@ async fn main() -> anyhow::Result<()> {
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (_, robot_base) = rig.destructure::<FxBuildHasher>([])?;
 
-    let mut costmap = Costmap::new(40, 40, 0.5, 10.0, 10.0, 0.01);
+    let mut costmap = Costmap::new(400, 400, 0.05, 10.0, 10.0, 0.01);
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
     points_signal.accept_subscription(costmap.create_points_sub());
-    // let costmap_ref = costmap.get_ref();
+    let costmap_ref = costmap.get_ref();
 
-    // let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
+    // let mut costmap_writer = unros_core::logging::dump::VideoDataDump::new(720, 720, "costmap.mkv")?;
 
-    // let video_maker = FnNode::new(|_| async move {
-    //     let mut i = 0;
-    //     loop {
-    //         tokio::time::sleep(Duration::from_millis(42)).await;
-    //         let costmap = costmap_ref.get_costmap();
-    //         let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.2, 0.0, 0.3);
-    //         let img = costmap_ref.obstacles_to_img(&obstacles);
+    let video_maker = FnNode::new(|_| async move {
+        let mut i = 0;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(42)).await;
+            let costmap = costmap_ref.get_costmap();
+            let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.2, 0.0, 0.3);
+            let img = costmap_ref.obstacles_to_img(&obstacles);
 
-    //         i += 1;
-    //         let _ = img.save(format!("img{i}.png"));
+            i += 1;
+            // let _ = img.save(format!("img{i}.png"));
 
-    //         // costmap_writer.write_frame(img.into()).unwrap();
-    //     }
-    // });
+            // costmap_writer.write_frame(img.into()).unwrap();
+        }
+    });
 
     let mut navigator = WaypointDriver::new(robot_base.get_ref(), costmap.get_ref(), 0.3, 0.2, 0.3);
+    navigator.can_reverse = false;
     let nav_task = navigator.get_driving_task().clone();
 
     let mut steering_sub = Subscriber::default();
@@ -158,7 +159,7 @@ async fn main() -> anyhow::Result<()> {
 
     async_run_all(
         [
-            // video_maker.into(),
+            video_maker.into(),
             costmap.into(),
             sim_conn.into(),
             navigator.into(),

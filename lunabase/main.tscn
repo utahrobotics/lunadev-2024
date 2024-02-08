@@ -13,16 +13,20 @@
 script/source = "extends Control
 
 
+var connected := false
+
+
 func _ready() -> void:
-	set_process_input(false)
-	Lunabot.connected.connect(func(): set_process_input(true))
-	Lunabot.disconnected.connect(func(): set_process_input(false))
+	Lunabot.connected.connect(func(): connected = true)
+	Lunabot.disconnected.connect(func(): connected = false)
 	Lunabot.connected.connect($Connected.play)
 	Lunabot.disconnected.connect($Disconnected.play)
 
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadMotion:
+		if !connected:
+			return
 		Lunabot.send_steering(
 			Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\"),
 			Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")
@@ -31,6 +35,9 @@ func _input(event: InputEvent) -> void:
 			Input.get_action_strength(\"MoveArmUp\") - Input.get_action_strength(\"MoveArmDown\"),
 			Input.get_action_strength(\"SpinDrumClockwise\") - Input.get_action_strength(\"SpinDrumCounterClockwise\")
 		)
+	
+	elif event.is_action_pressed(\"Restart\"):
+		get_tree().change_scene_to_file(scene_file_path)
 "
 
 [sub_resource type="GDScript" id="GDScript_wemvy"]
@@ -367,8 +374,8 @@ script/source = "extends CharacterBody3D
 
 const WHEEL_SEPARATION := 0.3
 const MOUSE_SENSITIVITY := 0.3
-const SPEED := 0.5
-const CONN_DELAY := 0.1
+const SPEED := 0.75
+const CONN_DELAY := 0.06
 
 var conn: StreamPeerTCP
 
@@ -381,9 +388,13 @@ var user_velocity: Vector3
 
 @onready var scanner: RayScanner = $RayScanner
 @onready var waypoint_mesh: Node3D = $Node/Waypoint
+@onready var sim_tab: Control = $\"../../../../..\"
 
 
 func _input(event: InputEvent) -> void:
+	if !sim_tab.is_visible_in_tree():
+		return
+	
 	if event.is_action_pressed(\"ui_cancel\"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		return
@@ -474,7 +485,7 @@ func _physics_process(delta: float) -> void:
 	velocity += - global_transform.basis.z * SPEED * (left_steering + right_steering) / 2
 	var angle := (right_steering - left_steering) * SPEED / WHEEL_SEPARATION
 	global_rotate(Vector3.UP, - angle * delta)
-	prints(left_steering, right_steering)
+	#prints(left_steering, right_steering)
 	
 	move_and_slide()
 "
