@@ -7,10 +7,11 @@ use std::{
 use anyhow::Context;
 use chrono::{Datelike, Timelike};
 
-use crate::RunOptions;
+use crate::{logging::eyre::UnrosEyreMessage, RunOptions};
 
 pub mod dump;
 pub mod rate;
+mod eyre;
 
 /// Sets up a locally available set of logging macros.
 ///
@@ -70,6 +71,8 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     const LOGS_DIR: &str = "logs";
 
     SUB_LOGGING_DIR.get_or_try_init::<_, anyhow::Error>(|| {
+        color_eyre::config::HookBuilder::default().panic_message(UnrosEyreMessage).install().map_err(|e| anyhow::anyhow!(e))?;
+
         if !AsRef::<Path>::as_ref(LOGS_DIR)
             .try_exists()
             .context("Failed to check if logging directory exists. Do we have permissions?")?
@@ -127,6 +130,9 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             .chain(
                 fern::Dispatch::new()
                     .level(log::LevelFilter::Info)
+                    // This filter is to avoid logging panics to the console, since rust already does that.
+                    // Note that the 'panic' target is set by us in eyre.rs.
+                    .filter(|x| x.target() != "panic")
                     .chain(std::io::stdout()),
             )
             // Apply globally

@@ -24,7 +24,8 @@ image = { workspace = true, optional = false }
 fast_image_resize = { workspace = true }
 spin_sleep = { workspace = true }
 tokio-rayon = { workspace = true }
-ffmpeg-sidecar = "0.5.1"
-srtlib = "0.1.7"
-sysinfo = "0.30.5"
-config = "0.13.4"
+ffmpeg-sidecar = "0.5"
+srtlib = "0.1"
+sysinfo = "0.30"
+config = "0.13"
+color-eyre = { version = "0.6", default-features = false }
