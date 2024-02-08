@@ -1,6 +1,6 @@
 use std::{
     fmt::{Debug, Display},
-    sync::{mpsc, Arc},
+    sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc},
     time::Duration,
 };
 
@@ -15,7 +15,7 @@ use unros_core::{
     anyhow, async_trait,
     pubsub::{Publisher, Subscription},
     task::{Task, TaskHandle},
-    tokio::sync::oneshot,
+    tokio::{self, sync::oneshot},
     tokio_rayon, Node, RuntimeContext,
 };
 
@@ -92,7 +92,6 @@ pub struct WaypointDriver {
     pub can_reverse: bool,
     pub width: Float,
     pub angle_epsilon: Float,
-    pub min_turn_angle: Float,
 }
 
 impl WaypointDriver {
@@ -113,13 +112,11 @@ impl WaypointDriver {
             task_receiver,
             completion_distance: 0.15,
             costmap_ref,
-            refresh_rate: Duration::from_millis(120),
+            refresh_rate: Duration::from_millis(20),
             agent_radius,
             max_height_diff,
             can_reverse: true,
             width,
-            // 30 degrees
-            min_turn_angle: 0.5235987,
             // 10 degrees
             angle_epsilon: 0.1745329,
         }
@@ -141,14 +138,19 @@ impl Node for WaypointDriver {
     const DEFAULT_NAME: &'static str = "waypoint-driver";
 
     async fn run(mut self, _context: RuntimeContext) -> anyhow::Result<()> {
-        tokio_rayon::spawn(move || {
-            let sleeper = spin_sleep::SpinSleeper::default();
+        let (path_sender, path_recv) = std::sync::mpsc::sync_channel(0);
+        let completed = Arc::new(AtomicBool::default());
+        let driver_completed = completed.clone();
+        let robot_base = self.robot_base.clone();
+        let costmap_ref = self.costmap_ref.clone();
+
+        let pathfinder = tokio_rayon::spawn(move || {
+            let mut job_counter = 0usize;
             loop {
                 let Ok(init) = self.task_receiver.recv() else {
                     break Ok(());
                 };
 
-                // println!("{}", init.data.destination);
                 let mut waypoint = self.costmap_ref.global_to_local(init.data.destination);
                 if waypoint.x < 0 {
                     waypoint.x = 0;
@@ -156,7 +158,6 @@ impl Node for WaypointDriver {
                 if waypoint.y < 0 {
                     waypoint.y = 0;
                 }
-                // println!("{waypoint}");
                 let mut waypoint = Vector2::new(waypoint.x as usize, waypoint.y as usize);
                 if waypoint.x >= self.costmap_ref.get_area_width() {
                     waypoint.x = self.costmap_ref.get_area_width() - 1;
@@ -168,7 +169,6 @@ impl Node for WaypointDriver {
                     let forward = orientation * Vector3::z_axis();
                     UnitVector2::new_normalize(Vector2::new(forward.x, forward.z))
                 });
-                // println!("{waypoint}");
 
                 loop {
                     let isometry = self.robot_base.get_isometry();
@@ -210,7 +210,7 @@ impl Node for WaypointDriver {
                     let forward = isometry.get_forward_vector();
                     let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
-                    let Some((raw_path, _distance)) = astar(
+                    let Some((path, _distance)) = astar(
                         &RobotState {
                             position,
                             forward,
@@ -243,24 +243,73 @@ impl Node for WaypointDriver {
                         todo!("Failed to find path")
                     };
 
-                    let next;
-                    if raw_path.len() == 1 {
-                        break;
-                    // } else if raw_path.len() == 2 {
-                    //     next = traverse_to(
-                    //         position,
-                    //         waypoint,
-                    //         forward,
-                    //         &obstacles,
-                    //         self.can_reverse,
-                    //         self.width,
-                    //     )
-                    //     .unwrap()
-                    //     .0;
-                    } else {
-                        next = *raw_path.get(1).unwrap();
+                    if path_sender.send((job_counter, Some((path, goal_forward)))).is_err() {
+                        return Ok(());
                     }
-                    println!("{next:?}");
+
+                    if driver_completed.load(Ordering::Relaxed) {
+                        driver_completed.store(false, Ordering::Relaxed);
+                        break;
+                    }
+                }
+
+                job_counter += 1;
+                let _ = init.sender.send(());
+            }
+        });
+
+        let driver = tokio_rayon::spawn(move || {
+            let mut job_counter = 0usize;
+            let sleeper = spin_sleep::SpinSleeper::default();
+
+            'main: loop {
+                let Ok(item) = path_recv.recv() else { return Ok(()); };
+                let (new_job_index, item) = item;
+                if new_job_index != job_counter {
+                    continue;
+                }
+                let (mut path, mut _goal_forward) = item.unwrap();
+    
+                loop {
+                    match path_recv.try_recv() {
+                        Ok((new_job_index, x)) => if let Some(x) = x {
+                            assert_eq!(new_job_index, job_counter);
+                            path = x.0;
+                        } else {
+                            continue 'main;
+                        }
+                        Err(e) => if e == mpsc::TryRecvError::Disconnected {
+                            return Ok(());
+                        }
+                    }
+                    let isometry = robot_base.get_isometry();
+
+                    let mut position = costmap_ref.global_to_local(Point2::new(
+                        isometry.translation.x,
+                        isometry.translation.y,
+                    ));
+                    if position.x < 0 {
+                        position.x = 0;
+                    }
+                    if position.y < 0 {
+                        position.y = 0;
+                    }
+                    let mut position = Vector2::new(position.x as usize, position.y as usize);
+                    if position.x >= costmap_ref.get_area_width() {
+                        position.x = costmap_ref.get_area_width() - 1;
+                    }
+                    if position.y >= costmap_ref.get_area_length() {
+                        position.y = costmap_ref.get_area_length() - 1;
+                    }
+
+                    let next = path.iter().skip(1).min_by_key(|x| NotNan::new((x.position.cast::<Float>() - position.cast::<Float>()).magnitude_squared()).unwrap()).unwrap();
+
+                    if next == path.last().unwrap() {
+                        break next.forward;
+                    }
+
+                    // println!("{}", path.len());
+                    // println!("{:?}", path);
 
                     if next.arc_angle.abs() <= self.angle_epsilon {
                         if next.reversing {
@@ -289,37 +338,42 @@ impl Node for WaypointDriver {
                     }
 
                     sleeper.sleep(self.refresh_rate);
-                }
+                };
 
-                if let Some(goal_forward) = goal_forward {
-                    // Turn to goal orientation
-                    loop {
-                        let forward = self.robot_base.get_isometry().get_forward_vector();
-                        let forward =
-                            UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
+                completed.store(true, Ordering::Relaxed);
+                job_counter += 1;
+                self.steering_signal.set(Steering::new(0.0, 0.0));
+    
+                // if let Some(goal_forward) = goal_forward {
+                //     // Turn to goal orientation
+                //     loop {
+                //         let forward = robot_base.get_isometry().get_forward_vector();
+                //         let forward =
+                //             UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
-                        let arc_angle = (forward.x * goal_forward.y - forward.y * goal_forward.x)
-                            .signum()
-                            * forward.angle(&goal_forward);
+                //         let arc_angle = (forward.x * goal_forward.y - forward.y * goal_forward.x)
+                //             .signum()
+                //             * forward.angle(&goal_forward);
 
-                        if arc_angle.abs() < self.angle_epsilon {
-                            break;
-                        }
+                //         if arc_angle.abs() < self.angle_epsilon {
+                //             break;
+                //         }
 
-                        if arc_angle > 0.0 {
-                            self.steering_signal.set(Steering::new(-1.0, 1.0));
-                        } else {
-                            self.steering_signal.set(Steering::new(1.0, -1.0));
-                        }
+                //         if arc_angle > 0.0 {
+                //             self.steering_signal.set(Steering::new(-1.0, 1.0));
+                //         } else {
+                //             self.steering_signal.set(Steering::new(1.0, -1.0));
+                //         }
 
-                        sleeper.sleep(self.refresh_rate);
-                    }
-                    self.steering_signal.set(Steering::new(0.0, 0.0));
-                }
-
-                let _ = init.sender.send(());
+                //         sleeper.sleep(self.refresh_rate);
+                //     }
+                //     self.steering_signal.set(Steering::new(0.0, 0.0));
+                // }
             }
-        })
-        .await
+        });
+        tokio::select! {
+            res = pathfinder => res,
+            res = driver => res
+        }
     }
 }

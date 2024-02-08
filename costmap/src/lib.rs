@@ -131,6 +131,7 @@ impl Costmap {
     }
 }
 
+#[derive(Clone)]
 pub struct CostmapRef {
     area_width: usize,
     area_length: usize,
