@@ -30,26 +30,26 @@ async fn main() -> anyhow::Result<()> {
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
     points_signal.accept_subscription(costmap.create_points_sub());
-    let costmap_ref = costmap.get_ref();
+    // let costmap_ref = costmap.get_ref();
 
     // let mut costmap_writer = unros_core::logging::dump::VideoDataDump::new(720, 720, "costmap.mkv")?;
 
-    let video_maker = FnNode::new(|_| async move {
-        let mut i = 0;
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(42)).await;
-            let costmap = costmap_ref.get_costmap();
-            let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.2, 0.0, 0.3);
-            let img = costmap_ref.obstacles_to_img(&obstacles);
+    // let video_maker = FnNode::new(|_| async move {
+    //     // let mut i = 0;
+    //     loop {
+    //         tokio::time::sleep(std::time::Duration::from_millis(42)).await;
+    //         let costmap = costmap_ref.get_costmap();
+    //         let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.2, 0.0, 0.3);
+    //         let img = costmap_ref.obstacles_to_img(&obstacles);
 
-            i += 1;
-            // let _ = img.save(format!("img{i}.png"));
+    //         i += 1;
+    //         let _ = img.save(format!("img{i}.png"));
 
-            // costmap_writer.write_frame(img.into()).unwrap();
-        }
-    });
+    //         // costmap_writer.write_frame(img.into()).unwrap();
+    //     }
+    // });
 
-    let mut navigator = WaypointDriver::new(robot_base.get_ref(), costmap.get_ref(), 0.3, 0.2, 0.3);
+    let mut navigator = WaypointDriver::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.025, 0.3);
     // navigator.can_reverse = false;
     let nav_task = navigator.get_driving_task().clone();
 
@@ -163,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
 
     async_run_all(
         [
-            video_maker.into(),
+            // video_maker.into(),
             costmap.into(),
             sim_conn.into(),
             navigator.into(),

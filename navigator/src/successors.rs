@@ -49,7 +49,7 @@ pub(super) fn successors<'a>(
             return None;
         }
         let cell = Vector2::new(cell.x as usize, cell.y as usize);
-        if !*obstacles.get((cell.x as usize, cell.y as usize))? {
+        if !*obstacles.get((cell.y as usize, cell.x as usize))? {
             return None;
         }
         let mut offset: Vector2<Float> = offset.cast();
