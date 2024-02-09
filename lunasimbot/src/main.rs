@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let mut navigator = WaypointDriver::new(robot_base.get_ref(), costmap.get_ref(), 0.3, 0.2, 0.3);
-    navigator.can_reverse = false;
+    // navigator.can_reverse = false;
     let nav_task = navigator.get_driving_task().clone();
 
     let mut steering_sub = Subscriber::default();

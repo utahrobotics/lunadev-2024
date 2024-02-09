@@ -19,9 +19,8 @@ const PI: Float = std::f64::consts::PI as Float;
 pub(super) struct RobotState<T=usize> {
     pub(super) position: Vector2<T>,
     pub(super) forward: UnitVector2<Float>,
-    pub(super) arc_angle: Float,
-    pub(super) radius: Float,
-    pub(super) reversing: bool,
+    pub(super) left_steering: NotNan<Float>,
+    pub(super) right_steering: NotNan<Float>,
 }
 
 impl PartialEq for RobotState {
@@ -42,6 +41,7 @@ pub(super) fn successors<'a>(
     current: RobotState,
     obstacles: &'a DMatrix<bool>,
     can_reverse: bool,
+    width: Float
 ) -> impl IntoIterator<Item = (RobotState, NotNan<Float>)> + 'a {
     SUCCESSORS.into_iter().filter_map(move |offset| {
         let cell = offset + current.position.cast();
@@ -55,39 +55,46 @@ pub(super) fn successors<'a>(
         let mut offset: Vector2<Float> = offset.cast();
         let distance = offset.magnitude();
         offset.unscale_mut(distance);
-        let inner_angle = offset.angle(&current.forward);
         let mut cross = (current.forward.x * offset.y - current.forward.y * offset.x).signum();
+        let mut angle = offset.angle(&current.forward);
 
-        if !cross.is_finite() {
-            cross = 1.0;
+        let mut left_steering;
+        let mut right_steering;
+        if angle > PI / 2.0 && can_reverse {
+            left_steering = - distance;
+            right_steering = - distance;
+            cross *= -1.0;
+            angle = PI - angle;
+        } else {
+            left_steering = distance;
+            right_steering = distance;
         }
 
-        let arc_angle;
-        let radius;
-        let reversing;
-        if inner_angle > PI / 2.0 && can_reverse {
-                arc_angle = (PI - inner_angle) * -cross;
-                radius = distance / (2.0 * (1.0 - inner_angle.cos())).sqrt();
-                reversing = true;
+        let arc = angle * width / 2.0;
+        if cross > 0.0 {
+            right_steering += arc;
+            left_steering -= arc;
         } else {
-            arc_angle = inner_angle * cross;
-            radius = distance / (2.0 * (1.0 - inner_angle.cos())).sqrt();
-            reversing = false;
+            right_steering -= arc;
+            left_steering += arc;
         }
 
-        let cost = if !radius.is_finite() {
-            distance
+        let cost = (left_steering.abs() + right_steering.abs()) / 2.0;
+
+        if left_steering.abs() > right_steering.abs() {
+            right_steering /= left_steering.abs();
+            left_steering = left_steering.signum();
         } else {
-            radius * arc_angle.abs()
-        };
+            left_steering /= right_steering.abs();
+            right_steering = right_steering.signum();
+        }
 
         Some((
             RobotState {
                 position: cell,
-                forward: Rotation2::new(arc_angle) * current.forward,
-                arc_angle,
-                radius,
-                reversing
+                forward: Rotation2::new(angle) * current.forward,
+                left_steering: NotNan::new(left_steering).unwrap(),
+                right_steering: NotNan::new(right_steering).unwrap()
             },
             NotNan::new(cost).unwrap(),
         ))

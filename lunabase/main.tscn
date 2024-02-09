@@ -374,7 +374,7 @@ script/source = "extends CharacterBody3D
 
 const WHEEL_SEPARATION := 0.3
 const MOUSE_SENSITIVITY := 0.3
-const SPEED := 0.75
+const SPEED := 0.5
 const CONN_DELAY := 0.06
 
 var conn: StreamPeerTCP

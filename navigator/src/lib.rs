@@ -203,15 +203,15 @@ impl Node for WaypointDriver {
                             position,
                             forward,
                             // The following values are ignored on the starting state
-                            arc_angle: 0.0,
-                            radius: 0.0,
-                            reversing: false
+                            left_steering: Default::default(),
+                            right_steering: Default::default(),
                         },
                         |current|
                             successors(
                                 *current,
                                 &obstacles,
                                 self.can_reverse,
+                                self.width as f32 / self.costmap_ref.get_cell_width()
                             )
                         ,
                         |current| {
@@ -231,7 +231,7 @@ impl Node for WaypointDriver {
                         todo!("Failed to find path")
                     };
 
-                    let mut path: Vec<RobotState<Float>> = path.into_iter().map(|RobotState { position, forward, arc_angle, radius, reversing } | RobotState { position: self.costmap_ref.local_to_global(position.cast().into()).coords, forward, arc_angle, radius, reversing }).collect();
+                    let mut path: Vec<RobotState<Float>> = path.into_iter().map(|RobotState { position, forward, left_steering, right_steering } | RobotState { position: self.costmap_ref.local_to_global(position.cast().into()).coords, forward, left_steering, right_steering }).collect();
 
                     path.first_mut().unwrap().position = Vector2::new(
                         isometry.translation.x,
@@ -281,7 +281,11 @@ impl Node for WaypointDriver {
                     let isometry = robot_base.get_isometry();
                     let position = Vector2::new(isometry.translation.x, isometry.translation.z);
 
-                    let (next_i, distance, next) = path.iter().enumerate().skip(1).map(|(i, x)| (i, (x.position - position).magnitude_squared(), x)).min_by_key(|(_, d, _)| NotNan::new(*d).unwrap()).unwrap();
+                    let (distance, next) = path.iter().skip(1).map(|x| ((x.position - position).magnitude_squared(), x)).min_by_key(|(d, _)| NotNan::new(*d).unwrap()).unwrap();
+
+                    if (path.last().unwrap().position - position).magnitude() < self.completion_distance {
+                        break next.forward;
+                    }
 
                     if distance > self.completion_distance {
                         error!("Exceeded max offset from path: {distance}");
@@ -296,36 +300,7 @@ impl Node for WaypointDriver {
                         continue;
                     }
 
-                    if next_i == path.len() - 1 {
-                        break next.forward;
-                    }
-
-                    if !next.radius.is_finite() {
-                        if next.reversing {
-                            self.steering_signal.set(Steering::new(-1.0, -1.0));
-                        } else {
-                            self.steering_signal.set(Steering::new(1.0, 1.0));
-                        }
-                    } else {
-                        let smaller_ratio =
-                            (next.radius - self.width / 2.0) / (next.radius + self.width / 2.0);
-                        println!("{:.2}", next.arc_angle);
-                        if next.arc_angle > 0.0 {
-                            if next.reversing {
-                                self.steering_signal
-                                    .set(Steering::new(-smaller_ratio, -1.0));
-                            } else {
-                                self.steering_signal.set(Steering::new(smaller_ratio, 1.0));
-                            }
-                        } else {
-                            if next.reversing {
-                                self.steering_signal
-                                    .set(Steering::new(-1.0, -smaller_ratio));
-                            } else {
-                                self.steering_signal.set(Steering::new(1.0, smaller_ratio));
-                            }
-                        }
-                    }
+                    self.steering_signal.set(Steering { left: next.left_steering, right: next.right_steering });
 
                     sleeper.sleep(self.refresh_rate);
                 };
