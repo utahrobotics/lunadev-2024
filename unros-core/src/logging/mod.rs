@@ -135,7 +135,7 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                     .chain(
                         fern::log_file(log_folder_name.join(".log"))
                             .context("Failed to create log file. Do we have permissions?")?,
-                    )
+                    ),
             )
             .chain(
                 fern::Dispatch::new()

@@ -1,18 +1,24 @@
 use std::{
-    fmt::{Debug, Display},
-    sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc},
-    time::Duration,
+    fmt::{Debug, Display}, sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    }, time::Duration
 };
 
 use costmap::CostmapRef;
 use global_msgs::Steering;
 use nalgebra::{Point2, UnitQuaternion, UnitVector2, Vector2, Vector3};
 use ordered_float::NotNan;
-use pathfinding::directed::{astar::astar, fringe::fringe};
+use pathfinding::directed::astar::astar;
 use rig::{RigSpace, RobotBaseRef};
-use successors::{successors, RobotState};
+use successors::{successors, traverse_to, RobotState};
 use unros_core::{
-    anyhow, async_trait, pubsub::{Publisher, Subscription}, setup_logging, task::{Task, TaskHandle}, tokio::{self, sync::oneshot}, tokio_rayon, Node, RuntimeContext
+    anyhow, async_trait,
+    pubsub::{Publisher, Subscription},
+    setup_logging,
+    task::{Task, TaskHandle},
+    tokio::{self, sync::oneshot},
+    tokio_rayon, Node, RuntimeContext,
 };
 
 type Float = f32;
@@ -197,6 +203,7 @@ impl Node for WaypointDriver {
 
                     let forward = isometry.get_forward_vector();
                     let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
+                    let width = self.width as f32 / self.costmap_ref.get_cell_width();
 
                     let Some((path, _distance)) = astar(
                         &RobotState {
@@ -206,19 +213,18 @@ impl Node for WaypointDriver {
                             left_steering: Default::default(),
                             right_steering: Default::default(),
                         },
-                        |current|
+                        |current| {
                             successors(
                                 *current,
                                 &obstacles,
                                 self.can_reverse,
-                                self.width as f32 / self.costmap_ref.get_cell_width()
+                                width,
                             )
-                        ,
+                        },
                         |current| {
-                            let mut cost = NotNan::new(
-                                (current.position.cast::<f32>() - waypoint.cast()).magnitude(),
-                            )
-                            .unwrap();
+                            let travel = current.position.cast::<Float>() - waypoint.cast();
+                            let mut cost = NotNan::new(travel.magnitude()).unwrap()
+                                + travel.angle(&current.forward) * self.width / 2.0;
 
                             if let Some(goal_forward) = goal_forward {
                                 cost += goal_forward.angle(&current.forward) * self.width / 2.0;
@@ -231,15 +237,60 @@ impl Node for WaypointDriver {
                         todo!("Failed to find path")
                     };
 
-                    let mut path: Vec<RobotState<Float>> = path.into_iter().map(|RobotState { position, forward, left_steering, right_steering } | RobotState { position: self.costmap_ref.local_to_global(position.cast().into()).coords, forward, left_steering, right_steering }).collect();
+                    // println!("A {:?}", path.first().unwrap());
+                    // println!("B {:?}", traverse_to(path.first().unwrap(), path.last().unwrap(), &obstacles, self.can_reverse, width).unwrap());
+                    // let mut new_path = Vec::with_capacity(path.len());
+                    // let mut path = path.into_iter();
 
-                    path.first_mut().unwrap().position = Vector2::new(
-                        isometry.translation.x,
-                        isometry.translation.z,
-                    );
+                    // let mut start = path.next().unwrap();
+                    // new_path.push(start);
+
+                    // let mut old_next = path.next().unwrap();
+ 
+                    // while let Some(next) = path.next() {
+                    //     if let Some(new_next) = traverse_to(&start, &next, &obstacles, self.can_reverse, self.width) {
+                    //         old_next = new_next;
+                    //     } else {
+                    //         new_path.push(old_next);
+                    //         start = old_next;
+                    //         old_next = next;
+                    //     }
+                    // }
+
+                    // new_path.push(old_next);
+
+                    let new_path = path;
+                    // println!("B {:?}", new_path.len());
+
+                    let mut path: Vec<RobotState<Float>> = new_path
+                        .into_iter()
+                        .map(
+                            |RobotState {
+                                 position,
+                                 forward,
+                                 left_steering,
+                                 right_steering,
+                             }| RobotState {
+                                position: self
+                                    .costmap_ref
+                                    .local_to_global(position.cast().into())
+                                    .coords,
+                                forward,
+                                left_steering,
+                                right_steering,
+                            },
+                        )
+                        .collect();
+
+                    path.first_mut().unwrap().position =
+                        Vector2::new(isometry.translation.x, isometry.translation.z);
                     path.last_mut().unwrap().position = init.data.destination.coords;
+                    // println!("{:?}", path.last().unwrap());
 
-                    if path_sender.send((job_counter, Some((path, goal_forward)))).is_err() {
+                    if path_sender
+                        .send((job_counter, Some((path, goal_forward))))
+                        .is_err()
+                    {
                         return Ok(());
                     }
 
@@ -259,56 +310,81 @@ impl Node for WaypointDriver {
             let sleeper = spin_sleep::SpinSleeper::default();
 
             'main: loop {
-                let Ok(item) = path_recv.recv() else { return Ok(()); };
+                let Ok(item) = path_recv.recv() else {
+                    return Ok(());
+                };
                 let (new_job_index, item) = item;
                 if new_job_index != job_counter {
                     continue;
                 }
                 let (mut path, mut _goal_forward) = item.unwrap();
-    
+
                 loop {
                     match path_recv.try_recv() {
-                        Ok((new_job_index, x)) => if let Some((new_path, _)) = x {
-                            assert_eq!(new_job_index, job_counter);
-                            path = new_path;
-                        } else {
-                            continue 'main;
+                        Ok((new_job_index, x)) => {
+                            if let Some((new_path, _)) = x {
+                                debug_assert_eq!(new_job_index, job_counter);
+                                path = new_path;
+                            } else {
+                                continue 'main;
+                            }
                         }
-                        Err(e) => if e == mpsc::TryRecvError::Disconnected {
-                            return Ok(());
+                        Err(e) => {
+                            if e == mpsc::TryRecvError::Disconnected {
+                                return Ok(());
+                            }
                         }
                     }
                     let isometry = robot_base.get_isometry();
                     let position = Vector2::new(isometry.translation.x, isometry.translation.z);
 
-                    let (distance, next) = path.iter().skip(1).map(|x| ((x.position - position).magnitude_squared(), x)).min_by_key(|(d, _)| NotNan::new(*d).unwrap()).unwrap();
+                    let (i, distance) = path
+                        .iter()
+                        .enumerate()
+                        .map(|(i, x)| (i, (x.position - position).magnitude_squared()))
+                        .min_by_key(|(_, d)| NotNan::new(*d).unwrap())
+                        .unwrap();
 
-                    if (path.last().unwrap().position - position).magnitude() < self.completion_distance {
-                        break next.forward;
+                    if (path.last().unwrap().position - position).magnitude()
+                        < self.completion_distance
+                    {
+                        break;
                     }
 
-                    if distance > self.completion_distance {
+                    // If we are closest to the last node but did not satisfy the end condition
+                    // OR
+                    // If we are simply too far from the path
+                    if i == path.len() - 1 || distance > self.completion_distance {
                         error!("Exceeded max offset from path: {distance}");
                         self.steering_signal.set(Steering::new(0.0, 0.0));
-                        let Ok(item) = path_recv.recv() else { return Ok(()); };
+                        let Ok(item) = path_recv.recv() else {
+                            return Ok(());
+                        };
                         let (new_job_index, item) = item;
                         if new_job_index != job_counter {
                             continue;
                         }
-                        let Some((new_path, _)) = item else { continue 'main; };
+                        let Some((new_path, _)) = item else {
+                            continue 'main;
+                        };
                         path = new_path;
                         continue;
                     }
 
-                    self.steering_signal.set(Steering { left: next.left_steering, right: next.right_steering });
+                    let next = path.get(i + 1).unwrap();
+
+                    self.steering_signal.set(Steering {
+                        left: next.left_steering,
+                        right: next.right_steering,
+                    });
 
                     sleeper.sleep(self.refresh_rate);
-                };
+                }
 
                 completed.store(true, Ordering::Relaxed);
                 job_counter += 1;
                 self.steering_signal.set(Steering::new(0.0, 0.0));
-    
+
                 // if let Some(goal_forward) = goal_forward {
                 //     // Turn to goal orientation
                 //     loop {
