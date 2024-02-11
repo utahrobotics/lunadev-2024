@@ -69,6 +69,10 @@ where
                         path = new_path;
                     }
 
+                    if path.is_empty() {
+                        break;
+                    }
+
                     let isometry = self.robot_base.get_isometry();
                     let position = Vector2::new(isometry.translation.x, isometry.translation.z);
 

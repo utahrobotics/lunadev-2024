@@ -21,9 +21,20 @@ use unros_core::{
 
 use crate::Float;
 
+#[derive(Debug)]
 pub enum NavigationError {
     NoPath,
 }
+
+impl std::fmt::Display for NavigationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoPath => write!(f, "There was no path to the destination"),
+        }
+    }
+}
+
+impl std::error::Error for NavigationError {}
 
 pub struct NavigationProgress {
     completion_percentage: Arc<AtomicU8>,
@@ -103,6 +114,7 @@ impl Node for DirectPathfinder {
                 let Some(pending_task) = task_init.send_task_data(NavigationProgress {
                     completion_percentage: completion_percentage.clone(),
                 }) else {
+                    error!("Scheduler of task dropped task init before we could respond");
                     continue;
                 };
 
@@ -198,6 +210,7 @@ impl Node for DirectPathfinder {
                         },
                         |current| *current == dest_grid,
                     ) else {
+                        self.path_signal.set(vec![]);
                         pending_task.finish(Err(NavigationError::NoPath));
                         continue 'outer;
                     };

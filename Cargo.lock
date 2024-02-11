@@ -2777,6 +2777,7 @@ version = "0.1.0"
 dependencies = [
  "costmap",
  "fxhash",
+ "localization",
  "nalgebra",
  "navigator",
  "rig",

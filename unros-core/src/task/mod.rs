@@ -251,18 +251,29 @@ impl<T: Send + 'static, SD: Send, TD: Send> Task for ChannelTask<T, SD, TD> {
 }
 
 /// The task failed to complete, or it already completed and should not be waited for again.
+#[derive(Debug)]
 pub enum TaskCompletionError {
     OutputAlreadyTaken,
     DidNotComplete,
 }
+
+impl Display for TaskCompletionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OutputAlreadyTaken => write!(f, "The output of this task has already been taken"),
+            Self::DidNotComplete => write!(f, "The task did not complete"),
+        }
+    }
+}
+
+impl std::error::Error for TaskCompletionError {}
 
 /// A handle to a task.
 ///
 /// This handle does not make any attempt at stopping the task when dropped.
 /// To implement this functionality, one should utilize the `TaskData`'s `Drop`.
 pub struct TaskHandle<T, TD> {
-    recv: mpsc::Receiver<T>,
-    done: bool,
+    recv: Option<mpsc::Receiver<T>>,
     data: TD,
 }
 
@@ -283,16 +294,15 @@ impl<T, TD> TaskHandle<T, TD> {
     /// If the task failed to complete (due to a panic or cancellation), this will return `Err(TaskCompletionError::DidNotComplete)`.
     /// Otherwise, the `Output` of the task will be returned.
     pub async fn wait_for_completion(&mut self) -> Result<T, TaskCompletionError> {
-        if self.done {
-            Err(TaskCompletionError::OutputAlreadyTaken)
-        } else {
-            let result = self
-                .recv
+        if let Some(recv) = &mut self.recv {
+            let result = recv
                 .recv()
                 .await
                 .ok_or(TaskCompletionError::DidNotComplete);
-            self.done = true;
+            self.recv = None;
             result
+        } else {
+            Err(TaskCompletionError::OutputAlreadyTaken)
         }
     }
 
@@ -312,7 +322,7 @@ impl<T, TD> TaskHandle<T, TD> {
         tokio::spawn(async move {
             match task.await {
                 Ok(x) => {
-                    let _ = sender.send(x);
+                    let _ = sender.send(x).await;
                 }
                 Err(e) => {
                     if e.is_cancelled() {
@@ -325,8 +335,7 @@ impl<T, TD> TaskHandle<T, TD> {
         });
 
         Self {
-            recv,
-            done: false,
+            recv: Some(recv),
             data,
         }
     }
@@ -347,7 +356,7 @@ impl<T, TD> TaskHandle<T, TD> {
         tokio::spawn(async move {
             match oneshot.await {
                 Ok(x) => {
-                    let _ = sender.send(x);
+                    let _ = sender.send(x).await;
                 }
                 Err(_) => {
                     error!("{task_name} has failed to complete");
@@ -356,8 +365,7 @@ impl<T, TD> TaskHandle<T, TD> {
         });
 
         Self {
-            recv,
-            done: false,
+            recv: Some(recv),
             data,
         }
     }
@@ -369,8 +377,7 @@ impl<T, TD> TaskHandle<T, TD> {
     /// which goes against its intended usage.
     pub async fn from_mpsc_receiver(recv: mpsc::Receiver<T>, data: TD) -> Self {
         Self {
-            recv,
-            done: false,
+            recv: Some(recv),
             data,
         }
     }

@@ -1,4 +1,4 @@
-[gd_scene load_steps=35 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=43 format=3 uid="uid://b8qgudi6vkflb"]
 
 [ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_1xyvq"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="1_hl7kb"]
@@ -388,6 +388,7 @@ var user_velocity: Vector3
 
 @onready var scanner: RayScanner = $RayScanner
 @onready var waypoint_mesh: Node3D = $Node/Waypoint
+@onready var estimated_mesh: Node3D = $Node/Estimated
 @onready var sim_tab: Control = $\"../../../../..\"
 
 
@@ -483,6 +484,10 @@ func _physics_process(delta: float) -> void:
 			
 			left_steering = conn.get_float()
 			right_steering = conn.get_float()
+			
+			estimated_mesh.global_position = Vector3(conn.get_float(), conn.get_float(), conn.get_float())
+			var w := conn.get_float()
+			estimated_mesh.quaternion = Quaternion(conn.get_float(), conn.get_float(), conn.get_float(), w)
 	
 	velocity += - global_transform.basis.z.slide(Vector3.UP).normalized() * SPEED * (left_steering + right_steering) / 2
 	var angle := (left_steering - right_steering) * SPEED / WHEEL_SEPARATION
@@ -494,6 +499,40 @@ func _physics_process(delta: float) -> void:
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_u861d"]
 height = 1.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mw3v4"]
+albedo_color = Color(0.101961, 0.537255, 0.101961, 1)
+
+[sub_resource type="PrismMesh" id="PrismMesh_6d518"]
+material = SubResource("StandardMaterial3D_mw3v4")
+size = Vector3(0.05, 0.05, 0.35)
+
+[sub_resource type="PrismMesh" id="PrismMesh_cfju8"]
+material = SubResource("StandardMaterial3D_mw3v4")
+size = Vector3(0.05, 0.05, 0.35)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_s2y08"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 0.164706, 0.215686, 0.372549)
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_jrghj"]
+material = SubResource("StandardMaterial3D_s2y08")
+height = 1.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_vyevn"]
+albedo_color = Color(1, 0, 0.65098, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_g5hor"]
+material = SubResource("StandardMaterial3D_vyevn")
+radius = 0.05
+height = 0.1
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_hn2h0"]
+material = SubResource("StandardMaterial3D_vyevn")
+top_radius = 0.01
+bottom_radius = 0.03
+height = 0.1
 
 [sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_yqe5l"]
 
@@ -735,11 +774,33 @@ shape = SubResource("CapsuleShape3D_u861d")
 [node name="RayScanner" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D" instance=ExtResource("2_jsa7e")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 
+[node name="Center" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
+
+[node name="Waypoint" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Center"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0, 0, 0)
+mesh = SubResource("PrismMesh_6d518")
+
+[node name="Waypoint2" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Center"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+mesh = SubResource("PrismMesh_cfju8")
+
 [node name="Node" type="Node" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
 
 [node name="Waypoint" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node" instance=ExtResource("3_b4xjj")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 visible = false
+
+[node name="Estimated" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node"]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+mesh = SubResource("CapsuleMesh_jrghj")
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
+mesh = SubResource("SphereMesh_g5hor")
+
+[node name="MeshInstance3D3" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
+transform = Transform3D(1, 0, 0, 0, 1.31134e-07, 1, 0, -1, 1.31134e-07, 0, 0, -0.0902355)
+mesh = SubResource("CylinderMesh_hn2h0")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
 layers = 2

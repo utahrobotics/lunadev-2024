@@ -1,10 +1,11 @@
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use nalgebra::{Isometry, Point3, Quaternion, Translation3, UnitQuaternion};
+use localization::{Localizer, OrientationFrame, PositionFrame};
+use nalgebra::{Point3, Quaternion, UnitQuaternion};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rig::Robot;
 use unros_core::{
-    anyhow, async_run_all, default_run_options,
+    anyhow, async_run_all, default_run_options, log,
     logging::init_logger,
     pubsub::{Publisher, Subscriber},
     task::Task,
@@ -24,8 +25,9 @@ async fn main() -> anyhow::Result<()> {
     init_logger(&run_options)?;
 
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
-    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera"])?;
+    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "debug"])?;
     let mut camera = elements.remove("camera").unwrap();
+    let debug_element = elements.remove("debug").unwrap();
 
     let mut costmap = Costmap::new(400, 400, 0.05, 10.0, 10.0, 0.01);
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
@@ -51,12 +53,21 @@ async fn main() -> anyhow::Result<()> {
     // });
 
     let mut pathfinder =
-        DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.025);
+        DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.05);
 
     let mut driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
     pathfinder.accept_path_sub(driver.create_path_sub());
     let nav_task = pathfinder.get_navigation_task().clone();
+
+    // let robot_base_ref = robot_base.get_ref();
+    let mut localizer = Localizer::new(robot_base, 0.0);
+
+    let mut position_pub = Publisher::default();
+    position_pub.accept_subscription(localizer.create_position_sub());
+
+    let mut orientation_pub = Publisher::default();
+    orientation_pub.accept_subscription(localizer.create_orientation_sub());
 
     let mut steering_sub = Subscriber::default();
     driver.accept_steering_sub(steering_sub.create_subscription(1));
@@ -111,10 +122,9 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .expect("Failed to receive packet") as usize;
 
-                robot_base.set_isometry(Isometry {
-                    rotation: UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)),
-                    translation: Translation3::new(x, 0.0, z),
-                });
+                position_pub.set(PositionFrame::rand(Point3::new(x, 0.0, z), 0.01, debug_element.get_ref()));
+
+                orientation_pub.set(OrientationFrame::rand(UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)), 0.05, debug_element.get_ref()));
 
                 let mut camera_joint = match camera.get_local_joint() {
                     rig::joints::JointMut::Hinge(x) => x,
@@ -149,7 +159,18 @@ async fn main() -> anyhow::Result<()> {
                 {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
-                    nav_task.try_schedule(Point3::new(x, 0.0, y)).await.unwrap();
+                    match nav_task.try_schedule(Point3::new(x, 0.0, y)).await {
+                        Ok(mut handle) => {
+                            tokio::spawn(async move {
+                                match handle.wait_for_completion().await {
+                                    Ok(Ok(())) => log::info!("Navigation complete"),
+                                    Ok(Err(e)) => log::error!("{e}"),
+                                    Err(e) => log::error!("{e}"),
+                                }
+                            });
+                        }
+                        Err(e) => log::error!("{e}"),
+                    }
                 }
 
                 if let Some(steering) = steering_sub.try_recv() {
@@ -173,6 +194,39 @@ async fn main() -> anyhow::Result<()> {
                         .await
                         .expect("Failed to write steering");
                 }
+
+                let isometry = camera.get_isometry_of_base();
+
+                stream
+                    .write_f32_le(isometry.translation.x)
+                    .await
+                    .expect("Failed to write position");
+                stream
+                    .write_f32_le(isometry.translation.y)
+                    .await
+                    .expect("Failed to write position");
+                stream
+                    .write_f32_le(isometry.translation.z)
+                    .await
+                    .expect("Failed to write position");
+
+                stream
+                    .write_f32_le(isometry.rotation.w)
+                    .await
+                    .expect("Failed to write orientation");
+                stream
+                    .write_f32_le(isometry.rotation.i)
+                    .await
+                    .expect("Failed to write orientation");
+                stream
+                    .write_f32_le(isometry.rotation.j)
+                    .await
+                    .expect("Failed to write orientation");
+                stream
+                    .write_f32_le(isometry.rotation.k)
+                    .await
+                    .expect("Failed to write orientation");
+
                 stream.flush().await.expect("Failed to write steering");
             }
         }
@@ -185,6 +239,7 @@ async fn main() -> anyhow::Result<()> {
             sim_conn.into(),
             driver.into(),
             pathfinder.into(),
+            localizer.into(),
         ],
         run_options,
     )
