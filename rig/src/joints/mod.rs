@@ -1,8 +1,7 @@
-use std::sync::{atomic::Ordering, Mutex};
+use std::sync::atomic::Ordering;
 
 use nalgebra::{Isometry3, UnitQuaternion, UnitVector3};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
 
 use crate::{AtomicFloat, Float};
 
@@ -44,12 +43,12 @@ impl Joint {
         }
     }
 
-    pub(super) fn add_subscriber(&self, sender: mpsc::Sender<()>) {
-        match self {
-            Joint::Fixed => {}
-            Joint::Hinge(x) => x.add_subscriber(sender),
-        }
-    }
+    // pub(super) fn add_subscriber(&self, sender: mpsc::Sender<()>) {
+    //     match self {
+    //         Joint::Fixed => {}
+    //         Joint::Hinge(x) => x.add_subscriber(sender),
+    //     }
+    // }
 }
 
 /// A mutable reference to a joint.
@@ -65,28 +64,29 @@ pub enum JointMut<'a> {
 #[derive(Deserialize, Serialize)]
 pub struct HingeJoint {
     pub axis: UnitVector3<Float>,
+    #[serde(default)]
     pub starting_angle: Float,
     #[serde(skip)]
     angle: AtomicFloat,
-    #[serde(skip)]
-    senders: Mutex<Vec<mpsc::Sender<()>>>,
+    // #[serde(skip)]
+    // senders: Mutex<Vec<mpsc::Sender<()>>>,
 }
 
 impl HingeJoint {
-    fn update(&self) {
-        for sender in self.senders.lock().unwrap().iter() {
-            let _ = sender.try_send(());
-        }
-    }
+    // fn update(&self) {
+    //     for sender in self.senders.lock().unwrap().iter() {
+    //         let _ = sender.try_send(());
+    //     }
+    // }
 
     /// Gets the signed angle of the hinge from the starting point.
     pub fn get_angle(&self) -> Float {
         self.angle.load(Ordering::Acquire)
     }
 
-    pub(super) fn add_subscriber(&self, sender: mpsc::Sender<()>) {
-        self.senders.lock().unwrap().push(sender);
-    }
+    // pub(super) fn add_subscriber(&self, sender: mpsc::Sender<()>) {
+    //     self.senders.lock().unwrap().push(sender);
+    // }
 }
 
 /// A mutable reference to a `HingeJoint`.
@@ -101,11 +101,11 @@ impl<'a> HingeJointMut<'a> {
 
     pub fn add_angle(&mut self, angle: Float) {
         self.0.angle.fetch_add(angle, Ordering::Release);
-        self.0.update();
+        // self.0.update();
     }
 
     pub fn set_angle(&mut self, angle: Float) {
         self.0.angle.store(angle, Ordering::Release);
-        self.0.update();
+        // self.0.update();
     }
 }

@@ -24,7 +24,8 @@ async fn main() -> anyhow::Result<()> {
     init_logger(&run_options)?;
 
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
-    let (_, robot_base) = rig.destructure::<FxBuildHasher>([])?;
+    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera"])?;
+    let mut camera = elements.remove("camera").unwrap();
 
     let mut costmap = Costmap::new(400, 400, 0.05, 10.0, 10.0, 0.01);
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
@@ -101,21 +102,39 @@ async fn main() -> anyhow::Result<()> {
                     .read_f32_le()
                     .await
                     .expect("Failed to receive packet") as Float;
+                let x_rot = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
                 let n = stream
                     .read_u32_le()
                     .await
                     .expect("Failed to receive packet") as usize;
+
                 robot_base.set_isometry(Isometry {
                     rotation: UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)),
                     translation: Translation3::new(x, 0.0, z),
                 });
 
+                let mut camera_joint = match camera.get_local_joint() {
+                    rig::joints::JointMut::Hinge(x) => x,
+                    _ => unreachable!(),
+                };
+
+                camera_joint.set_angle(x_rot);
+                let camera_isometry = camera.get_global_isometry();
                 points.reserve(n.saturating_sub(points.capacity()));
+                // let mut first = true;
                 for _ in 0..n {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
                     let z = stream.read_f32_le().await.expect("Failed to receive point");
-                    points.push(Point3::new(x, y, z));
+                    let point = camera_isometry * Point3::new(x, y, z);
+                    // if first {
+                    //     println!("{point:?}");
+                    //     first = false;
+                    // }
+                    points.push(point);
                 }
 
                 let capacity = points.capacity();

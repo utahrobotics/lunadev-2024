@@ -404,7 +404,8 @@ func _input(event: InputEvent) -> void:
 		event.relative = Vector2(sqrt(absf(event.relative.x)), sqrt(absf(event.relative.y))) * event.relative.sign()
 		event.relative *= MOUSE_SENSITIVITY
 		global_rotate(Vector3.UP, event.relative.x)
-		rotate_object_local(Vector3.RIGHT, event.relative.y)
+		scanner.rotation.x += event.relative.y
+		#scanner.rotate_object_local(Vector3.RIGHT, event.relative.y)
 	
 	elif event.is_action_pressed(\"PlaceWaypoint\"):
 		waypoint = Vector2(global_position.x, global_position.z)
@@ -465,6 +466,7 @@ func _physics_process(delta: float) -> void:
 			conn.put_float(quaternion.x)
 			conn.put_float(quaternion.y)
 			conn.put_float(quaternion.z)
+			conn.put_float(scanner.rotation.x)
 			var points := scanner.scan()
 			conn.put_u32(points.size())
 			for point in points:
@@ -491,8 +493,7 @@ func _physics_process(delta: float) -> void:
 "
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_u861d"]
-radius = 0.456615
-height = 0.992012
+height = 1.0
 
 [sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_yqe5l"]
 
@@ -725,13 +726,14 @@ render_target_update_mode = 4
 [node name="Node3D" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport"]
 
 [node name="CharacterBody3D" type="CharacterBody3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 script = SubResource("GDScript_0y6bh")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 shape = SubResource("CapsuleShape3D_u861d")
 
 [node name="RayScanner" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D" instance=ExtResource("2_jsa7e")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 
 [node name="Node" type="Node" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
 

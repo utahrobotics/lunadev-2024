@@ -15,7 +15,7 @@ use joints::{Joint, JointMut};
 use nalgebra::{Isometry3, Point3, Quaternion, RealField, UnitQuaternion, Vector3};
 use portable_atomic::AtomicF32;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 
 pub mod joints;
 
@@ -163,11 +163,11 @@ impl Robot {
                 .ok_or_else(|| anyhow::anyhow!("Missing element: {element_path}"))?;
 
             slices_vec.push(first_slice);
-            let (sender, receiver) = mpsc::channel(1);
+            // let (sender, receiver) = mpsc::channel(1);
 
             loop {
                 current_element.joint.init();
-                current_element.joint.add_subscriber(sender.clone());
+                // current_element.joint.add_subscriber(sender.clone());
                 let (w, [i, j, k]) = quaternion_core::from_euler_angles(
                     current_element.rotation_type.into(),
                     current_element.rotation_order.into(),
@@ -211,7 +211,7 @@ impl Robot {
                     RobotElement(Arc::new(RobotElementInner {
                         chain: chain.drain(..).collect(),
                         reference: base_element.get_ref(),
-                        receiver: receiver.into(),
+                        // receiver: receiver.into(),
                     })),
                 )
                 .is_some()
@@ -232,7 +232,7 @@ struct IsometryAndJoint {
 struct RobotElementInner {
     chain: Box<[Arc<IsometryAndJoint>]>,
     reference: RobotBaseRef,
-    receiver: tokio::sync::Mutex<mpsc::Receiver<()>>,
+    // receiver: tokio::sync::Mutex<mpsc::Receiver<()>>,
 }
 
 /// An element of a robot, which can be moved if it is attached by a non-fixed
@@ -345,16 +345,16 @@ impl RobotElementRef {
         self.0.get_isometry_of_base() * self.0.get_isometry_from_base()
     }
 
-    pub async fn wait_for_change(&self) {
-        self.0
-             .0
-            .receiver
-            .lock()
-            .await
-            .recv()
-            .await
-            .expect("Sender should still be alive");
-    }
+    // pub async fn wait_for_change(&self) {
+    //     self.0
+    //          .0
+    //         .receiver
+    //         .lock()
+    //         .await
+    //         .recv()
+    //         .await
+    //         .expect("Sender should still be alive");
+    // }
 }
 
 struct RobotBaseInner {

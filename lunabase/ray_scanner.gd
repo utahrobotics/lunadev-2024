@@ -21,7 +21,13 @@ func _ready() -> void:
 
 func scan() -> Array[Vector3]:
 	var out: Array[Vector3] = []
+	#var first := true
 	for raycast in raycasts:
 		if raycast.is_colliding():
-			out.append(raycast.get_collision_point())
+			var point := raycast.get_collision_point()
+			#if first:
+				#first = false
+				#print(point)
+			#out.append(raycast.get_collision_point())
+			out.append(global_transform.inverse() * point)
 	return out
