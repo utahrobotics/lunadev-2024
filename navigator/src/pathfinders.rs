@@ -256,7 +256,7 @@ fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, obstacles: &DMatrix<boo
     let distance = travel.magnitude();
     travel.unscale_mut(distance);
 
-    for i in 0..distance.ceil() as usize {
+    for i in 0..distance.floor() as usize {
         let intermediate = from.cast() + travel * i as Float;
 
         if !*obstacles
