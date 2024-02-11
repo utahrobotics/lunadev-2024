@@ -89,12 +89,11 @@ where
                     let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
                     let travel = (next.cast::<Float>() - position.cast()).coords.normalize();
-                    let mut cross = (forward.x * travel.y - forward.y * travel.x).signum();
+                    let cross = (forward.x * travel.y - forward.y * travel.x).signum();
                     let mut angle = forward.angle(&travel);
                     let mut reversing = 1.0;
 
                     if angle > PI / 2.0 && self.can_reverse {
-                        cross *= -1.0;
                         angle = PI - angle;
                         reversing = -1.0;
                     }
