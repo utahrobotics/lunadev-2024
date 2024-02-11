@@ -9,7 +9,7 @@ use std::{
 use costmap::CostmapRef;
 use nalgebra::{DMatrix, Point2, Point3, Vector2};
 use ordered_float::NotNan;
-use pathfinding::directed::astar::astar;
+use pathfinding::directed::fringe::fringe;
 use rig::RobotBaseRef;
 use unros_core::{
     anyhow, async_trait,
@@ -158,7 +158,7 @@ impl Node for DirectPathfinder {
                         break;
                     }
 
-                    let Some((path, _distance)) = astar(
+                    let Some((path, _distance)) = fringe(
                         &position,
                         |current| {
                             let current = current.cast::<isize>();

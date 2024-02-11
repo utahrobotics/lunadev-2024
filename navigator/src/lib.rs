@@ -34,6 +34,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
             robot_base,
             refresh_rate: Duration::from_millis(20),
             can_reverse: false,
+            // 30 degrees
             full_turn_angle: 0.5235987756,
             turn_fn: |frac| -2.0 * frac + 1.0,
         }
@@ -88,7 +89,7 @@ where
                     let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
                     let travel = (next.cast::<Float>() - position.cast()).coords.normalize();
-                    let mut cross = -(forward.x * travel.y - forward.y * travel.x).signum();
+                    let mut cross = (forward.x * travel.y - forward.y * travel.x).signum();
                     let mut angle = forward.angle(&travel);
                     let mut reversing = 1.0;
 
@@ -101,20 +102,20 @@ where
                     if angle > self.full_turn_angle {
                         if cross > 0.0 {
                             self.steering_signal
-                                .set(Steering::new(-1.0 * reversing, 1.0 * reversing));
+                                .set(Steering::new(1.0 * reversing, -1.0 * reversing));
                         } else {
                             self.steering_signal
-                                .set(Steering::new(1.0 * reversing, -1.0 * reversing));
+                                .set(Steering::new(-1.0 * reversing, 1.0 * reversing));
                         }
                     } else {
                         let smaller_ratio = (self.turn_fn)(angle / self.full_turn_angle);
 
                         if cross > 0.0 {
                             self.steering_signal
-                                .set(Steering::new(smaller_ratio * reversing, 1.0 * reversing));
+                                .set(Steering::new(1.0 * reversing, smaller_ratio * reversing));
                         } else {
                             self.steering_signal
-                                .set(Steering::new(1.0 * reversing, smaller_ratio * reversing));
+                                .set(Steering::new(smaller_ratio * reversing, 1.0 * reversing));
                         }
                     }
 
