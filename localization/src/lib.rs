@@ -386,14 +386,8 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
             // );
             // let rotation = UnitQuaternion::default();
 
-            let x_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
-            let y_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
-            let z_distr = Normal::new(bb.start_position.x, bb.start_std_dev).unwrap();
-            let translation = Translation3::new(
-                x_distr.sample(&mut rng),
-                y_distr.sample(&mut rng),
-                z_distr.sample(&mut rng),
-            );
+            let trans_distr = Normal::new(0.0, bb.start_std_dev).unwrap();
+            let translation = Translation3::from(bb.start_position + random_unit_vector(&mut rng).scale(trans_distr.sample(&mut rng)));
 
             Particle {
                 isometry: Isometry::from_parts(translation, bb.start_orientation),
@@ -487,7 +481,7 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
                         let travel = new_position - p.isometry.translation.vector;
                         let distance = travel.magnitude();
                         let strength = 1.0 - normal(0.0, std_dev, distance) / max_normal;
-                        p.isometry.translation.vector += travel * strength;
+                        p.isometry.translation.vector += travel * strength * 0.25;
                     });
                 } else {
                     particles.par_iter_mut().for_each(|p| {

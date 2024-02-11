@@ -2729,7 +2729,6 @@ dependencies = [
  "eigenvalues",
  "fxhash",
  "nalgebra",
- "quaternion-core",
  "rand",
  "rand_distr",
  "rig",
