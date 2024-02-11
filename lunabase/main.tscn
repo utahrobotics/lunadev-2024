@@ -483,7 +483,7 @@ func _physics_process(delta: float) -> void:
 			right_steering = conn.get_float()
 	
 	velocity += - global_transform.basis.z.slide(Vector3.UP).normalized() * SPEED * (left_steering + right_steering) / 2
-	var angle := (right_steering - left_steering) * SPEED / WHEEL_SEPARATION
+	var angle := (left_steering - right_steering) * SPEED / WHEEL_SEPARATION
 	global_rotate(Vector3.UP, - angle * delta)
 	#prints(left_steering, right_steering)
 	

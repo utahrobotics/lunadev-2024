@@ -1,7 +1,7 @@
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use nalgebra::{Isometry, Point2, Point3, Quaternion, Translation3, UnitQuaternion};
-use navigator::{DrivingTaskScheduleData, WaypointDriver};
+use nalgebra::{Isometry, Point3, Quaternion, Translation3, UnitQuaternion};
+use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rig::Robot;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
@@ -49,13 +49,16 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // });
 
-    let mut navigator =
-        WaypointDriver::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.025, 0.3);
-    navigator.can_reverse = false;
-    let nav_task = navigator.get_driving_task().clone();
+    let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.025);
+
+    let mut driver =
+        DifferentialDriver::new(robot_base.get_ref());
+    // driver.can_reverse = true;
+    pathfinder.accept_path_sub(driver.create_path_sub());
+    let nav_task = pathfinder.get_navigation_task().clone();
 
     let mut steering_sub = Subscriber::default();
-    navigator.accept_steering_sub(steering_sub.create_subscription(1));
+    driver.accept_steering_sub(steering_sub.create_subscription(1));
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
     let sim_conn = FnNode::new(|_| async move {
@@ -128,10 +131,7 @@ async fn main() -> anyhow::Result<()> {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
                     nav_task
-                        .try_schedule(DrivingTaskScheduleData {
-                            destination: Point2::new(x, y),
-                            orientation: None,
-                        })
+                        .try_schedule(Point3::new(x, 0.0, y))
                         .await
                         .unwrap();
                 }
@@ -167,7 +167,8 @@ async fn main() -> anyhow::Result<()> {
             // video_maker.into(),
             costmap.into(),
             sim_conn.into(),
-            navigator.into(),
+            driver.into(),
+            pathfinder.into(),
         ],
         run_options,
     )

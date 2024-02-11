@@ -66,11 +66,11 @@ impl<T> PendingChannelTask<T> {
 }
 
 /// A request to schedule a task.
-pub struct ChannelTaskInit<TD, T> {
+pub struct TaskInit<TD, T> {
     task_data_sender: oneshot::Sender<(TD, oneshot::Receiver<T>)>,
 }
 
-impl<TD, T> ChannelTaskInit<TD, T> {
+impl<TD, T> TaskInit<TD, T> {
     /// Sends the `TaskData` to the scheduler, thus completing the scheduling.
     ///
     /// Returns `None` if the scheduler was dropped before receiving the data.  
@@ -122,9 +122,8 @@ impl std::error::Error for ChannelTaskError {}
 /// /// The `TaskData` type is left to its default value of `()`.
 /// type FactorialTask = ChannelTask<usize, usize>;
 /// ```
-#[derive(Clone)]
 pub struct ChannelTask<T, SD, TD = ()> {
-    sender: mpsc::Sender<(SD, ChannelTaskInit<TD, T>)>,
+    sender: mpsc::Sender<(SD, TaskInit<TD, T>)>,
     task_name: Cow<'static, str>,
 }
 
@@ -139,7 +138,7 @@ impl<T, SD, TD> ChannelTask<T, SD, TD> {
     pub fn new(
         size: usize,
         task_name: impl Into<Cow<'static, str>>,
-    ) -> (Self, mpsc::Receiver<(SD, ChannelTaskInit<TD, T>)>) {
+    ) -> (Self, mpsc::Receiver<(SD, TaskInit<TD, T>)>) {
         let (sender, receiver) = mpsc::channel(size);
         (
             Self {
@@ -150,6 +149,69 @@ impl<T, SD, TD> ChannelTask<T, SD, TD> {
         )
     }
 }
+
+impl<T, SD, TD> Clone for ChannelTask<T, SD, TD> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone(), task_name: self.task_name.clone() }
+    }
+}
+
+pub struct ExclusiveTask<T, SD, TD = ()> {
+    sender: std::sync::mpsc::SyncSender<(SD, TaskInit<TD, T>)>,
+    task_name: Cow<'static, str>,
+}
+
+impl<T, SD, TD> Clone for ExclusiveTask<T, SD, TD> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone(), task_name: self.task_name.clone() }
+    }
+}
+
+impl<T, SD, TD> ExclusiveTask<T, SD, TD> {
+    pub fn new(
+        task_name: impl Into<Cow<'static, str>>,
+    ) -> (Self, std::sync::mpsc::Receiver<(SD, TaskInit<TD, T>)>) {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(0);
+        (
+            Self {
+                sender,
+                task_name: task_name.into(),
+            },
+            receiver,
+        )
+    }
+}
+
+
+#[async_trait]
+impl<T: Send + 'static, SD: Send, TD: Send> Task for ExclusiveTask<T, SD, TD> {
+    type Output = T;
+    type ScheduleData = SD;
+    type TaskData = TD;
+    type ScheduleError = ChannelTaskError;
+
+    async fn try_schedule(
+        &self,
+        schedule_data: Self::ScheduleData,
+    ) -> Result<TaskHandle<Self::Output, Self::TaskData>, Self::ScheduleError> {
+        let (task_data_sender, task_data_receiver) = oneshot::channel();
+        self.sender
+            .try_send((schedule_data, TaskInit { task_data_sender }))
+            .map_err(|e| match e {
+                std::sync::mpsc::TrySendError::Full(_) => ChannelTaskError::TaskQueueFull,
+                std::sync::mpsc::TrySendError::Disconnected(_) => ChannelTaskError::TaskDropped,
+            })?;
+        let (task_data, done_recv) = task_data_receiver
+            .await
+            .map_err(|_| ChannelTaskError::TaskDropped)?;
+
+        Ok(
+            TaskHandle::from_oneshot_receiver(done_recv, task_data, self.task_name.to_string())
+                .await,
+        )
+    }
+}
+
 
 /// A concrete type that can be made from any `Task` with the same associated types.
 pub type AnyTask<T, SE, SD, TD = ()> =
@@ -168,7 +230,7 @@ impl<T: Send + 'static, SD: Send, TD: Send> Task for ChannelTask<T, SD, TD> {
     ) -> Result<TaskHandle<Self::Output, Self::TaskData>, Self::ScheduleError> {
         let (task_data_sender, task_data_receiver) = oneshot::channel();
         self.sender
-            .try_send((schedule_data, ChannelTaskInit { task_data_sender }))
+            .try_send((schedule_data, TaskInit { task_data_sender }))
             .map_err(|e| match e {
                 mpsc::error::TrySendError::Full(_) => ChannelTaskError::TaskQueueFull,
                 mpsc::error::TrySendError::Closed(_) => ChannelTaskError::TaskDropped,

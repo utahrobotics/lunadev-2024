@@ -8,7 +8,7 @@ use costmap::Costmap;
 use fxhash::FxBuildHasher;
 use localization::{IMUFrame, Localizer, OrientationFrame, PositionFrame};
 use nalgebra::{Isometry, Point3};
-use navigator::WaypointDriver;
+use navigator::DifferentialDriver;
 #[cfg(unix)]
 use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
@@ -125,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
         // camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
     }
 
-    let navigator = WaypointDriver::new(robot_base_ref.clone(), costmap.get_ref(), 0.5, 0.2, 1.0);
+    let navigator = DifferentialDriver::new(robot_base_ref.clone(), costmap.get_ref(), 0.5, 0.2, 1.0);
 
     let mut data_dump = DataDump::new_file("motion.csv").await?;
     writeln!(
