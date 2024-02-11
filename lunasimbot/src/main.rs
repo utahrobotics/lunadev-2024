@@ -49,10 +49,10 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // });
 
-    let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.025);
+    let mut pathfinder =
+        DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.025);
 
-    let mut driver =
-        DifferentialDriver::new(robot_base.get_ref());
+    let mut driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
     pathfinder.accept_path_sub(driver.create_path_sub());
     let nav_task = pathfinder.get_navigation_task().clone();
@@ -130,10 +130,7 @@ async fn main() -> anyhow::Result<()> {
                 {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
-                    nav_task
-                        .try_schedule(Point3::new(x, 0.0, y))
-                        .await
-                        .unwrap();
+                    nav_task.try_schedule(Point3::new(x, 0.0, y)).await.unwrap();
                 }
 
                 if let Some(steering) = steering_sub.try_recv() {

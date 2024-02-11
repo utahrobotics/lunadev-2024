@@ -1,24 +1,33 @@
-use std::{sync::{atomic::{AtomicU8, Ordering}, Arc}, time::{Duration, Instant}};
+use std::{
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 
 use costmap::CostmapRef;
 use nalgebra::{DMatrix, Point2, Point3, Vector2};
 use ordered_float::NotNan;
 use pathfinding::directed::astar::astar;
 use rig::RobotBaseRef;
-use unros_core::{anyhow, async_trait, pubsub::{Publisher, Subscription}, setup_logging, task::{ExclusiveTask, TaskInit}, tokio_rayon, Node, RuntimeContext};
+use unros_core::{
+    anyhow, async_trait,
+    pubsub::{Publisher, Subscription},
+    setup_logging,
+    task::{ExclusiveTask, TaskInit},
+    tokio_rayon, Node, RuntimeContext,
+};
 
 use crate::Float;
 
-
 pub enum NavigationError {
-    NoPath
+    NoPath,
 }
-
 
 pub struct NavigationProgress {
-    completion_percentage: Arc<AtomicU8>
+    completion_percentage: Arc<AtomicU8>,
 }
-
 
 impl NavigationProgress {
     pub fn get_completion_percentage(&self) -> f32 {
@@ -26,15 +35,17 @@ impl NavigationProgress {
     }
 }
 
-
-pub type NavigationTask = ExclusiveTask<Result<(), NavigationError>, Point3<Float>, NavigationProgress>;
-
+pub type NavigationTask =
+    ExclusiveTask<Result<(), NavigationError>, Point3<Float>, NavigationProgress>;
 
 pub struct DirectPathfinder {
     nav_task: NavigationTask,
     path_signal: Publisher<Vec<Point2<Float>>>,
     robot_base: RobotBaseRef,
-    task_receiver: std::sync::mpsc::Receiver<(Point3<f32>, TaskInit<NavigationProgress, Result<(), NavigationError>>)>,
+    task_receiver: std::sync::mpsc::Receiver<(
+        Point3<f32>,
+        TaskInit<NavigationProgress, Result<(), NavigationError>>,
+    )>,
     pub completion_distance: Float,
     costmap_ref: CostmapRef,
     pub refresh_rate: Duration,
@@ -89,8 +100,12 @@ impl Node for DirectPathfinder {
 
                 let completion_percentage = Arc::new(AtomicU8::default());
 
-                let Some(pending_task) = task_init.send_task_data(NavigationProgress { completion_percentage: completion_percentage.clone() }) else { continue; };
-                
+                let Some(pending_task) = task_init.send_task_data(NavigationProgress {
+                    completion_percentage: completion_percentage.clone(),
+                }) else {
+                    continue;
+                };
+
                 let dest = Point2::new(dest.x, dest.z);
                 let mut dest_grid = self.costmap_ref.global_to_local(dest);
                 if dest_grid.x < 0 {
@@ -137,7 +152,9 @@ impl Node for DirectPathfinder {
                         position.y = self.costmap_ref.get_area_length() - 1;
                     }
 
-                    if (position.cast::<Float>() - dest_grid.cast()).magnitude() <= self.completion_distance {
+                    if (position.cast::<Float>() - dest_grid.cast()).magnitude()
+                        <= self.completion_distance
+                    {
                         break;
                     }
 
@@ -155,25 +172,29 @@ impl Node for DirectPathfinder {
                                 (Vector2::new(1, -1) + current, ROOT_2),
                                 (Vector2::new(1, 0) + current, 1.0),
                                 (Vector2::new(1, 1) + current, ROOT_2),
-                            ].into_iter()
-                                .filter_map(|(next, cost)| {
-                                    if next.x < 0 || next.y < 0 {
-                                        None
-                                    } else {
-                                        let next = Vector2::new(next.x as usize, next.y as usize);
+                            ]
+                            .into_iter()
+                            .filter_map(|(next, cost)| {
+                                if next.x < 0 || next.y < 0 {
+                                    None
+                                } else {
+                                    let next = Vector2::new(next.x as usize, next.y as usize);
 
-                                        if next.x >= self.costmap_ref.get_area_width() || next.y >= self.costmap_ref.get_area_length() {
-                                            None
-                                        } else if !*obstacles.get((next.y, next.x))? {
-                                            return None;
-                                        } else {
-                                            Some((next, NotNan::new(cost).unwrap()))
-                                        }
+                                    if next.x >= self.costmap_ref.get_area_width()
+                                        || next.y >= self.costmap_ref.get_area_length()
+                                    {
+                                        None
+                                    } else if !*obstacles.get((next.y, next.x))? {
+                                        return None;
+                                    } else {
+                                        Some((next, NotNan::new(cost).unwrap()))
                                     }
-                                })
+                                }
+                            })
                         },
                         |current| {
-                            NotNan::new((current.cast::<Float>() - dest_grid.cast()).magnitude()).unwrap()
+                            NotNan::new((current.cast::<Float>() - dest_grid.cast()).magnitude())
+                                .unwrap()
                         },
                         |current| *current == dest_grid,
                     ) else {
@@ -200,11 +221,17 @@ impl Node for DirectPathfinder {
 
                     new_path.push(last.cast::<isize>());
 
-                    let mut path: Vec<_> = new_path.into_iter().map(|point| {
-                        self.costmap_ref.local_to_global(point.into()).cast::<Float>()
-                    }).collect();
+                    let mut path: Vec<_> = new_path
+                        .into_iter()
+                        .map(|point| {
+                            self.costmap_ref
+                                .local_to_global(point.into())
+                                .cast::<Float>()
+                        })
+                        .collect();
 
-                    *path.first_mut().unwrap() = Point2::new(isometry.translation.x, isometry.translation.z);
+                    *path.first_mut().unwrap() =
+                        Point2::new(isometry.translation.x, isometry.translation.z);
                     *path.last_mut().unwrap() = dest;
                     // println!("{:?}", path.last().unwrap());
 
@@ -218,21 +245,27 @@ impl Node for DirectPathfinder {
                 completion_percentage.store(255, Ordering::Relaxed);
                 pending_task.finish(Ok(()));
             }
-        }).await
+        })
+        .await
     }
 }
-
 
 #[inline]
 fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, obstacles: &DMatrix<bool>) -> bool {
     let mut travel = to.cast::<Float>() - from.cast();
     let distance = travel.magnitude();
     travel.unscale_mut(distance);
-    
+
     for i in 0..distance.ceil() as usize {
         let intermediate = from.cast() + travel * i as Float;
 
-        if !*obstacles.get((intermediate.y.round() as usize, intermediate.x.round() as usize)).unwrap() {
+        if !*obstacles
+            .get((
+                intermediate.y.round() as usize,
+                intermediate.x.round() as usize,
+            ))
+            .unwrap()
+        {
             return false;
         }
     }

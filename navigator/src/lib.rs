@@ -1,6 +1,4 @@
-use std::
-    time::Duration
-;
+use std::time::Duration;
 
 use global_msgs::Steering;
 use nalgebra::{Point2, UnitVector2, Vector2};
@@ -9,8 +7,7 @@ use rig::{RigSpace, RobotBaseRef};
 use unros_core::{
     anyhow, async_trait,
     pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging,
-    tokio_rayon, Node, RuntimeContext,
+    setup_logging, tokio_rayon, Node, RuntimeContext,
 };
 
 pub mod pathfinders;
@@ -19,7 +16,6 @@ type Float = f32;
 
 const PI: Float = std::f64::consts::PI as Float;
 
-
 pub struct DifferentialDriver<F> {
     path_sub: Subscriber<Vec<Point2<Float>>>,
     steering_signal: Publisher<Steering>,
@@ -27,13 +23,11 @@ pub struct DifferentialDriver<F> {
     pub refresh_rate: Duration,
     pub can_reverse: bool,
     pub full_turn_angle: Float,
-    pub turn_fn: F
+    pub turn_fn: F,
 }
 
 impl DifferentialDriver<fn(Float) -> Float> {
-    pub fn new(
-        robot_base: RobotBaseRef,
-    ) -> Self {
+    pub fn new(robot_base: RobotBaseRef) -> Self {
         Self {
             path_sub: Default::default(),
             steering_signal: Default::default(),
@@ -41,7 +35,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
             refresh_rate: Duration::from_millis(20),
             can_reverse: false,
             full_turn_angle: 0.5235987756,
-            turn_fn: |frac| - 2.0 * frac + 1.0
+            turn_fn: |frac| -2.0 * frac + 1.0,
         }
     }
 
@@ -57,7 +51,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
 #[async_trait]
 impl<F> Node for DifferentialDriver<F>
 where
-    F: FnMut(Float) -> Float + Send + 'static
+    F: FnMut(Float) -> Float + Send + 'static,
 {
     const DEFAULT_NAME: &'static str = "waypoint-driver";
 
@@ -73,19 +67,17 @@ where
                     if let Some(new_path) = self.path_sub.try_recv() {
                         path = new_path;
                     }
-    
+
                     let isometry = self.robot_base.get_isometry();
                     let position = Vector2::new(isometry.translation.x, isometry.translation.z);
-    
+
                     let (i, _) = path
                         .iter()
                         .enumerate()
-                        .map(|(i, x)| {
-                            (i, (x.coords - position).magnitude_squared())
-                        })
+                        .map(|(i, x)| (i, (x.coords - position).magnitude_squared()))
                         .min_by_key(|(_, distance)| NotNan::new(*distance).unwrap())
                         .unwrap();
-    
+
                     if i == path.len() - 1 {
                         break;
                     }
@@ -96,7 +88,7 @@ where
                     let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
                     let travel = (next.cast::<Float>() - position.cast()).coords.normalize();
-                    let mut cross = - (forward.x * travel.y - forward.y * travel.x).signum();
+                    let mut cross = -(forward.x * travel.y - forward.y * travel.x).signum();
                     let mut angle = forward.angle(&travel);
                     let mut reversing = 1.0;
 
@@ -108,26 +100,36 @@ where
 
                     if angle > self.full_turn_angle {
                         if cross > 0.0 {
-                            self.steering_signal.set(Steering::new(-1.0 * reversing, 1.0 * reversing));
+                            self.steering_signal
+                                .set(Steering::new(-1.0 * reversing, 1.0 * reversing));
                         } else {
-                            self.steering_signal.set(Steering::new(1.0 * reversing, -1.0 * reversing));
+                            self.steering_signal
+                                .set(Steering::new(1.0 * reversing, -1.0 * reversing));
                         }
                     } else {
                         let smaller_ratio = (self.turn_fn)(angle / self.full_turn_angle);
 
                         if cross > 0.0 {
-                            self.steering_signal.set(Steering::new(smaller_ratio * reversing, 1.0 * reversing));
+                            self.steering_signal
+                                .set(Steering::new(smaller_ratio * reversing, 1.0 * reversing));
                         } else {
-                            self.steering_signal.set(Steering::new(1.0 * reversing, smaller_ratio * reversing));
+                            self.steering_signal
+                                .set(Steering::new(1.0 * reversing, smaller_ratio * reversing));
                         }
                     }
-    
+
                     sleeper.sleep(self.refresh_rate);
                 }
                 self.steering_signal.set(Steering::new(0.0, 0.0));
 
-                (self.path_sub, self.steering_signal, self.robot_base, self.turn_fn)
-            }).await;
+                (
+                    self.path_sub,
+                    self.steering_signal,
+                    self.robot_base,
+                    self.turn_fn,
+                )
+            })
+            .await;
 
             self.path_sub = path_sub;
             self.steering_signal = steering_signal;

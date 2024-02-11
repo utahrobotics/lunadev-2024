@@ -152,7 +152,10 @@ impl<T, SD, TD> ChannelTask<T, SD, TD> {
 
 impl<T, SD, TD> Clone for ChannelTask<T, SD, TD> {
     fn clone(&self) -> Self {
-        Self { sender: self.sender.clone(), task_name: self.task_name.clone() }
+        Self {
+            sender: self.sender.clone(),
+            task_name: self.task_name.clone(),
+        }
     }
 }
 
@@ -163,7 +166,10 @@ pub struct ExclusiveTask<T, SD, TD = ()> {
 
 impl<T, SD, TD> Clone for ExclusiveTask<T, SD, TD> {
     fn clone(&self) -> Self {
-        Self { sender: self.sender.clone(), task_name: self.task_name.clone() }
+        Self {
+            sender: self.sender.clone(),
+            task_name: self.task_name.clone(),
+        }
     }
 }
 
@@ -181,7 +187,6 @@ impl<T, SD, TD> ExclusiveTask<T, SD, TD> {
         )
     }
 }
-
 
 #[async_trait]
 impl<T: Send + 'static, SD: Send, TD: Send> Task for ExclusiveTask<T, SD, TD> {
@@ -211,7 +216,6 @@ impl<T: Send + 'static, SD: Send, TD: Send> Task for ExclusiveTask<T, SD, TD> {
         )
     }
 }
-
 
 /// A concrete type that can be made from any `Task` with the same associated types.
 pub type AnyTask<T, SE, SD, TD = ()> =
