@@ -134,7 +134,7 @@ impl AprilTagDetector {
         self.tag_detected.accept_subscription(sub);
     }
 
-    pub fn create_image_subscription(&mut self) -> Subscription<Arc<DynamicImage>> {
+    pub fn create_image_subscription(&self) -> Subscription<Arc<DynamicImage>> {
         self.image_sub.create_subscription()
     }
 }

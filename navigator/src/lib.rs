@@ -44,7 +44,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
         self.steering_signal.accept_subscription(sub);
     }
 
-    pub fn create_path_sub(&mut self) -> Subscription<Vec<Point2<Float>>> {
+    pub fn create_path_sub(&self) -> Subscription<Vec<Point2<Float>>> {
         self.path_sub.create_subscription()
     }
 }

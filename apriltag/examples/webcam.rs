@@ -24,9 +24,9 @@ async fn main() -> anyhow::Result<()> {
         .next()
         .context("No camera found")?;
     camera.accept_image_received_sub(apriltag.create_image_subscription());
-    let mut pose_sub = Subscriber::default();
+    let mut pose_sub = Subscriber::new(1);
     apriltag.add_tag(Default::default(), Default::default(), 0.12, 0);
-    apriltag.accept_tag_detected_sub(pose_sub.create_subscription(1));
+    apriltag.accept_tag_detected_sub(pose_sub.create_subscription());
     let pose_sub = FnNode::new(|_| async move {
         loop {
             let pose = pose_sub.recv().await;

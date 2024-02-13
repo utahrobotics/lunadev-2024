@@ -75,7 +75,7 @@ impl Costmap {
     }
 
     pub fn create_points_sub<T: Send + IntoParallelIterator<Item = Point3<f32>> + 'static>(
-        &mut self,
+        &self,
     ) -> Subscription<T> {
         let cell_width = self.cell_width;
         let area_width = self.area_width;

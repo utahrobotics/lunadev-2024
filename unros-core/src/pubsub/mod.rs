@@ -349,7 +349,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     /// Creates a `Subscription` with a size of 1.
     ///
     /// There is no benefit to having a queue size of more than 1.
-    pub fn create_subscription(&mut self) -> Subscription<T> {
+    pub fn create_subscription(&self) -> Subscription<T> {
         self.inner.create_subscription()
     }
 

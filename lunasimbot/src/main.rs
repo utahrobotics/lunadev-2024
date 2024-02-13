@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     let mut camera = elements.remove("camera").unwrap();
     let debug_element = elements.remove("debug").unwrap();
 
-    let mut costmap = Costmap::new(400, 400, 0.05, 10.0, 10.0, 0.01);
+    let costmap = Costmap::new(400, 400, 0.05, 10.0, 10.0, 0.01);
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
     points_signal.accept_subscription(costmap.create_points_sub());
@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let nav_task = pathfinder.get_navigation_task().clone();
 
     // let robot_base_ref = robot_base.get_ref();
-    let mut localizer = Localizer::new(robot_base, 0.0);
+    let localizer = Localizer::new(robot_base, 0.0);
 
     let mut position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));

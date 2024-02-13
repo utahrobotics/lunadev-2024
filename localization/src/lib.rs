@@ -200,28 +200,28 @@ impl Localizer {
     /// Provide an imu subscription.
     ///
     /// Some messages may be skipped if there are too many.
-    pub fn create_imu_sub(&mut self) -> Subscription<IMUFrame> {
+    pub fn create_imu_sub(&self) -> Subscription<IMUFrame> {
         self.imu_sub.create_subscription()
     }
 
     /// Provide a position subscription.
     ///
     /// Some messages may be skipped if there are too many.
-    pub fn create_position_sub(&mut self) -> Subscription<PositionFrame> {
+    pub fn create_position_sub(&self) -> Subscription<PositionFrame> {
         self.position_sub.create_subscription()
     }
 
     /// Provide a velocity subscription.
     ///
     /// Some messages may be skipped if there are too many.
-    pub fn create_velocity_sub(&mut self) -> Subscription<VelocityFrame> {
+    pub fn create_velocity_sub(&self) -> Subscription<VelocityFrame> {
         self.velocity_sub.create_subscription()
     }
 
     /// Provide an orientation subscription.
     ///
     /// Some messages may be skipped if there are too many.
-    pub fn create_orientation_sub(&mut self) -> Subscription<OrientationFrame> {
+    pub fn create_orientation_sub(&self) -> Subscription<OrientationFrame> {
         self.orientation_sub.create_subscription()
     }
 }

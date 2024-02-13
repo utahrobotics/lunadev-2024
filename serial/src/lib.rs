@@ -81,7 +81,7 @@ impl SerialConnection {
     }
 
     /// Provide a subscription whose messages will be written to the serial port.
-    pub fn create_message_to_send_sub(&mut self) -> Subscription<Bytes> {
+    pub fn create_message_to_send_sub(&self) -> Subscription<Bytes> {
         self.messages_to_send.create_subscription()
     }
 }
@@ -149,12 +149,12 @@ impl VescConnection {
     }
 
     /// Provide a subscription for the current level.
-    pub fn connect_current_from(&mut self) -> Subscription<u32> {
+    pub fn connect_current_from(&self) -> Subscription<u32> {
         self.current.create_subscription()
     }
 
     /// Provide a subscription for the duty cycle.
-    pub fn connect_duty_from(&mut self) -> Subscription<u32> {
+    pub fn connect_duty_from(&self) -> Subscription<u32> {
         self.current.create_subscription()
     }
 }

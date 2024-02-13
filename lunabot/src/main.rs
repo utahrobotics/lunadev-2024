@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let costmap = Costmap::new(80, 80, 0.05, 2.0, 3.9, 0.01);
 
     #[cfg(unix)]
-    let mut costmap = costmap;
+    let costmap = costmap;
 
     #[cfg(unix)]
     let mut camera = {
@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // });
 
-    let mut localizer = Localizer::new(robot_base, 0.4);
+    let localizer = Localizer::new(robot_base, 0.4);
 
     apriltag.accept_tag_detected_sub(localizer.create_position_sub().map(
         |pose: PoseObservation| PositionFrame {
@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mut navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.get_ref(), 0.5, 0.1);
-    let mut driver = DifferentialDriver::new(robot_base_ref.clone());
+    let driver = DifferentialDriver::new(robot_base_ref.clone());
 
     navigator.accept_path_sub(driver.create_path_sub());
 
