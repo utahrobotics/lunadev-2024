@@ -385,11 +385,13 @@ var waypoint: Vector2
 var waypoint_provided := false
 var send_waypoint := false
 var user_velocity: Vector3
+var ang_vel: Quaternion
 
 @onready var scanner: RayScanner = $RayScanner
 @onready var waypoint_mesh: Node3D = $Node/Waypoint
 @onready var estimated_mesh: Node3D = $Node/Estimated
 @onready var sim_tab: Control = $\"../../../../..\"
+@onready var last_quat := quaternion
 
 
 func _input(event: InputEvent) -> void:
@@ -452,6 +454,12 @@ var right_steering := 0.0
 
 func _physics_process(delta: float) -> void:
 	velocity = user_velocity
+	ang_vel = last_quat.inverse() * quaternion
+	if ang_vel.get_axis().is_normalized():
+		ang_vel = Quaternion(ang_vel.get_axis(), ang_vel.get_angle() / delta)
+	else:
+		ang_vel = Quaternion()
+	last_quat = quaternion
 	if conn != null:
 		conn.poll()
 	
@@ -463,10 +471,18 @@ func _physics_process(delta: float) -> void:
 			conn.put_float(global_position.x)
 			conn.put_float(global_position.y)
 			conn.put_float(global_position.z)
+			var vel := user_velocity + Vector3.UP * 9.81
+			conn.put_float(vel.x)
+			conn.put_float(vel.y)
+			conn.put_float(vel.z)
 			conn.put_float(quaternion.w)
 			conn.put_float(quaternion.x)
 			conn.put_float(quaternion.y)
 			conn.put_float(quaternion.z)
+			conn.put_float(ang_vel.w)
+			conn.put_float(ang_vel.x)
+			conn.put_float(ang_vel.y)
+			conn.put_float(ang_vel.z)
 			conn.put_float(scanner.rotation.x)
 			var points := scanner.scan()
 			conn.put_u32(points.size())

@@ -1,7 +1,7 @@
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use localization::{Localizer, OrientationFrame, PositionFrame};
-use nalgebra::{Point3, Quaternion, UnitQuaternion};
+use localization::{IMUFrame, Localizer, OrientationFrame, PositionFrame, VelocityFrame};
+use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rig::Robot;
 use unros_core::{
@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     // });
 
     let mut pathfinder =
-        DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.05);
+        DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.2);
 
     let mut driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
@@ -64,10 +64,16 @@ async fn main() -> anyhow::Result<()> {
     let mut localizer = Localizer::new(robot_base, 0.0);
 
     let mut position_pub = Publisher::default();
-    position_pub.accept_subscription(localizer.create_position_sub());
+    position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));
+
+    let mut velocity_pub = Publisher::default();
+    velocity_pub.accept_subscription(localizer.create_velocity_sub().set_name("velocity"));
 
     let mut orientation_pub = Publisher::default();
-    orientation_pub.accept_subscription(localizer.create_orientation_sub());
+    orientation_pub.accept_subscription(localizer.create_orientation_sub().set_name("orientation"));
+
+    let mut imu_pub = Publisher::default();
+    imu_pub.accept_subscription(localizer.create_imu_sub().set_name("imu"));
 
     let mut steering_sub = Subscriber::default();
     driver.accept_steering_sub(steering_sub.create_subscription(1));
@@ -97,6 +103,18 @@ async fn main() -> anyhow::Result<()> {
                     .read_f32_le()
                     .await
                     .expect("Failed to receive packet") as Float;
+                let vx = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let _vy = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let vz = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
                 let w = stream
                     .read_f32_le()
                     .await
@@ -113,6 +131,22 @@ async fn main() -> anyhow::Result<()> {
                     .read_f32_le()
                     .await
                     .expect("Failed to receive packet") as Float;
+                let vw = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let vi = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let vj = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let vk = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
                 let x_rot = stream
                     .read_f32_le()
                     .await
@@ -122,9 +156,10 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .expect("Failed to receive packet") as usize;
 
-                position_pub.set(PositionFrame::rand(Point3::new(x, 0.0, z), 0.01, debug_element.get_ref()));
-
-                orientation_pub.set(OrientationFrame::rand(UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)), 0.05, debug_element.get_ref()));
+                position_pub.set(PositionFrame::rand(Point3::new(x, 0.0, z), 0.02, debug_element.get_ref()));
+                velocity_pub.set(VelocityFrame::rand(Vector3::new(vx, 0.0, vz), 0.02, debug_element.get_ref()));
+                orientation_pub.set(OrientationFrame::rand(UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)), 0.03, debug_element.get_ref()));
+                imu_pub.set(IMUFrame::rand(Vector3::new(0.0, -9.81, 0.0), 0.0, UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)), 0.03, debug_element.get_ref()));
 
                 let mut camera_joint = match camera.get_local_joint() {
                     rig::joints::JointMut::Hinge(x) => x,
