@@ -5,25 +5,18 @@
 //! to `Rust`'s channels in that they do not trigger code, unlike `ROS` subscriber callbacks.
 
 use std::{
+    collections::VecDeque,
     io::Write,
     ops::{Deref, DerefMut},
     path::Path,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex, Weak,
-    },
+    sync::{Arc, Weak},
 };
 
 use crossbeam::queue::ArrayQueue;
-use futures::{stream::FuturesUnordered, StreamExt};
 use log::warn;
-use rand::seq::SliceRandom;
-use tokio::sync::watch;
+use tokio::sync::Notify;
 
-use crate::{
-    logging::{dump::DataDump, START_TIME},
-    rng::QuickRng,
-};
+use crate::logging::{dump::DataDump, START_TIME};
 
 /// An essential component that promotes separation of concerns, and is
 /// an intrinsic element of the ROS framework.
@@ -37,15 +30,15 @@ use crate::{
 /// `Arc`. Since Nodes will often be used from different threads, the type `T`
 /// should also be `Send`.
 pub struct Publisher<T> {
-    bounded_queues: Vec<Box<dyn Queue<T>>>,
-    watch_sender: watch::Sender<()>,
+    subs: VecDeque<Subscription<T>>,
+    // watch_sender: watch::Sender<()>,
 }
 
 impl<T> Default for Publisher<T> {
     fn default() -> Self {
         Self {
-            bounded_queues: Default::default(),
-            watch_sender: watch::channel(()).0,
+            subs: Default::default(),
+            // watch_sender: watch::channel(()).0,
         }
     }
 }
@@ -55,56 +48,78 @@ impl<T: Clone> Publisher<T> {
     ///
     /// Only the node that owns this signal should call this method.
     pub fn set(&mut self, value: T) {
-        self.bounded_queues
-            .retain(|queue| queue.push(value.clone()));
-        self.watch_sender.send_replace(());
+        self.subs
+            .retain_mut(|sub| match sub.queue.push(value.clone()) {
+                EnqueueResult::Ok => {
+                    sub.lag = 0;
+                    true
+                }
+                EnqueueResult::Full => {
+                    sub.lag += 1;
+                    if let Some(name) = &sub.name {
+                        warn!(target: "publishers", "{name} lagging by {} messages", sub.lag);
+                    }
+                    true
+                }
+                EnqueueResult::Closed => false,
+            });
+        self.subs.retain(|sub| {
+            if let Some(notify) = sub.notify.upgrade() {
+                notify.notify_one();
+                true
+            } else {
+                false
+            }
+        });
     }
 
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
     pub fn accept_subscription(&mut self, sub: Subscription<T>) {
-        self.bounded_queues.push(sub.queue);
-        (sub.subscriber)(self.watch_sender.subscribe(), sub.name);
+        self.subs.push_back(sub);
     }
 }
 
-trait Queue<T>: Send + Sync {
-    fn push(&self, value: T) -> bool;
-}
-
-struct SubscriptionQueue<T> {
-    queue: ArrayQueue<T>,
-    lag: AtomicUsize,
-    name: Mutex<Option<Box<str>>>,
-}
-
-impl<T: Send> Queue<T> for Weak<SubscriptionQueue<T>> {
-    fn push(&self, value: T) -> bool {
-        if let Some(queue) = self.upgrade() {
-            if queue.queue.force_push(value).is_some() {
-                let n = queue.lag.fetch_add(1, Ordering::Relaxed) + 1;
-                if let Some(name) = queue.name.lock().unwrap().as_ref() {
-                    warn!(target: "publishers", "{name} lagging by {n} messages");
-                }
-            } else {
-                queue.lag.store(0, Ordering::Relaxed);
-            }
-            true
-        } else {
-            false
+impl<T> Drop for Publisher<T> {
+    fn drop(&mut self) {
+        for sub in self.subs.drain(..) {
+            drop(sub.queue);
+            if let Some(notify) = sub.notify.upgrade() {
+                notify.notify_one();
+            };
         }
     }
 }
 
-impl<T, F: Fn(T) -> bool + Send + Sync> Queue<T> for F {
-    fn push(&self, value: T) -> bool {
-        self(value)
+trait Queue<T>: Send + Sync {
+    fn push(&self, value: T) -> EnqueueResult;
+}
+
+#[derive(PartialEq, Eq)]
+enum EnqueueResult {
+    Ok,
+    Full,
+    Closed,
+}
+
+impl<T: Send> Queue<T> for Weak<ArrayQueue<T>> {
+    fn push(&self, value: T) -> EnqueueResult {
+        if let Some(queue) = self.upgrade() {
+            if queue.force_push(value).is_some() {
+                EnqueueResult::Full
+            } else {
+                EnqueueResult::Ok
+            }
+        } else {
+            EnqueueResult::Closed
+        }
     }
 }
 
-struct SubscriptionInner<T> {
-    queue: Arc<SubscriptionQueue<T>>,
-    watch: watch::Receiver<()>,
+impl<T, F: Fn(T) -> EnqueueResult + Send + Sync> Queue<T> for F {
+    fn push(&self, value: T) -> EnqueueResult {
+        self(value)
+    }
 }
 
 /// An essential companion to the `Publisher`.
@@ -113,78 +128,48 @@ struct SubscriptionInner<T> {
 /// from multiple Publishers concurrently. To subscribe to a `Publisher`,
 /// a `Subscriber` must create a subscription and pass that to the `Publisher`.
 pub struct Subscriber<T> {
-    subscriptions: Vec<SubscriptionInner<T>>,
-    rng: QuickRng,
-}
-
-impl<T> Default for Subscriber<T> {
-    fn default() -> Self {
-        Self {
-            subscriptions: Default::default(),
-            rng: QuickRng::default(),
-        }
-    }
+    queue: Arc<ArrayQueue<T>>,
+    notify: Arc<Notify>,
 }
 
 /// An object that must be passed to a `Publisher`, enabling the `Subscriber`
 /// that created the subscription to receive messages from that `Publisher`.
 ///
 /// If dropped, no change will occur to the `Subscriber` and no resources will be leaked.
-pub struct Subscription<'a, T> {
-    subscriber: Box<dyn FnOnce(watch::Receiver<()>, Option<Box<str>>) + 'a>,
+pub struct Subscription<T> {
+    // subscriber: Box<dyn FnOnce(watch::Receiver<()>, Option<Box<str>>)>,
     queue: Box<dyn Queue<T>>,
+    notify: Weak<Notify>,
     name: Option<Box<str>>,
+    lag: usize,
 }
 
 impl<T: Clone + Send + 'static> Subscriber<T> {
+    pub fn new(size: usize) -> Self {
+        Self {
+            queue: Arc::new(ArrayQueue::new(size)),
+            notify: Arc::new(Notify::new()),
+        }
+    }
+
     /// Receive some message (waiting if none are available), or `None` if all `Publishers` have been dropped.
     pub async fn recv_or_closed(&mut self) -> Option<T> {
-        let mut futs = FuturesUnordered::new();
-        self.subscriptions.shuffle(&mut self.rng);
-
-        for sub in &mut self.subscriptions {
-            if let Some(x) = sub.queue.queue.pop() {
-                sub.watch.mark_changed();
-                sub.queue.lag.store(0, Ordering::Relaxed);
-                return Some(x);
+        loop {
+            if let Some(value) = self.queue.pop() {
+                return Some(value);
             }
-            futs.push(async {
-                loop {
-                    break if sub.watch.changed().await.is_ok() {
-                        let Some(value) = sub.queue.queue.pop() else {
-                            // println!("fwfw");
-                            continue;
-                        };
-                        sub.queue.lag.store(0, Ordering::Relaxed);
-                        Some(value)
-                    } else {
-                        None
-                    };
-                }
-            });
-        }
 
-        while let Some(x) = futs.next().await {
-            if x.is_some() {
-                return x;
+            if Arc::weak_count(&self.queue) == 0 {
+                return None;
             }
+
+            self.notify.notified().await;
         }
-        None
     }
 
     /// Try to receive a message if one is available.
     pub fn try_recv(&mut self) -> Option<T> {
-        self.subscriptions.shuffle(&mut self.rng);
-
-        for sub in &mut self.subscriptions {
-            if let Some(x) = sub.queue.queue.pop() {
-                sub.queue.lag.store(0, Ordering::Relaxed);
-                sub.watch.mark_changed();
-                return Some(x);
-            }
-        }
-
-        None
+        self.queue.pop()
     }
 
     /// Wait until a message is received, even if all `Publisher`s have been dropped.
@@ -226,24 +211,12 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 
     /// Creates a `Subscription` that needs to be passed to a `Publisher`.
-    ///
-    /// The final queue will have a maximum size of `size`.
-    ///
-    /// # Panics
-    /// Panics if size is 0.
-    pub fn create_subscription(&mut self, size: usize) -> Subscription<T> {
-        let queue = Arc::new(SubscriptionQueue {
-            queue: ArrayQueue::new(size),
-            lag: Default::default(),
-            name: Default::default(),
-        });
+    pub fn create_subscription(&self) -> Subscription<T> {
         Subscription {
-            queue: Box::new(Arc::downgrade(&queue)),
-            subscriber: Box::new(move |watch, name| {
-                *queue.name.lock().unwrap() = name;
-                self.subscriptions.push(SubscriptionInner { queue, watch });
-            }),
+            queue: Box::new(Arc::downgrade(&self.queue)),
+            notify: Arc::downgrade(&self.notify),
             name: None,
+            lag: 0,
         }
     }
 
@@ -280,12 +253,13 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 }
 
-impl<'a, T: 'static> Subscription<'a, T> {
+impl<T: 'static> Subscription<T> {
     /// Changes the generic type of this `Subscription` using the given `map` function.
-    pub fn map<V>(self, map: impl Fn(V) -> T + Send + Sync + 'static) -> Subscription<'a, V> {
+    pub fn map<V>(self, map: impl Fn(V) -> T + Send + Sync + 'static) -> Subscription<V> {
         Subscription {
-            subscriber: self.subscriber,
             queue: Box::new(move |x| self.queue.push(map(x))),
+            notify: self.notify,
+            lag: 0,
             name: None,
         }
     }
@@ -306,7 +280,6 @@ impl<'a, T: 'static> Subscription<'a, T> {
 /// A `Subscriber` that always stores the last received message, acting as a smart pointer for `T`.
 ///
 /// Users must regularly call `update`, `update_or_closed`, or `try_update` to receive newer messages.
-#[derive(Default)]
 pub struct WatchSubscriber<T> {
     inner: Subscriber<T>,
     value: T,
@@ -330,7 +303,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     /// Creates a new `WatchSubscriber` initialized with the given value and no subscriptions.
     pub fn new(value: T) -> Self {
         Self {
-            inner: Subscriber::default(),
+            inner: Subscriber::new(1),
             value,
         }
     }
@@ -377,7 +350,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     ///
     /// There is no benefit to having a queue size of more than 1.
     pub fn create_subscription(&mut self) -> Subscription<T> {
-        self.inner.create_subscription(1)
+        self.inner.create_subscription()
     }
 
     /// Convert this `WatchSubscriber` into a logger that logs

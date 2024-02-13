@@ -36,7 +36,7 @@ impl SerialConnection {
             path: path.into_boxed_str().into(),
             baud_rate,
             msg_received: Publisher::default(),
-            messages_to_send: Subscriber::default(),
+            messages_to_send: Subscriber::new(8),
             tolerate_error,
         }
     }
@@ -82,7 +82,7 @@ impl SerialConnection {
 
     /// Provide a subscription whose messages will be written to the serial port.
     pub fn create_message_to_send_sub(&mut self) -> Subscription<Bytes> {
-        self.messages_to_send.create_subscription(8)
+        self.messages_to_send.create_subscription()
     }
 }
 
@@ -143,19 +143,19 @@ impl VescConnection {
     pub fn new(serial: SerialConnection) -> Self {
         Self {
             serial,
-            current: Subscriber::default(),
-            duty: Subscriber::default(),
+            current: Subscriber::new(32),
+            duty: Subscriber::new(32),
         }
     }
 
     /// Provide a subscription for the current level.
     pub fn connect_current_from(&mut self) -> Subscription<u32> {
-        self.current.create_subscription(32)
+        self.current.create_subscription()
     }
 
     /// Provide a subscription for the duty cycle.
     pub fn connect_duty_from(&mut self) -> Subscription<u32> {
-        self.current.create_subscription(32)
+        self.current.create_subscription()
     }
 }
 

@@ -93,7 +93,7 @@ impl AprilTagDetector {
         robot_element: RobotElementRef,
     ) -> Self {
         Self {
-            image_sub: Subscriber::default(),
+            image_sub: Subscriber::new(4),
             tag_detected: Default::default(),
             known_tags: Default::default(),
             focal_length_px,
@@ -135,7 +135,7 @@ impl AprilTagDetector {
     }
 
     pub fn create_image_subscription(&mut self) -> Subscription<Arc<DynamicImage>> {
-        self.image_sub.create_subscription(4)
+        self.image_sub.create_subscription()
     }
 }
 

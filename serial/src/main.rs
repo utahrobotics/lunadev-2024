@@ -16,8 +16,8 @@ async fn main() -> anyhow::Result<()> {
     init_logger(&run_options)?;
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
     let mut serial = SerialConnection::new("/dev/ttyACM1".into(), 115200, true).await;
-    let mut sub = Subscriber::<Bytes>::default();
-    serial.accept_msg_received_sub(sub.create_subscription(8));
+    let mut sub = Subscriber::<Bytes>::new(8);
+    serial.accept_msg_received_sub(sub.create_subscription());
     tokio::spawn(async move {
         loop {
             let x = sub.recv().await;

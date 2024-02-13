@@ -15,12 +15,12 @@ impl Drive {
     pub fn new(serial: SerialConnection) -> Self {
         Self {
             drive_controller: serial,
-            steering_sub: Subscriber::default(),
+            steering_sub: Subscriber::new(8),
         }
     }
 
-    pub fn create_steering_sub(&mut self) -> Subscription<Steering> {
-        self.steering_sub.create_subscription(8)
+    pub fn create_steering_sub(&self) -> Subscription<Steering> {
+        self.steering_sub.create_subscription()
     }
 }
 
@@ -34,9 +34,9 @@ impl Node for Drive {
 
         let mut write_signal = Publisher::default();
         write_signal.accept_subscription(self.drive_controller.create_message_to_send_sub());
-        let mut read_sub = Subscriber::default();
+        let mut read_sub = Subscriber::new(8);
         self.drive_controller
-            .accept_msg_received_sub(read_sub.create_subscription(8));
+            .accept_msg_received_sub(read_sub.create_subscription());
 
         let handle = tokio::spawn(async move {
             'main: loop {

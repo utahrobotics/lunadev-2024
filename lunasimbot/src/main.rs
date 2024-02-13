@@ -52,8 +52,7 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // });
 
-    let mut pathfinder =
-        DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.2);
+    let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.2);
 
     let mut driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
@@ -75,8 +74,8 @@ async fn main() -> anyhow::Result<()> {
     let mut imu_pub = Publisher::default();
     imu_pub.accept_subscription(localizer.create_imu_sub().set_name("imu"));
 
-    let mut steering_sub = Subscriber::default();
-    driver.accept_steering_sub(steering_sub.create_subscription(1));
+    let mut steering_sub = Subscriber::new(1);
+    driver.accept_steering_sub(steering_sub.create_subscription());
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
     let sim_conn = FnNode::new(|_| async move {
@@ -156,10 +155,28 @@ async fn main() -> anyhow::Result<()> {
                     .await
                     .expect("Failed to receive packet") as usize;
 
-                position_pub.set(PositionFrame::rand(Point3::new(x, 0.0, z), 0.02, debug_element.get_ref()));
-                velocity_pub.set(VelocityFrame::rand(Vector3::new(vx, 0.0, vz), 0.02, debug_element.get_ref()));
-                orientation_pub.set(OrientationFrame::rand(UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)), 0.03, debug_element.get_ref()));
-                imu_pub.set(IMUFrame::rand(Vector3::new(0.0, -9.81, 0.0), 0.0, UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)), 0.03, debug_element.get_ref()));
+                position_pub.set(PositionFrame::rand(
+                    Point3::new(x, 0.0, z),
+                    0.02,
+                    debug_element.get_ref(),
+                ));
+                velocity_pub.set(VelocityFrame::rand(
+                    Vector3::new(vx, 0.0, vz),
+                    0.02,
+                    debug_element.get_ref(),
+                ));
+                orientation_pub.set(OrientationFrame::rand(
+                    UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)),
+                    0.03,
+                    debug_element.get_ref(),
+                ));
+                imu_pub.set(IMUFrame::rand(
+                    Vector3::new(0.0, -9.81, 0.0),
+                    0.0,
+                    UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)),
+                    0.03,
+                    debug_element.get_ref(),
+                ));
 
                 let mut camera_joint = match camera.get_local_joint() {
                     rig::joints::JointMut::Hinge(x) => x,

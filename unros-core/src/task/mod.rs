@@ -295,10 +295,7 @@ impl<T, TD> TaskHandle<T, TD> {
     /// Otherwise, the `Output` of the task will be returned.
     pub async fn wait_for_completion(&mut self) -> Result<T, TaskCompletionError> {
         if let Some(recv) = &mut self.recv {
-            let result = recv
-                .recv()
-                .await
-                .ok_or(TaskCompletionError::DidNotComplete);
+            let result = recv.recv().await.ok_or(TaskCompletionError::DidNotComplete);
             self.recv = None;
             result
         } else {

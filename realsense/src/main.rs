@@ -13,8 +13,8 @@ async fn main() -> unros_core::anyhow::Result<()> {
     // let frame_count: &_ = Box::leak(Box::new(frame_count));
     async_run_all(
         cameras.map(|mut x| {
-            let mut img_sub = Subscriber::default();
-            x.accept_image_received_sub(img_sub.create_subscription(4));
+            let mut img_sub = Subscriber::new(4);
+            x.accept_image_received_sub(img_sub.create_subscription());
             // let mut imu_sub = x.imu_frame_received().watch();
             tokio::spawn(async move {
                 let mut i = 0;

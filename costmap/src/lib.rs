@@ -64,7 +64,7 @@ impl Costmap {
             cell_width,
             x_offset,
             y_offset,
-            points_sub: Subscriber::default(),
+            points_sub: Subscriber::new(8),
             heights: (0..(area_length * area_width))
                 .map(|_| Default::default())
                 .collect(),
@@ -84,7 +84,7 @@ impl Costmap {
         let y_offset = self.y_offset;
         let height_step = self.height_step;
 
-        self.points_sub.create_subscription(8).map(move |x: T| {
+        self.points_sub.create_subscription().map(move |x: T| {
             x.into_par_iter()
                 .filter_map(|mut point| {
                     let height = (point.y / height_step).round() as isize;

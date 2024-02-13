@@ -136,9 +136,9 @@ async fn main() -> anyhow::Result<()> {
         "imu_ax,imu_ay,imu_az,imu_rvw,imu_rvi,imu_rvj,imu_rvk,vx,vy,vz,x,y,z,w,i,j,k,delta"
     )
     .unwrap();
-    let mut imu_sub = Subscriber::<IMUFrame>::default();
+    let mut imu_sub = Subscriber::<IMUFrame>::new(32);
     #[cfg(unix)]
-    camera.accept_imu_frame_received_sub(imu_sub.create_subscription(32));
+    camera.accept_imu_frame_received_sub(imu_sub.create_subscription());
     let dumper = FnNode::new(|_| async move {
         let start = Instant::now();
         let mut elapsed = Duration::ZERO;

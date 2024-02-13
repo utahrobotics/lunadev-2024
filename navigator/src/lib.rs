@@ -29,7 +29,7 @@ pub struct DifferentialDriver<F> {
 impl DifferentialDriver<fn(Float) -> Float> {
     pub fn new(robot_base: RobotBaseRef) -> Self {
         Self {
-            path_sub: Default::default(),
+            path_sub: Subscriber::new(1),
             steering_signal: Default::default(),
             robot_base,
             refresh_rate: Duration::from_millis(20),
@@ -45,7 +45,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
     }
 
     pub fn create_path_sub(&mut self) -> Subscription<Vec<Point2<Float>>> {
-        self.path_sub.create_subscription(1)
+        self.path_sub.create_subscription()
     }
 }
 

@@ -55,7 +55,7 @@ impl Telemetry {
             bandwidth_limit: 0,
             server_addr: server_addr.into(),
             steering_signal: Default::default(),
-            image_subscriptions: Subscriber::default(),
+            image_subscriptions: Subscriber::new(1),
             packet_queue: SegQueue::new(),
         }
     }
@@ -210,7 +210,7 @@ impl Node for Telemetry {
                         Event::Receive { .. } => todo!(),
                     }
                 }
-                while let Some(_) = self.image_subscriptions.try_recv() {}
+                self.image_subscriptions.try_recv();
                 info!("Connected to lunabase!");
                 loop {
                     {
@@ -241,7 +241,7 @@ impl Node for Telemetry {
                     while let Some((body, mode, channel)) = self.packet_queue.pop() {
                         peer.send_packet(Packet::new(&body, mode)?, channel as u8)?;
                     }
-                    while let Some(img) = self.image_subscriptions.try_recv() {
+                    if let Some(img) = self.image_subscriptions.try_recv() {
                         let img = webp::Encoder::from_image(&img)
                             .map_err(|e| {
                                 anyhow::anyhow!("Failed to encode image frame to webp: {e}")
