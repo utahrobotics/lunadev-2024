@@ -61,6 +61,8 @@ Packet Throttle: %s\"\"\" % [total_bytes, ping, roundi(packet_loss * 100), round
 script/source = "extends Label
 
 
+const TOO_LONG := 3.0
+
 var timer := 0.0
 
 
@@ -76,6 +78,9 @@ func _process(delta: float) -> void:
 		text = \"Last Received: 10000+ ms\"
 	else:
 		text = \"Last Received: %s ms\" % [roundi(timer * 1000)]
+	var strength := minf(timer, TOO_LONG) / TOO_LONG
+	modulate.g = 1.0 - strength
+	modulate.r = strength
 "
 
 [sub_resource type="GDScript" id="GDScript_67ds2"]
@@ -622,6 +627,7 @@ text = "Not Connected"
 script = SubResource("GDScript_wemvy")
 
 [node name="LastReceived" type="Label" parent="Controller/Control/VBoxContainer3"]
+modulate = Color(0, 1, 0, 1)
 layout_mode = 2
 size_flags_horizontal = 0
 text = "Last Received:"
@@ -817,7 +823,7 @@ stretch = true
 [node name="SubViewport" type="SubViewport" parent="Sim/AspectRatioContainer/SubViewportContainer"]
 handle_input_locally = false
 msaa_3d = 1
-size = Vector2i(628, 348)
+size = Vector2i(2, 2)
 render_target_update_mode = 0
 
 [node name="Node3D" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport"]

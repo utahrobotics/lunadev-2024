@@ -46,8 +46,8 @@ func is_lunabot_connected() -> bool:
 
 
 class Statistics:
-	var data_received: int
-	var packet_loss: int
+	var data_received: float
+	var packet_loss: float
 	var delta: float
 
 
