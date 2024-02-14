@@ -4,6 +4,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Instant,
 };
 
 use crossbeam::queue::SegQueue;
@@ -16,7 +17,14 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use rand::seq::SliceRandom;
 use unros_core::{
-    anyhow, async_trait, log, pubsub::{Publisher, Subscriber, Subscription}, rng::QuickRng, setup_logging, tokio_rayon, Node, RuntimeContext
+    anyhow, async_trait, log,
+    pubsub::{Publisher, Subscriber, Subscription},
+    rayon::{
+        self,
+        iter::{IntoParallelIterator, ParallelIterator},
+    },
+    rng::QuickRng,
+    setup_logging, tokio_rayon, Node, RuntimeContext,
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -55,7 +63,7 @@ impl Telemetry {
             steering_signal: Default::default(),
             image_subscriptions: Subscriber::new(1),
             packet_queue: SegQueue::new(),
-            max_image_chunk_width: 32
+            max_image_chunk_width: 32,
         }
     }
 
@@ -208,13 +216,14 @@ impl Node for Telemetry {
                     match event {
                         Event::Connect(_) => break,
                         Event::Disconnect(_, _) => {
-                            warn!("Somehow disconnected to a peer!")
+                            warn!("Somehow disconnected from a peer!")
                         }
                         Event::Receive { .. } => todo!(),
                     }
                 }
-                self.image_subscriptions.try_recv();
+
                 info!("Connected to lunabase!");
+                let mut start_service = Instant::now();
                 loop {
                     {
                         let option = host.service(50)?;
@@ -244,47 +253,64 @@ impl Node for Telemetry {
                     while let Some((body, mode, channel)) = self.packet_queue.pop() {
                         peer.send_packet(Packet::new(&body, mode)?, channel as u8)?;
                     }
+                    let elapsed = start_service.elapsed();
+                    if elapsed.as_millis() < 50 {
+                        continue;
+                    }
+                    start_service += elapsed;
                     if let Some(img) = self.image_subscriptions.try_recv() {
                         let w_chunks = img.width().div_ceil(self.max_image_chunk_width) as u16;
                         let h_chunks = img.height().div_ceil(self.max_image_chunk_width) as u16;
                         let mut rng = QuickRng::default();
 
-                        let mut xy_vec: Vec<_> = (0..w_chunks).flat_map(|x| (0..h_chunks).map(move |y| (x, y))).collect();
+                        let mut xy_vec: Vec<_> = (0..w_chunks)
+                            .flat_map(|x| (0..h_chunks).map(move |y| (x, y)))
+                            .collect();
                         xy_vec.shuffle(&mut rng);
 
-                        for (x, y) in xy_vec {
-                            let mut chunk_width;
-                            if x == w_chunks - 1 {
-                                chunk_width = img.width() % self.max_image_chunk_width;
-                                if chunk_width == 0 {
+                        let (sender, recv) = std::sync::mpsc::sync_channel(xy_vec.len());
+
+                        rayon::spawn(move || {
+                            xy_vec.into_par_iter().for_each(move |(x, y)| {
+                                let mut chunk_width;
+                                if x == w_chunks - 1 {
+                                    chunk_width = img.width() % self.max_image_chunk_width;
+                                    if chunk_width == 0 {
+                                        chunk_width = self.max_image_chunk_width;
+                                    }
+                                } else {
                                     chunk_width = self.max_image_chunk_width;
                                 }
-                            } else {
-                                chunk_width = self.max_image_chunk_width;
-                            }
 
-                            let mut chunk_height;
+                                let mut chunk_height;
 
-                            if y == h_chunks - 1 {
-                                chunk_height = img.height() % self.max_image_chunk_width;
-                                if chunk_height == 0 {
+                                if y == h_chunks - 1 {
                                     chunk_height = img.height() % self.max_image_chunk_width;
+                                    if chunk_height == 0 {
+                                        chunk_height = img.height() % self.max_image_chunk_width;
+                                    }
+                                } else {
+                                    chunk_height = self.max_image_chunk_width;
                                 }
-                            } else {
-                                chunk_height = self.max_image_chunk_width;
-                            }
 
-                            let img = webp::Encoder::from_image(&img.crop_imm(x as u32 * self.max_image_chunk_width, y as u32 * self.max_image_chunk_width, chunk_width, chunk_height))
-                                .map_err(|e| {
-                                    anyhow::anyhow!("Failed to encode image frame to webp: {e}")
-                                })?
-                                .encode(0.0);
-                            let mut bytes = Vec::with_capacity(4 + img.len());
+                                let img = webp::Encoder::from_image(&img.crop_imm(
+                                    x as u32 * self.max_image_chunk_width,
+                                    y as u32 * self.max_image_chunk_width,
+                                    chunk_width,
+                                    chunk_height,
+                                ))
+                                .unwrap()
+                                .encode(10.0);
+                                let mut bytes = Vec::with_capacity(4 + img.len());
 
-                            bytes.extend_from_slice(&x.to_le_bytes());
-                            bytes.extend_from_slice(&y.to_le_bytes());
-                            bytes.extend_from_slice(&img);
+                                bytes.extend_from_slice(&x.to_le_bytes());
+                                bytes.extend_from_slice(&y.to_le_bytes());
+                                bytes.extend_from_slice(&img);
 
+                                sender.send(bytes).unwrap();
+                            });
+                        });
+                        for bytes in recv {
                             peer.send_packet(
                                 Packet::new(&bytes, enet::PacketMode::UnreliableUnsequenced)?,
                                 Channels::Camera as u8,

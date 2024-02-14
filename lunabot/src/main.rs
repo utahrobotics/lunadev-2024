@@ -1,5 +1,8 @@
 use std::{
-    io::Write, net::SocketAddrV4, str::FromStr, time::{Duration, Instant}
+    io::Write,
+    net::SocketAddrV4,
+    str::FromStr,
+    time::{Duration, Instant},
 };
 
 use apriltag::{AprilTagDetector, PoseObservation};
@@ -181,8 +184,7 @@ async fn main() -> anyhow::Result<()> {
         costmap.into(),
         navigator.into(),
         dumper.into(),
-        telemetry.into()
-        // las_node.into()
+        telemetry.into(), // las_node.into()
     ];
 
     #[cfg(unix)]

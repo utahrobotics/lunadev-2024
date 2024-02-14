@@ -554,7 +554,7 @@ pub async fn async_run_all(
                 }
                 let cpus = sys.cpus();
                 let usage = cpus.into_iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
-                if usage >= 70.0 {
+                if usage >= 80.0 {
                     warn!("CPU Usage at {usage}%");
                     last_cpu_check = Instant::now();
                 }
