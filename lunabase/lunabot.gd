@@ -9,7 +9,7 @@ enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA, PING }
 
 signal connected
 signal disconnected
-signal camera_frame_received(img: Image)
+signal camera_chunk_received(coords: Vector2i, img: Image)
 signal network_statistics(total_bytes: float, ping: int, packet_loss: float, packet_throttle: float)
 signal odometry_received(origin: Vector2)
 signal something_received
@@ -45,12 +45,21 @@ func is_lunabot_connected() -> bool:
 	return is_connected
 
 
+class Statistics:
+	var data_received: int
+	var packet_loss: int
+	var delta: float
+
+
 func _run_thr():
 	var last_receive_time := Time.get_ticks_msec()
 	var pinged := false
+	var statistics: Array[Statistics] = []
 	
 	while running:
+		var start_service_time := Time.get_ticks_msec()
 		var result: Array = server.service(200)
+		var delta := (Time.get_ticks_msec() - start_service_time) / 1000.0
 		
 		lunabot_mutex.lock()
 		if lunabot != null and lunabot.is_active():
@@ -62,12 +71,34 @@ func _run_thr():
 					ENetPacketPeer.FLAG_RELIABLE
 				)
 			
+			var stats := Statistics.new()
+			stats.data_received = server.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_DATA) + server.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA)
+			stats.packet_loss = lunabot.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / ENetPacketPeer.PACKET_LOSS_SCALE
+			stats.delta = delta
+			statistics.append(stats)
+			
+			var total_time := 0.0
+			var data_received := 0.0
+			var packet_loss := 0.0
+			
+			for i in range(statistics.size() - 1, -1, -1):
+				stats = statistics[i]
+				total_time += stats.delta
+				data_received += stats.data_received
+				packet_loss += stats.packet_loss
+				if total_time > 2.0:
+					statistics = statistics.slice(i + 1)
+					break
+			
+			data_received /= total_time
+			packet_loss /= total_time
+			
 			call_deferred(
 				"emit_signal",
 				"network_statistics",
-				server.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_DATA) + server.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA),
+				roundi(data_received),
 				roundi(lunabot.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME) / 2),
-				lunabot.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / ENetPacketPeer.PACKET_LOSS_SCALE,
+				roundi(packet_loss),
 				lunabot.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE) / ENetPacketPeer.PACKET_THROTTLE_SCALE
 			)
 		lunabot_mutex.unlock()
@@ -129,11 +160,6 @@ func _run_thr():
 	server.destroy()
 
 
-var camera_image_buffers: Array[PackedByteArray]
-var camera_image_idx := -1
-var collected_fragment_count: int
-
-
 func _on_receive(channel: int) -> void:
 	call_deferred("emit_signal", "something_received")
 	lunabot_mutex.lock()
@@ -144,50 +170,15 @@ func _on_receive(channel: int) -> void:
 			pass
 		
 		Channels.CAMERA:
-			var current_camera_image_index := data.decode_u32(0)
-			var current_camera_image_fragment_idx := data.decode_u8(4)
-			
-			if current_camera_image_fragment_idx == 0:
-				if current_camera_image_index <= camera_image_idx:
-					print_debug("Out of order fragment A")
-					return
-				
-				collected_fragment_count = 1
-				camera_image_idx = current_camera_image_index
-				var fragment_count := data.decode_u8(5)
-				camera_image_buffers.clear()
-				camera_image_buffers.append(data.slice(6))
-				
-				if fragment_count > 1:
-					for _i in range(fragment_count - 1):
-						camera_image_buffers.append(PackedByteArray())
-					return
-			
-			elif current_camera_image_index != camera_image_idx:
-				print_debug("Out of order fragment B")
-				return
-			
-			else:
-				if not camera_image_buffers[current_camera_image_fragment_idx].is_empty():
-					push_error("Received the same fragment again!")
-					return
-				
-				camera_image_buffers[current_camera_image_fragment_idx] = data.slice(5)
-				collected_fragment_count += 1
-				
-				if collected_fragment_count < camera_image_buffers.size():
-					return
-			
-			data = camera_image_buffers[0]
-			
-			for i in range(1, camera_image_buffers.size()):
-				data.append_array(camera_image_buffers[i])
+			var x := data.decode_u16(0)
+			var y := data.decode_u16(2)
 			
 			var img := Image.new()
-			var err := img.load_webp_from_buffer(data)
-			if err != OK:
+			var err := img.load_webp_from_buffer(data.slice(4))
+			if err == OK:
+				call_deferred("emit_signal", "camera_chunk_received", Vector2i(x, y), img)
+			else:
 				push_error("Error parsing camera frame: %s" % err)
-			call_deferred("emit_signal", "camera_frame_received", img)
 		
 		Channels.ODOMETRY:
 			var x := data.decode_float(0)

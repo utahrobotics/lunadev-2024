@@ -1,4 +1,4 @@
-[gd_scene load_steps=43 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=41 format=3 uid="uid://b8qgudi6vkflb"]
 
 [ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_1xyvq"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="1_hl7kb"]
@@ -78,21 +78,56 @@ func _process(delta: float) -> void:
 		text = \"Last Received: %s ms\" % [roundi(timer * 1000)]
 "
 
-[sub_resource type="Gradient" id="Gradient_k12v6"]
-colors = PackedColorArray(0, 0, 0, 1, 0, 0, 0, 1)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_adsri"]
-gradient = SubResource("Gradient_k12v6")
-height = 32
-
 [sub_resource type="GDScript" id="GDScript_67ds2"]
-script/source = "extends TextureRect
+script/source = "extends GridContainer
+
+
+const IMAGE_WIDTH := 1280
+const IMAGE_HEIGHT := 720
+const MAX_CHUNK_WIDTH := 32
+
+var texture_rects: Array = []
 
 
 func _ready() -> void:
-	Lunabot.camera_frame_received.connect(
-		func(img: Image):
-			texture = ImageTexture.create_from_image(img)
+	#custom_minimum_size = Vector2i(IMAGE_WIDTH as float / IMAGE_HEIGHT * 200, 200)
+	get_parent().ratio = IMAGE_WIDTH as float / IMAGE_HEIGHT 
+	var max_x := ceili(IMAGE_WIDTH as float / MAX_CHUNK_WIDTH)
+	columns = max_x
+	var max_y := ceili(IMAGE_HEIGHT as float / MAX_CHUNK_WIDTH)
+	
+	for y in range(0, max_y):
+		var arr: Array[TextureRect] = []
+		texture_rects.append(arr)
+		var height: int
+		if y == max_y - 1:
+			height = IMAGE_HEIGHT % MAX_CHUNK_WIDTH
+			if height == 0:
+				height = IMAGE_HEIGHT % MAX_CHUNK_WIDTH
+		else:
+			height = MAX_CHUNK_WIDTH
+		
+		for x in range(0, max_x):
+			var width: int
+			if x == max_x - 1:
+				width = IMAGE_WIDTH % MAX_CHUNK_WIDTH
+				if width == 0:
+					width = MAX_CHUNK_WIDTH
+			else:
+				width = MAX_CHUNK_WIDTH
+			
+			var texture_rect := TextureRect.new()
+			texture_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			texture_rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			texture_rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			#texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+			arr.append(texture_rect)
+			texture_rect.texture = ImageTexture.create_from_image(Image.create(width, height, false, Image.FORMAT_RGB8))
+			add_child(texture_rect)
+	
+	Lunabot.camera_chunk_received.connect(
+		func(coords: Vector2i, img: Image):
+			texture_rects[coords.y][coords.x].texture.update(img)
 	)
 "
 
@@ -563,11 +598,9 @@ offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxEmpty_f0mli")
-current_tab = 2
 script = SubResource("GDScript_45865")
 
 [node name="Controller" type="HSplitContainer" parent="."]
-visible = false
 layout_mode = 2
 theme_override_constants/autohide = 0
 split_offset = 400
@@ -604,12 +637,20 @@ theme_override_constants/margin_bottom = 10
 [node name="VBoxContainer" type="VBoxContainer" parent="Controller/MarginContainer"]
 layout_mode = 2
 
-[node name="TextureRect" type="TextureRect" parent="Controller/MarginContainer/VBoxContainer"]
-custom_minimum_size = Vector2(0, 200)
+[node name="VBoxContainer2" type="VBoxContainer" parent="Controller/MarginContainer/VBoxContainer"]
 layout_mode = 2
-texture = SubResource("GradientTexture2D_adsri")
-expand_mode = 5
-stretch_mode = 5
+size_flags_vertical = 3
+alignment = 1
+
+[node name="AspectRatioContainer" type="AspectRatioContainer" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer2"]
+layout_mode = 2
+stretch_mode = 0
+
+[node name="Camera" type="GridContainer" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer2/AspectRatioContainer"]
+layout_mode = 2
+theme_override_constants/h_separation = 0
+theme_override_constants/v_separation = 0
+columns = 10
 script = SubResource("GDScript_67ds2")
 
 [node name="HBoxContainer" type="HBoxContainer" parent="Controller/MarginContainer/VBoxContainer"]
@@ -761,6 +802,7 @@ step = 0.001
 editable = false
 
 [node name="Sim" type="VBoxContainer" parent="."]
+visible = false
 layout_mode = 2
 
 [node name="AspectRatioContainer" type="AspectRatioContainer" parent="Sim"]
@@ -776,7 +818,7 @@ stretch = true
 handle_input_locally = false
 msaa_3d = 1
 size = Vector2i(628, 348)
-render_target_update_mode = 4
+render_target_update_mode = 0
 
 [node name="Node3D" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport"]
 
