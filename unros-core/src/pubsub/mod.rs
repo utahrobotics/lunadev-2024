@@ -31,14 +31,12 @@ use crate::logging::{dump::DataDump, START_TIME};
 /// should also be `Send`.
 pub struct Publisher<T> {
     subs: VecDeque<Subscription<T>>,
-    // watch_sender: watch::Sender<()>,
 }
 
 impl<T> Default for Publisher<T> {
     fn default() -> Self {
         Self {
             subs: Default::default(),
-            // watch_sender: watch::channel(()).0,
         }
     }
 }
@@ -52,25 +50,27 @@ impl<T: Clone> Publisher<T> {
             .retain_mut(|sub| match sub.queue.push(value.clone()) {
                 EnqueueResult::Ok => {
                     sub.lag = 0;
-                    true
+                    if let Some(notify) = sub.notify.upgrade() {
+                        notify.notify_one();
+                        true
+                    } else {
+                        false
+                    }
                 }
                 EnqueueResult::Full => {
                     sub.lag += 1;
                     if let Some(name) = &sub.name {
                         warn!(target: "publishers", "{name} lagging by {} messages", sub.lag);
                     }
-                    true
+                    if let Some(notify) = sub.notify.upgrade() {
+                        notify.notify_one();
+                        true
+                    } else {
+                        false
+                    }
                 }
                 EnqueueResult::Closed => false,
             });
-        self.subs.retain(|sub| {
-            if let Some(notify) = sub.notify.upgrade() {
-                notify.notify_one();
-                true
-            } else {
-                false
-            }
-        });
     }
 
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
@@ -327,7 +327,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
         }
     }
 
-    /// Try receive new message (returning `true`), or return `false` if no messages are available.
+    /// Try to receive a new message (returning `true`), or return `false` if no messages are available.
     pub fn try_update(sub: &mut Self) -> bool {
         if Self::try_update_inner(sub) {
             while Self::try_update_inner(sub) {}

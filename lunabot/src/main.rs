@@ -1,6 +1,5 @@
 use std::{
-    io::Write,
-    time::{Duration, Instant},
+    io::Write, net::SocketAddrV4, str::FromStr, time::{Duration, Instant}
 };
 
 use apriltag::{AprilTagDetector, PoseObservation};
@@ -12,6 +11,7 @@ use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 #[cfg(unix)]
 use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
+use telemetry::Telemetry;
 use unros_core::{
     anyhow, async_run_all, default_run_options,
     logging::{
@@ -53,6 +53,9 @@ async fn main() -> anyhow::Result<()> {
 
         camera
     };
+
+    let telemetry = Telemetry::new(SocketAddrV4::from_str("10.8.0.6:43721").unwrap());
+    camera.accept_image_received_sub(telemetry.create_image_subscription());
 
     let costmap_ref = costmap.get_ref();
 
@@ -178,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
         costmap.into(),
         navigator.into(),
         dumper.into(),
+        telemetry.into()
         // las_node.into()
     ];
 

@@ -11,15 +11,12 @@ use enet::{
     Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, PeerState,
 };
 use global_msgs::Steering;
-use image::{DynamicImage, EncodableLayout};
+use image::DynamicImage;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
+use rand::seq::SliceRandom;
 use unros_core::{
-    anyhow, async_trait, log,
-    pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging,
-    tokio_rayon::{self},
-    Node, RuntimeContext,
+    anyhow, async_trait, log, pubsub::{Publisher, Subscriber, Subscription}, rng::QuickRng, setup_logging, tokio_rayon, Node, RuntimeContext
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -44,6 +41,7 @@ enum ImportantMessage {
 pub struct Telemetry {
     pub bandwidth_limit: u32,
     pub server_addr: Address,
+    pub max_image_chunk_width: u32,
     steering_signal: Publisher<Steering>,
     image_subscriptions: Subscriber<Arc<DynamicImage>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
@@ -57,11 +55,16 @@ impl Telemetry {
             steering_signal: Default::default(),
             image_subscriptions: Subscriber::new(1),
             packet_queue: SegQueue::new(),
+            max_image_chunk_width: 32
         }
     }
 
     pub fn accept_steering_sub(&mut self, sub: Subscription<Steering>) {
         self.steering_signal.accept_subscription(sub);
+    }
+
+    pub fn create_image_subscription(&self) -> Subscription<Arc<DynamicImage>> {
+        self.image_subscriptions.create_subscription()
     }
 
     fn receive_packet(&mut self, channel: u8, packet: Box<[u8]>, context: &RuntimeContext) {
@@ -183,17 +186,17 @@ impl Node for Telemetry {
 
         tokio_rayon::spawn(move || {
             let _sender = sender;
-            let host = enet.create_host::<()>(
-                None,
-                1,
-                ChannelLimit::Maximum,
-                BandwidthLimit::Unlimited,
-                outgoing_limit,
-            )?;
-            let mut host = HostWrapper(host);
-            host.connect(&self.server_addr, Channels::Max as usize, 0)?;
 
             loop {
+                let host = enet.create_host::<()>(
+                    None,
+                    1,
+                    ChannelLimit::Maximum,
+                    BandwidthLimit::Unlimited,
+                    outgoing_limit,
+                )?;
+                let mut host = HostWrapper(host);
+                host.connect(&self.server_addr, Channels::Max as usize, 0)?;
                 info!("Connecting to lunabase...");
                 loop {
                     if drop_check_bool.load(Ordering::Relaxed) {
@@ -242,15 +245,51 @@ impl Node for Telemetry {
                         peer.send_packet(Packet::new(&body, mode)?, channel as u8)?;
                     }
                     if let Some(img) = self.image_subscriptions.try_recv() {
-                        let img = webp::Encoder::from_image(&img)
-                            .map_err(|e| {
-                                anyhow::anyhow!("Failed to encode image frame to webp: {e}")
-                            })?
-                            .encode(35.0);
-                        peer.send_packet(
-                            Packet::new(img.as_bytes(), enet::PacketMode::UnreliableUnsequenced)?,
-                            Channels::Camera as u8,
-                        )?;
+                        let w_chunks = img.width().div_ceil(self.max_image_chunk_width) as u16;
+                        let h_chunks = img.height().div_ceil(self.max_image_chunk_width) as u16;
+                        let mut rng = QuickRng::default();
+
+                        let mut xy_vec: Vec<_> = (0..w_chunks).flat_map(|x| (0..h_chunks).map(move |y| (x, y))).collect();
+                        xy_vec.shuffle(&mut rng);
+
+                        for (x, y) in xy_vec {
+                            let mut chunk_width;
+                            if x == w_chunks - 1 {
+                                chunk_width = img.width() % self.max_image_chunk_width;
+                                if chunk_width == 0 {
+                                    chunk_width = self.max_image_chunk_width;
+                                }
+                            } else {
+                                chunk_width = self.max_image_chunk_width;
+                            }
+
+                            let mut chunk_height;
+
+                            if y == h_chunks - 1 {
+                                chunk_height = img.height() % self.max_image_chunk_width;
+                                if chunk_height == 0 {
+                                    chunk_height = img.height() % self.max_image_chunk_width;
+                                }
+                            } else {
+                                chunk_height = self.max_image_chunk_width;
+                            }
+
+                            let img = webp::Encoder::from_image(&img.crop_imm(x as u32 * self.max_image_chunk_width, y as u32 * self.max_image_chunk_width, chunk_width, chunk_height))
+                                .map_err(|e| {
+                                    anyhow::anyhow!("Failed to encode image frame to webp: {e}")
+                                })?
+                                .encode(0.0);
+                            let mut bytes = Vec::with_capacity(4 + img.len());
+
+                            bytes.extend_from_slice(&x.to_le_bytes());
+                            bytes.extend_from_slice(&y.to_le_bytes());
+                            bytes.extend_from_slice(&img);
+
+                            peer.send_packet(
+                                Packet::new(&bytes, enet::PacketMode::UnreliableUnsequenced)?,
+                                Channels::Camera as u8,
+                            )?;
+                        }
                     }
                 }
             }
