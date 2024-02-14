@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
         // camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
     }
 
-    let mut navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.get_ref(), 0.5, 0.1);
+    let mut navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.get_ref(), 0.5, 0.15);
     let driver = DifferentialDriver::new(robot_base_ref.clone());
 
     navigator.accept_path_sub(driver.create_path_sub());
