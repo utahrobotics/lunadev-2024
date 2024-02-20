@@ -6,3 +6,5 @@ rustc-ice-*.txt
 *.sqlite*
 smooth-diff-drive-academy/
 super_sorted.txt
+
+/lunabase/camera.sdp

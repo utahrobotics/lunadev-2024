@@ -9,7 +9,7 @@ enum ImportantMessage { ENABLE_CAMERA, DISABLE_CAMERA, PING }
 
 signal connected
 signal disconnected
-signal camera_chunk_received(coords: Vector2i, img: Image)
+signal camera_sdp_received(sdp: String)
 signal network_statistics(total_bytes: float, ping: int, packet_loss: float, packet_throttle: float)
 signal odometry_received(origin: Vector2)
 signal something_received
@@ -170,15 +170,7 @@ func _on_receive(channel: int) -> void:
 			pass
 		
 		Channels.CAMERA:
-			var x := data.decode_u16(0)
-			var y := data.decode_u16(2)
-			
-			var img := Image.new()
-			var err := img.load_webp_from_buffer(data.slice(4))
-			if err == OK:
-				call_deferred("emit_signal", "camera_chunk_received", Vector2i(x, y), img)
-			else:
-				push_error("Error parsing camera frame: %s" % err)
+			call_deferred("emit_signal", "camera_sdp_received", data.get_string_from_utf8())
 		
 		Channels.ODOMETRY:
 			var x := data.decode_float(0)
@@ -205,7 +197,6 @@ func _on_receive(channel: int) -> void:
 func raw_send(channel: int, data: PackedByteArray, flags: int) -> void:
 	lunabot_mutex.lock()
 	if lunabot == null:
-		push_warning("Lunabot not connected to yet!")
 		lunabot_mutex.unlock()
 		return
 	var err := lunabot.send(channel, data, flags)

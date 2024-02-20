@@ -84,55 +84,82 @@ func _process(delta: float) -> void:
 "
 
 [sub_resource type="GDScript" id="GDScript_67ds2"]
-script/source = "extends GridContainer
+script/source = "extends TextureRect
+
+
+signal image_received(Image)
+signal ffmpeg_thr_finished
 
 
 const IMAGE_WIDTH := 1280
 const IMAGE_HEIGHT := 720
-const MAX_CHUNK_WIDTH := 32
+const IMAGE_SIZE := IMAGE_WIDTH * IMAGE_HEIGHT * 3
 
 var texture_rects: Array = []
 
+var ffmpeg_thr: Thread
+var udp_thr := Thread.new()
+
 
 func _ready() -> void:
-	#custom_minimum_size = Vector2i(IMAGE_WIDTH as float / IMAGE_HEIGHT * 200, 200)
-	get_parent().ratio = IMAGE_WIDTH as float / IMAGE_HEIGHT 
-	var max_x := ceili(IMAGE_WIDTH as float / MAX_CHUNK_WIDTH)
-	columns = max_x
-	var max_y := ceili(IMAGE_HEIGHT as float / MAX_CHUNK_WIDTH)
+	texture = ImageTexture.create_from_image(Image.create(IMAGE_WIDTH, IMAGE_HEIGHT, false, Image.FORMAT_RGB8))
 	
-	for y in range(0, max_y):
-		var arr: Array[TextureRect] = []
-		texture_rects.append(arr)
-		var height: int
-		if y == max_y - 1:
-			height = IMAGE_HEIGHT % MAX_CHUNK_WIDTH
-			if height == 0:
-				height = IMAGE_HEIGHT % MAX_CHUNK_WIDTH
-		else:
-			height = MAX_CHUNK_WIDTH
-		
-		for x in range(0, max_x):
-			var width: int
-			if x == max_x - 1:
-				width = IMAGE_WIDTH % MAX_CHUNK_WIDTH
-				if width == 0:
-					width = MAX_CHUNK_WIDTH
-			else:
-				width = MAX_CHUNK_WIDTH
+	Lunabot.camera_sdp_received.connect(
+		func(sdp: String):
+			if ffmpeg_thr != null:
+				return
+			ffmpeg_thr = Thread.new()
+			var sdp_file := FileAccess.open(\"camera.sdp\", FileAccess.WRITE)
+			sdp_file.store_string(sdp)
+			sdp_file.close()
 			
-			var texture_rect := TextureRect.new()
-			texture_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			texture_rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			texture_rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			#texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
-			arr.append(texture_rect)
-			texture_rect.texture = ImageTexture.create_from_image(Image.create(width, height, false, Image.FORMAT_RGB8))
-			add_child(texture_rect)
+			ffmpeg_thr.start(
+				func():
+					var output := []
+					var err := OS.execute(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-strict\", \"2\", \"-f\", \"rawvideo\", \"-pix_fmt\", \"rgb24\", \"tcp://127.0.0.1:%s\" % (Lunabot.RECV_FROM + 3)], output, true, true)
+					##OS.create_process(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-strict\", \"2\", \"-y\", \"output.mkv\"], true)
+					for line in output:
+						print(line)
+					print(\"Error code %s\" % err)
+					call_deferred(\"emit_signal\", \"ffmpeg_thr_finished\")
+			)
+			
+			await ffmpeg_thr_finished
+			ffmpeg_thr = null
+			Lunabot.raw_send_reliable(Lunabot.Channels.CAMERA, [1])
+	)
 	
-	Lunabot.camera_chunk_received.connect(
-		func(coords: Vector2i, img: Image):
-			texture_rects[coords.y][coords.x].texture.update(img)
+	udp_thr.start(
+		func():
+			var tcp_server := TCPServer.new()
+			while true:
+				var err := tcp_server.listen(Lunabot.RECV_FROM + 3)
+				if err != 0:
+					push_error(\"Faced the following error while binding cam tcp: %s\" % err)
+					OS.delay_msec(2000)
+					continue
+				
+				while not tcp_server.is_connection_available():
+					OS.delay_msec(20)
+				
+				var cam_tcp := tcp_server.take_connection()
+				tcp_server.stop()
+				
+				while true:
+					var result := cam_tcp.get_data(IMAGE_SIZE)
+					if result[0] == ERR_FILE_EOF:
+						break
+					if result[0] != 0:
+						push_error(\"Faced the following error while reading cam tcp: %s\" % result[0])
+						continue
+					call_deferred(\"emit_signal\", \"image_received\", Image.create_from_data(IMAGE_WIDTH, IMAGE_HEIGHT, false, Image.FORMAT_RGB8, result[1])),
+			
+		Thread.PRIORITY_HIGH
+	)
+	
+	image_received.connect(
+		func(img: Image):
+			texture.update(img)
 	)
 "
 
@@ -648,15 +675,9 @@ layout_mode = 2
 size_flags_vertical = 3
 alignment = 1
 
-[node name="AspectRatioContainer" type="AspectRatioContainer" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer2"]
+[node name="Camera" type="TextureRect" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer2"]
 layout_mode = 2
-stretch_mode = 0
-
-[node name="Camera" type="GridContainer" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer2/AspectRatioContainer"]
-layout_mode = 2
-theme_override_constants/h_separation = 0
-theme_override_constants/v_separation = 0
-columns = 10
+expand_mode = 5
 script = SubResource("GDScript_67ds2")
 
 [node name="HBoxContainer" type="HBoxContainer" parent="Controller/MarginContainer/VBoxContainer"]
