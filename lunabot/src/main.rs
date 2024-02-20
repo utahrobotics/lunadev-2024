@@ -57,12 +57,18 @@ async fn main() -> anyhow::Result<()> {
         camera
     };
 
-    let telemetry = Telemetry::new(SocketAddrV4::from_str("10.8.0.6:43721").unwrap());
+    let telemetry = Telemetry::new(
+        SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
+        1280,
+        720,
+        24,
+    )
+    .await?;
     camera.accept_image_received_sub(telemetry.create_image_subscription());
 
     let costmap_ref = costmap.get_ref();
 
-    let mut costmap_writer = VideoDataDump::new(720, 720, "costmap.mkv")?;
+    let mut costmap_writer = VideoDataDump::new_file(720, 720, "costmap.mkv", 60)?;
     // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
     let video_maker = FnNode::new(|_| async move {
@@ -72,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
             let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
             let img = costmap_ref.obstacles_to_img(&obstacles);
 
-            costmap_writer.write_frame(img.into()).unwrap();
+            costmap_writer.write_frame(img.into())?;
         }
     });
 

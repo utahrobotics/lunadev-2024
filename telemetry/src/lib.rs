@@ -1,30 +1,24 @@
 use std::{
+    net::SocketAddrV4,
     ops::{Deref, DerefMut},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Instant,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 use crossbeam::queue::SegQueue;
-use enet::{
-    Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, PeerState,
-};
+use enet::{BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, PeerState};
 use global_msgs::Steering;
 use image::DynamicImage;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
-use rand::seq::SliceRandom;
+use spin_sleep::SpinSleeper;
 use unros_core::{
     anyhow, async_trait, log,
+    logging::dump::VideoDataDump,
     pubsub::{Publisher, Subscriber, Subscription},
-    rayon::{
-        self,
-        iter::{IntoParallelIterator, ParallelIterator},
-    },
-    rng::QuickRng,
-    setup_logging, tokio_rayon, Node, RuntimeContext,
+    setup_logging,
+    tokio::{self, sync::oneshot},
+    tokio_rayon, DropCheck, Node, RuntimeContext,
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -48,23 +42,41 @@ enum ImportantMessage {
 /// A remote connection to `Lunabase`
 pub struct Telemetry {
     pub bandwidth_limit: u32,
-    pub server_addr: Address,
+    pub server_addr: SocketAddrV4,
     pub max_image_chunk_width: u32,
+    pub camera_delta: Duration,
     steering_signal: Publisher<Steering>,
-    image_subscriptions: Subscriber<Arc<DynamicImage>>,
+    image_subscriptions: Option<Subscriber<Arc<DynamicImage>>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
+    video_dump: Option<VideoDataDump>,
+    sdp: Option<oneshot::Receiver<String>>,
 }
 
 impl Telemetry {
-    pub fn new(server_addr: impl Into<Address>) -> Self {
-        Self {
+    pub async fn new(
+        server_addr: impl Into<SocketAddrV4>,
+        cam_width: u32,
+        cam_height: u32,
+        cam_fps: usize,
+    ) -> anyhow::Result<Self> {
+        let server_addr = server_addr.into();
+        let mut video_addr = server_addr;
+        video_addr.set_port(video_addr.port() + 1);
+
+        let (video_dump, sdp) =
+            VideoDataDump::new_rtp(cam_width, cam_height, video_addr, cam_fps).await?;
+
+        Ok(Self {
             bandwidth_limit: 0,
-            server_addr: server_addr.into(),
+            server_addr,
             steering_signal: Default::default(),
-            image_subscriptions: Subscriber::new(1),
+            image_subscriptions: Some(Subscriber::new(1)),
+            camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
             packet_queue: SegQueue::new(),
             max_image_chunk_width: 32,
-        }
+            video_dump: Some(video_dump),
+            sdp: Some(sdp),
+        })
     }
 
     pub fn accept_steering_sub(&mut self, sub: Subscription<Steering>) {
@@ -72,7 +84,10 @@ impl Telemetry {
     }
 
     pub fn create_image_subscription(&self) -> Subscription<Arc<DynamicImage>> {
-        self.image_subscriptions.create_subscription()
+        self.image_subscriptions
+            .as_ref()
+            .unwrap()
+            .create_subscription()
     }
 
     fn receive_packet(&mut self, channel: u8, packet: Box<[u8]>, context: &RuntimeContext) {
@@ -165,15 +180,6 @@ impl Drop for HostWrapper {
     }
 }
 
-struct DropCheck(Arc<AtomicBool>, std::sync::mpsc::Receiver<()>);
-
-impl Drop for DropCheck {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
-        let _ = self.1.recv();
-    }
-}
-
 #[async_trait]
 impl Node for Telemetry {
     const DEFAULT_NAME: &'static str = "telemetry";
@@ -188,138 +194,106 @@ impl Node for Telemetry {
             BandwidthLimit::Limited(self.bandwidth_limit)
         };
 
-        let drop_check_bool = Arc::new(AtomicBool::new(false));
-        let (sender, receiver) = std::sync::mpsc::sync_channel(0);
-        let _drop_check = DropCheck(drop_check_bool.clone(), receiver);
+        let mut drop_check = DropCheck::default();
+        let drop_check2 = drop_check.clone();
+        let _drop_check = drop_check.clone();
+        let mut image_subscriptions = self.image_subscriptions.take().unwrap();
+        let mut video_dump = self.video_dump.take().unwrap();
 
-        tokio_rayon::spawn(move || {
-            let _sender = sender;
+        let cam_fut = tokio_rayon::spawn(move || {
+            let mut start_service = Instant::now();
+            let sleeper = SpinSleeper::default();
+            drop_check.dont_update_on_drop();
 
             loop {
-                let host = enet.create_host::<()>(
-                    None,
-                    1,
-                    ChannelLimit::Maximum,
-                    BandwidthLimit::Unlimited,
-                    outgoing_limit,
-                )?;
-                let mut host = HostWrapper(host);
-                host.connect(&self.server_addr, Channels::Max as usize, 0)?;
-                info!("Connecting to lunabase...");
-                loop {
-                    if drop_check_bool.load(Ordering::Relaxed) {
-                        return Ok(());
-                    }
-                    let Some(event) = host.service(50)? else {
-                        continue;
-                    };
-                    match event {
-                        Event::Connect(_) => break,
-                        Event::Disconnect(_, _) => {
-                            warn!("Somehow disconnected from a peer!")
-                        }
-                        Event::Receive { .. } => todo!(),
-                    }
+                if drop_check.has_dropped() {
+                    return Ok(());
+                }
+                if let Some(img) = image_subscriptions.try_recv() {
+                    video_dump.write_frame(img.deref().clone())?;
                 }
 
-                info!("Connected to lunabase!");
-                let mut start_service = Instant::now();
-                loop {
-                    {
-                        let option = host.service(50)?;
-                        if drop_check_bool.load(Ordering::Relaxed) {
-                            return Ok(());
-                        }
-                        match option {
-                            Some(Event::Connect(_)) => {
-                                error!("Somehow connected to another peer, ignoring...");
-                            }
-                            Some(Event::Disconnect(_, _)) => {
-                                error!("Disconnected from lunabase!");
-                                break;
-                            }
-                            Some(Event::Receive {
-                                channel_id,
-                                ref packet,
-                                ..
-                            }) => {
-                                let packet = packet.data().to_vec().into_boxed_slice();
-                                self.receive_packet(channel_id, packet, &context);
-                            }
-                            None => {}
-                        }
+                let elapsed = start_service.elapsed();
+                start_service += elapsed;
+                sleeper.sleep(self.camera_delta.saturating_sub(elapsed));
+            }
+        });
+
+        let sdp = self.sdp.take().unwrap().await?;
+
+        info!("Connecting to lunabase...");
+        let enet_fut = tokio_rayon::spawn(move || 'main: loop {
+            let tmp_host = enet.create_host::<()>(
+                None,
+                1,
+                ChannelLimit::Maximum,
+                BandwidthLimit::Unlimited,
+                outgoing_limit,
+            )?;
+            let mut host = HostWrapper(tmp_host);
+            host.connect(&self.server_addr.into(), Channels::Max as usize, 0)?;
+            loop {
+                if drop_check2.has_dropped() {
+                    return Ok(());
+                }
+                let Some(event) = host.service(50)? else {
+                    continue;
+                };
+                match event {
+                    Event::Connect(_) => break,
+                    Event::Disconnect(ref peer, _) => {
+                        warn!("Somehow disconnected from a peer ({:?}:{})! ignoring...", peer.address().ip(), peer.address().port());
+                        continue 'main;
                     }
-                    let mut peer = host.peers().next().unwrap();
-                    while let Some((body, mode, channel)) = self.packet_queue.pop() {
-                        peer.send_packet(Packet::new(&body, mode)?, channel as u8)?;
-                    }
-                    let elapsed = start_service.elapsed();
-                    if elapsed.as_millis() < 50 {
-                        continue;
-                    }
-                    start_service += elapsed;
-                    if let Some(img) = self.image_subscriptions.try_recv() {
-                        let w_chunks = img.width().div_ceil(self.max_image_chunk_width) as u16;
-                        let h_chunks = img.height().div_ceil(self.max_image_chunk_width) as u16;
-                        let mut rng = QuickRng::default();
-
-                        let mut xy_vec: Vec<_> = (0..w_chunks)
-                            .flat_map(|x| (0..h_chunks).map(move |y| (x, y)))
-                            .collect();
-                        xy_vec.shuffle(&mut rng);
-
-                        let (sender, recv) = std::sync::mpsc::sync_channel(xy_vec.len());
-
-                        rayon::spawn(move || {
-                            xy_vec.into_par_iter().for_each(move |(x, y)| {
-                                let mut chunk_width;
-                                if x == w_chunks - 1 {
-                                    chunk_width = img.width() % self.max_image_chunk_width;
-                                    if chunk_width == 0 {
-                                        chunk_width = self.max_image_chunk_width;
-                                    }
-                                } else {
-                                    chunk_width = self.max_image_chunk_width;
-                                }
-
-                                let mut chunk_height;
-
-                                if y == h_chunks - 1 {
-                                    chunk_height = img.height() % self.max_image_chunk_width;
-                                    if chunk_height == 0 {
-                                        chunk_height = img.height() % self.max_image_chunk_width;
-                                    }
-                                } else {
-                                    chunk_height = self.max_image_chunk_width;
-                                }
-
-                                let img = webp::Encoder::from_image(&img.crop_imm(
-                                    x as u32 * self.max_image_chunk_width,
-                                    y as u32 * self.max_image_chunk_width,
-                                    chunk_width,
-                                    chunk_height,
-                                ))
-                                .unwrap()
-                                .encode(10.0);
-                                let mut bytes = Vec::with_capacity(4 + img.len());
-
-                                bytes.extend_from_slice(&x.to_le_bytes());
-                                bytes.extend_from_slice(&y.to_le_bytes());
-                                bytes.extend_from_slice(&img);
-
-                                sender.send(bytes).unwrap();
-                            });
-                        });
-                        for bytes in recv {
-                            peer.send_packet(
-                                Packet::new(&bytes, enet::PacketMode::UnreliableUnsequenced)?,
-                                Channels::Camera as u8,
-                            )?;
-                        }
+                    Event::Receive { ref sender, .. } => {
+                        warn!("Somehow received from a peer ({:?}:{})! ignoring...", sender.address().ip(), sender.address().port());
+                        continue 'main;
                     }
                 }
             }
-        })
-        .await
+            let mut peer = host.peers().next().unwrap();
+            peer.send_packet(
+                Packet::new(sdp.as_bytes(), PacketMode::ReliableSequenced)?,
+                Channels::Camera as u8,
+            )?;
+
+            info!("Connected to lunabase!");
+            loop {
+                {
+                    let option = host.service(50)?;
+                    if drop_check2.has_dropped() {
+                        return Ok(());
+                    }
+                    match option {
+                        Some(Event::Connect(_)) => {
+                            error!("Somehow connected to another peer, ignoring...");
+                        }
+                        Some(Event::Disconnect(_, _)) => {
+                            error!("Disconnected from lunabase!");
+                            break;
+                        }
+                        Some(Event::Receive {
+                            channel_id,
+                            ref packet,
+                            ..
+                        }) => {
+                            let packet = packet.data().to_vec().into_boxed_slice();
+                            self.receive_packet(channel_id, packet, &context);
+                        }
+                        None => {}
+                    }
+                }
+                let mut peer = host.peers().next().unwrap();
+                while let Some((body, mode, channel)) = self.packet_queue.pop() {
+                    peer.send_packet(Packet::new(&body, mode)?, channel as u8)?;
+                }
+            }
+            info!("Connecting to lunabase...");
+        });
+
+        tokio::select! {
+            res = enet_fut => res,
+            res = cam_fut => res,
+        }
     }
 }

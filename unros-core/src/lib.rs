@@ -290,21 +290,34 @@ impl Add for FinalizedNode {
 }
 
 #[derive(Default, Clone)]
-pub struct DropCheck(Arc<AtomicBool>);
+pub struct DropCheck {
+    dropped: Arc<AtomicBool>,
+    update_on_drop: bool,
+}
 
 impl Drop for DropCheck {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
+        if self.update_on_drop {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
     }
 }
 
 impl DropCheck {
     pub fn has_dropped(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.dropped.load(Ordering::SeqCst)
     }
 
     pub fn reset(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.dropped.store(true, Ordering::SeqCst);
+    }
+
+    pub fn update_on_drop(&mut self) {
+        self.update_on_drop = true;
+    }
+
+    pub fn dont_update_on_drop(&mut self) {
+        self.update_on_drop = true;
     }
 }
 
