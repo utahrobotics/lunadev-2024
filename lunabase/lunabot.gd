@@ -133,7 +133,6 @@ func _run_thr():
 					continue
 				lunabot = null
 				lunabot_mutex.unlock()
-				push_error("Lost connection to lunabot!")
 				call_deferred("emit_signal", "disconnected")
 				
 			ENetConnection.EventType.EVENT_RECEIVE:
