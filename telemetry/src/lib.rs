@@ -90,7 +90,7 @@ impl Telemetry {
             .create_subscription()
     }
 
-    fn receive_packet(&mut self, channel: u8, packet: Box<[u8]>, context: &RuntimeContext) {
+    fn receive_packet(&mut self, channel: u8, packet: Box<[u8]>, context: &RuntimeContext, sdp: &String) {
         setup_logging!(context);
         let Ok(channel) = Channels::try_from(channel) else {
             error!("Received invalid channel: {channel}");
@@ -112,7 +112,22 @@ impl Telemetry {
                     )),
                 }
             }
-            Channels::Camera => todo!(),
+            Channels::Camera => {
+                match packet[0] {
+                    1 => {
+                        info!("Resending SDP");
+                        self.packet_queue.push((
+                            sdp.as_bytes().into_iter().copied().collect(),
+                            PacketMode::ReliableSequenced,
+                            Channels::Camera,
+                        ));
+                    }
+                    x => {
+                        error!("Received invalid CameraMessage: {x}");
+                        return;
+                    }
+                }
+            }
             Channels::Odometry => todo!(),
             Channels::Controls => {
                 let drive = i8::from_le_bytes([packet[0]]) as f32;
@@ -207,9 +222,11 @@ impl Node for Telemetry {
 
             loop {
                 if drop_check.has_dropped() {
+                    println!("B");
                     return Ok(());
                 }
                 if let Some(img) = image_subscriptions.try_recv() {
+                    println!("A");
                     video_dump.write_frame(img.deref().clone())?;
                 }
 
@@ -278,7 +295,7 @@ impl Node for Telemetry {
                             ..
                         }) => {
                             let packet = packet.data().to_vec().into_boxed_slice();
-                            self.receive_packet(channel_id, packet, &context);
+                            self.receive_packet(channel_id, packet, &context, &sdp);
                         }
                         None => {}
                     }

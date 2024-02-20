@@ -289,10 +289,16 @@ impl Add for FinalizedNode {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct DropCheck {
     dropped: Arc<AtomicBool>,
     update_on_drop: bool,
+}
+
+impl Default for DropCheck {
+    fn default() -> Self {
+        Self { dropped: Default::default(), update_on_drop: true }
+    }
 }
 
 impl Drop for DropCheck {
