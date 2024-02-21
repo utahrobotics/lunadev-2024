@@ -6,6 +6,7 @@ use std::{
 };
 
 use apriltag::{AprilTagDetector, PoseObservation};
+use camera::{discover_all_cameras, Camera};
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
 use localization::{IMUFrame, Localizer, OrientationFrame, PositionFrame};
@@ -16,13 +17,10 @@ use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use telemetry::Telemetry;
 use unros_core::{
-    anyhow, async_run_all, default_run_options,
-    logging::{
+    anyhow, async_run_all, default_run_options, log::info, logging::{
         dump::{DataDump, VideoDataDump},
         init_logger,
-    },
-    pubsub::Subscriber,
-    tokio, FnNode,
+    }, pubsub::Subscriber, tokio, FnNode
 };
 
 #[tokio::main]
@@ -40,8 +38,12 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(unix)]
     let costmap = costmap;
 
+    let camera_count = discover_all_cameras()?.count();
+    info!("Discovered {camera_count} cameras");
+    let mut camera = Camera::new(0)?;
+
     #[cfg(unix)]
-    let mut camera = {
+    let mut realsense_camera = {
         use unros_core::rayon::iter::ParallelIterator;
         let mut camera = discover_all_realsense()?
             .next()
@@ -78,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
             let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
             let img = costmap_ref.obstacles_to_img(&obstacles);
 
-            costmap_writer.write_frame(img.into())?;
+            costmap_writer.write_frame(img.into(), "costmap")?;
         }
     });
 
@@ -129,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(unix)]
     {
-        camera.accept_image_received_sub(
+        realsense_camera.accept_image_received_sub(
             apriltag
                 .create_image_subscription()
                 .set_name("RealSense Apriltag Image"),
@@ -150,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
     .unwrap();
     let mut imu_sub = Subscriber::<IMUFrame>::new(32);
     #[cfg(unix)]
-    camera.accept_imu_frame_received_sub(imu_sub.create_subscription());
+    realsense_camera.accept_imu_frame_received_sub(imu_sub.create_subscription());
     let dumper = FnNode::new(|_| async move {
         let start = Instant::now();
         let mut elapsed = Duration::ZERO;
@@ -191,10 +193,11 @@ async fn main() -> anyhow::Result<()> {
         navigator.into(),
         dumper.into(),
         telemetry.into(), // las_node.into()
+        camera.into()
     ];
 
     #[cfg(unix)]
-    let nodes = nodes.into_iter().chain(std::iter::once(camera.into()));
+    let nodes = nodes.into_iter().chain(std::iter::once(realsense_camera.into()));
 
     async_run_all(nodes, run_options).await
 }

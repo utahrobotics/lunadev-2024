@@ -2813,6 +2813,7 @@ name = "lunabot"
 version = "0.1.0"
 dependencies = [
  "apriltag 0.1.0",
+ "camera",
  "costmap",
  "fxhash",
  "las",

@@ -12,9 +12,10 @@ use std::{
     io::{ErrorKind, Write},
     net::{SocketAddr, SocketAddrV4},
     num::NonZeroU32,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, sync::Arc,
 };
 
+use crossbeam::{queue::ArrayQueue, utils::Backoff};
 use ffmpeg_sidecar::{child::FfmpegChild, command::FfmpegCommand, event::FfmpegEvent};
 use image::DynamicImage;
 use log::{error, info, warn};
@@ -25,7 +26,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 
-use crate::spawn_persistent_thread;
+use crate::{spawn_persistent_thread, DropCheck};
 
 use super::SUB_LOGGING_DIR;
 
@@ -160,7 +161,8 @@ impl Display for VideoWriteError {
 impl Error for VideoWriteError {}
 
 pub struct VideoDataDump {
-    video_writer: std::sync::mpsc::Sender<DynamicImage>,
+    video_writer: Arc<ArrayQueue<DynamicImage>>,
+    writer_drop: DropCheck
     // path: PathBuf,
     // start: Instant,
 }
@@ -274,7 +276,7 @@ impl VideoDataDump {
                 "2",
             ])
             .args(["-sdp_file".as_ref(), sdp_file_path.as_path()])
-            .args(["-f", "rtp", &format!("rtp://{addr}?rtcpport={}", addr.port() + 1)])
+            .args(["-f", "rtp", &format!("rtp://{addr}")])
             .spawn()
             .map_err(VideoDumpInitError::IOError)?;
 
@@ -305,7 +307,10 @@ impl VideoDataDump {
     }
 
     fn new(width: u32, height: u32, mut output: FfmpegChild) -> Result<Self, VideoDumpInitError> {
-        let (writer, receiver) = std::sync::mpsc::channel::<DynamicImage>();
+        let queue_sender = Arc::new(ArrayQueue::<DynamicImage>::new(1));
+        let queue_receiver = queue_sender.clone();
+        let writer_drop = DropCheck::default();
+        let reader_drop = writer_drop.clone();
 
         let mut resizer = fast_image_resize::Resizer::new(
             fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Box),
@@ -337,11 +342,19 @@ impl VideoDataDump {
 
         spawn_persistent_thread(move || {
             loop {
-                let Ok(frame) = receiver.recv() else {
+                if reader_drop.has_dropped() {
                     if let Err(e) = video_out.flush() {
                         error!("Failed to flush encoder: {e}");
                     }
                     break;
+                }
+                let backoff = Backoff::new();
+                let frame = loop {
+                    let Some(frame) = queue_receiver.pop() else {
+                        backoff.snooze();
+                        continue;
+                    };
+                    break frame;
                 };
                 let src_image = fast_image_resize::Image::from_vec_u8(
                     NonZeroU32::new(frame.width())
@@ -370,14 +383,32 @@ impl VideoDataDump {
         });
 
         Ok(Self {
-            video_writer: writer,
+            video_writer: queue_sender,
+            writer_drop
             // start: Instant::now(),
             // path: path.to_path_buf(),
         })
     }
 
-    pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
-        self.video_writer.send(frame).map_err(|_| VideoWriteError)
+    pub fn write_frame(&mut self, frame: DynamicImage, name: &str) -> Result<(), VideoWriteError> {
+        if self.writer_drop.has_dropped() {
+            return Err(VideoWriteError);
+        }
+        match self.video_writer.force_push(frame) {
+            Some(_) => {
+                warn!("Overwriting last frame: {name} as queue was full!");
+                Ok(())
+            }
+            None => Ok(())
+        }
+    }
+
+    pub fn write_frame_quiet(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
+        if self.writer_drop.has_dropped() {
+            return Err(VideoWriteError);
+        }
+        self.video_writer.force_push(frame);
+        Ok(())
     }
 
     // pub async fn init_subtitles(&self) -> Result<SubtitleDump, std::io::Error> {

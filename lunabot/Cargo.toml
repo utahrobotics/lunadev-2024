@@ -9,6 +9,7 @@ edition = "2021"
 unros-core = { path = "../unros-core" }
 telemetry = { path = "../telemetry" }
 realsense = { path = "../realsense" }
+camera = { path = "../camera" }
 navigator = { path = "../navigator" }
 localization = { path = "../localization" }
 apriltag = { path = "../apriltag" }

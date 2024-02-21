@@ -222,12 +222,10 @@ impl Node for Telemetry {
 
             loop {
                 if drop_check.has_dropped() {
-                    println!("B");
                     return Ok(());
                 }
                 if let Some(img) = image_subscriptions.try_recv() {
-                    println!("A");
-                    video_dump.write_frame(img.deref().clone())?;
+                    video_dump.write_frame_quiet(img.deref().clone())?;
                 }
 
                 let elapsed = start_service.elapsed();
