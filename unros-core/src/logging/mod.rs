@@ -144,7 +144,9 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                     // This filter is to avoid logging panics to the console, since rust already does that.
                     // Note that the 'panic' target is set by us in eyre.rs.
                     .filter(|x| x.target() != "panic")
-                    .filter(|x| !(x.target() == "unros_core::logging::dump" && x.level() == Level::Info))
+                    .filter(|x| {
+                        !(x.target() == "unros_core::logging::dump" && x.level() == Level::Info)
+                    })
                     .format(move |out, message, record| {
                         let secs = START_TIME.get().unwrap().elapsed().as_secs_f32();
                         out.finish(format_args!(

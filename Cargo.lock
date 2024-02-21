@@ -5232,7 +5232,6 @@ dependencies = [
  "config",
  "console-subscriber",
  "crossbeam",
- "fast_image_resize",
  "fern",
  "ffmpeg-sidecar",
  "futures",

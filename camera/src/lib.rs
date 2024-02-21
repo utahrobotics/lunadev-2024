@@ -13,7 +13,10 @@ use nokhwa::{
     utils::{CameraIndex, RequestedFormat, RequestedFormatType},
 };
 use unros_core::{
-    anyhow::{self, Context}, async_trait, log, pubsub::{Publisher, Subscription}, setup_logging, tokio_rayon, Node, RuntimeContext
+    anyhow::{self, Context},
+    async_trait, log,
+    pubsub::{Publisher, Subscription},
+    setup_logging, tokio_rayon, Node, RuntimeContext,
 };
 
 /// A pending connection to a camera.
@@ -30,8 +33,16 @@ pub struct Camera {
 impl Camera {
     /// Creates a pending connection to the camera with the given index.
     pub fn new(camera_index: u32) -> anyhow::Result<Self> {
-        let tmp_camera = nokhwa::Camera::new(CameraIndex::Index(camera_index), RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate)).context("Failed to initialize camera")?;
-        log::info!("Pinged {} with index {}", tmp_camera.info().human_name(), camera_index);
+        let tmp_camera = nokhwa::Camera::new(
+            CameraIndex::Index(camera_index),
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
+        )
+        .context("Failed to initialize camera")?;
+        log::info!(
+            "Pinged {} with index {}",
+            tmp_camera.info().human_name(),
+            camera_index
+        );
         Ok(Self {
             fps: 0,
             res_x: 0,
@@ -88,8 +99,12 @@ pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
     Ok(query(nokhwa::utils::ApiBackend::Auto)?
         .into_iter()
         .filter_map(|info| {
-            let CameraIndex::Index(n) = info.index() else { return None; };
-            let Ok(cam) = Camera::new(*n) else { return None; };
+            let CameraIndex::Index(n) = info.index() else {
+                return None;
+            };
+            let Ok(cam) = Camera::new(*n) else {
+                return None;
+            };
             Some(cam)
         }))
 }

@@ -297,7 +297,10 @@ pub struct DropCheck {
 
 impl Default for DropCheck {
     fn default() -> Self {
-        Self { dropped: Default::default(), update_on_drop: true }
+        Self {
+            dropped: Default::default(),
+            update_on_drop: true,
+        }
     }
 }
 

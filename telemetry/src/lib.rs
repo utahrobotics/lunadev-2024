@@ -14,7 +14,7 @@ use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros_core::{
     anyhow, async_trait, log,
-    logging::dump::VideoDataDump,
+    logging::dump::{ScalingFilter, VideoDataDump},
     pubsub::{Publisher, Subscriber, Subscription},
     setup_logging,
     tokio::{self, sync::oneshot},
@@ -64,7 +64,7 @@ impl Telemetry {
         video_addr.set_port(video_addr.port() + 1);
 
         let (video_dump, sdp) =
-            VideoDataDump::new_rtp(cam_width, cam_height, video_addr, cam_fps).await?;
+            VideoDataDump::new_rtp(cam_width, cam_height, 1280, 720, ScalingFilter::FastBilinear, video_addr, cam_fps).await?;
 
         Ok(Self {
             bandwidth_limit: 0,
@@ -90,7 +90,13 @@ impl Telemetry {
             .create_subscription()
     }
 
-    fn receive_packet(&mut self, channel: u8, packet: Box<[u8]>, context: &RuntimeContext, sdp: &String) {
+    fn receive_packet(
+        &mut self,
+        channel: u8,
+        packet: Box<[u8]>,
+        context: &RuntimeContext,
+        sdp: &String,
+    ) {
         setup_logging!(context);
         let Ok(channel) = Channels::try_from(channel) else {
             error!("Received invalid channel: {channel}");
@@ -112,22 +118,20 @@ impl Telemetry {
                     )),
                 }
             }
-            Channels::Camera => {
-                match packet[0] {
-                    1 => {
-                        info!("Resending SDP");
-                        self.packet_queue.push((
-                            sdp.as_bytes().into_iter().copied().collect(),
-                            PacketMode::ReliableSequenced,
-                            Channels::Camera,
-                        ));
-                    }
-                    x => {
-                        error!("Received invalid CameraMessage: {x}");
-                        return;
-                    }
+            Channels::Camera => match packet[0] {
+                1 => {
+                    info!("Resending SDP");
+                    self.packet_queue.push((
+                        sdp.as_bytes().into_iter().copied().collect(),
+                        PacketMode::ReliableSequenced,
+                        Channels::Camera,
+                    ));
                 }
-            }
+                x => {
+                    error!("Received invalid CameraMessage: {x}");
+                    return;
+                }
+            },
             Channels::Odometry => todo!(),
             Channels::Controls => {
                 let drive = i8::from_le_bytes([packet[0]]) as f32;
@@ -257,11 +261,19 @@ impl Node for Telemetry {
                 match event {
                     Event::Connect(_) => break,
                     Event::Disconnect(ref peer, _) => {
-                        warn!("Somehow disconnected from a peer ({:?}:{})! ignoring...", peer.address().ip(), peer.address().port());
+                        warn!(
+                            "Somehow disconnected from a peer ({:?}:{})! ignoring...",
+                            peer.address().ip(),
+                            peer.address().port()
+                        );
                         continue 'main;
                     }
                     Event::Receive { ref sender, .. } => {
-                        warn!("Somehow received from a peer ({:?}:{})! ignoring...", sender.address().ip(), sender.address().port());
+                        warn!(
+                            "Somehow received from a peer ({:?}:{})! ignoring...",
+                            sender.address().ip(),
+                            sender.address().port()
+                        );
                         continue 'main;
                     }
                 }

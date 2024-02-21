@@ -17,10 +17,14 @@ use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use telemetry::Telemetry;
 use unros_core::{
-    anyhow, async_run_all, default_run_options, log::info, logging::{
-        dump::{DataDump, VideoDataDump},
+    anyhow, async_run_all, default_run_options,
+    log::info,
+    logging::{
+        dump::{DataDump, ScalingFilter, VideoDataDump},
         init_logger,
-    }, pubsub::Subscriber, tokio, FnNode
+    },
+    pubsub::Subscriber,
+    tokio, FnNode,
 };
 
 #[tokio::main]
@@ -61,8 +65,8 @@ async fn main() -> anyhow::Result<()> {
 
     let telemetry = Telemetry::new(
         SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
-        1280,
-        720,
+        1920,
+        1080,
         24,
     )
     .await?;
@@ -70,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
 
     let costmap_ref = costmap.get_ref();
 
-    let mut costmap_writer = VideoDataDump::new_file(720, 720, "costmap.mkv", 60)?;
+    let mut costmap_writer = VideoDataDump::new_file(80, 80, 720, 720, ScalingFilter::Neighbor, "costmap.mkv", 24)?;
     // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
     let video_maker = FnNode::new(|_| async move {
@@ -80,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
             let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
             let img = costmap_ref.obstacles_to_img(&obstacles);
 
-            costmap_writer.write_frame(img.into(), "costmap")?;
+            costmap_writer.write_frame(img.into())?;
         }
     });
 
@@ -193,11 +197,13 @@ async fn main() -> anyhow::Result<()> {
         navigator.into(),
         dumper.into(),
         telemetry.into(), // las_node.into()
-        camera.into()
+        camera.into(),
     ];
 
     #[cfg(unix)]
-    let nodes = nodes.into_iter().chain(std::iter::once(realsense_camera.into()));
+    let nodes = nodes
+        .into_iter()
+        .chain(std::iter::once(realsense_camera.into()));
 
     async_run_all(nodes, run_options).await
 }

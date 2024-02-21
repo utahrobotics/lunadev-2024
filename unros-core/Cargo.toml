@@ -21,7 +21,7 @@ console-subscriber = { version = "0.2", features = ["parking_lot"]}
 serde = { workspace = true }
 anyhow = { workspace = true }
 image = { workspace = true, optional = false }
-fast_image_resize = { workspace = true }
+# fast_image_resize = { workspace = true }
 spin_sleep = { workspace = true }
 tokio-rayon = { workspace = true }
 ffmpeg-sidecar = "0.5"

@@ -11,13 +11,13 @@ use std::{
     fmt::Display,
     io::{ErrorKind, Write},
     net::{SocketAddr, SocketAddrV4},
-    num::NonZeroU32,
-    path::{Path, PathBuf}, sync::Arc,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use crossbeam::{queue::ArrayQueue, utils::Backoff};
 use ffmpeg_sidecar::{child::FfmpegChild, command::FfmpegCommand, event::FfmpegEvent};
-use image::DynamicImage;
+use image::{DynamicImage, EncodableLayout};
 use log::{error, info, warn};
 use tokio::{
     fs::File,
@@ -151,18 +151,50 @@ impl Write for DataDump {
 }
 
 #[derive(Debug)]
-pub struct VideoWriteError;
+pub enum VideoWriteError {
+    IncorrectDimensions {
+        expected_width: u32,
+        expected_height: u32,
+        actual_width: u32,
+        actual_height: u32
+    },
+    Unknown
+}
 
 impl Display for VideoWriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "The video writing thread has failed for some reason")
+        match self {
+            Self::Unknown => write!(f, "The video writing thread has failed for some reason"),
+            Self::IncorrectDimensions { expected_width: expected_x, expected_height: expected_y, actual_width: actual_x, actual_height: actual_y } => write!(f, "Image dimensions are wrong. Expected {expected_x}x{expected_y}, got {actual_x}x{actual_y}"),
+        }
     }
 }
 impl Error for VideoWriteError {}
 
+
+#[derive(Clone)]
+enum VideoDataDumpType {
+    Rtp(SocketAddrV4),
+    File(PathBuf)
+}
+
+
+impl std::fmt::Display for VideoDataDumpType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VideoDataDumpType::Rtp(addr) => write!(f, "{addr}"),
+            VideoDataDumpType::File(path) => write!(f, "{}", path.display()),
+        }
+    }
+}
+
+
 pub struct VideoDataDump {
     video_writer: Arc<ArrayQueue<DynamicImage>>,
-    writer_drop: DropCheck
+    writer_drop: DropCheck,
+    width: u32,
+    height: u32,
+    dump_type: VideoDataDumpType,
     // path: PathBuf,
     // start: Instant,
 }
@@ -197,28 +229,44 @@ impl Display for VideoDumpInitError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalingFilter {
+    Neighbor,
+    FastBilinear,
+}
+
+impl std::fmt::Display for ScalingFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Neighbor => write!(f, "neighbor"),
+            Self::FastBilinear => write!(f, "fast_bilinear"),
+        }
+    }
+}
+
 pub enum SubtitleWriteError {
     IOError(std::io::Error),
 }
 
 impl VideoDataDump {
     pub fn new_file(
-        width: u32,
-        height: u32,
+        in_width: u32,
+        in_height: u32,
+        out_width: u32,
+        out_height: u32,
+        scale_filter: ScalingFilter,
         path: impl AsRef<Path>,
         fps: usize,
     ) -> Result<Self, VideoDumpInitError> {
         ffmpeg_sidecar::download::auto_download()
             .map_err(|e| VideoDumpInitError::FFMPEGInstallError(e.to_string()))?;
-        let pathbuf;
-        let path = if path.as_ref().is_absolute() {
-            path.as_ref()
+        let pathbuf: PathBuf = if path.as_ref().is_absolute() {
+            path.as_ref().into()
         } else {
             let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
                 return Err(VideoDumpInitError::LoggingError(anyhow::anyhow!("Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`")));
             };
-            pathbuf = PathBuf::from(sub_log_dir).join(path.as_ref());
-            pathbuf.as_path()
+            PathBuf::from(sub_log_dir).join(path.as_ref())
         };
 
         let output = FfmpegCommand::new()
@@ -228,21 +276,29 @@ impl VideoDataDump {
                 "-pix_fmt",
                 "rgb24",
                 "-s",
-                &format!("{width}x{height}"),
+                &format!("{in_width}x{in_height}"),
             ])
             .input("-")
-            .args(["-vf", &format!("fps={fps}")])
+            .args([
+                "-vf",
+                &format!("fps={fps},scale={out_width}:{out_height}"),
+                "-sws_flags",
+                &scale_filter.to_string(),
+            ])
             .args(["-c:v", "libx265"])
-            .args(["-y".as_ref(), path.as_os_str()])
+            .args(["-y".as_ref(), pathbuf.as_os_str()])
             .spawn()
             .map_err(VideoDumpInitError::IOError)?;
 
-        Self::new(width, height, output)
+        Self::new(in_width, in_height, VideoDataDumpType::File(pathbuf), output)
     }
 
     pub async fn new_rtp(
-        width: u32,
-        height: u32,
+        in_width: u32,
+        in_height: u32,
+        out_width: u32,
+        out_height: u32,
+        scale_filter: ScalingFilter,
         addr: SocketAddrV4,
         fps: usize,
     ) -> Result<(Self, oneshot::Receiver<String>), VideoDumpInitError> {
@@ -262,11 +318,21 @@ impl VideoDataDump {
                 "-pix_fmt",
                 "rgb24",
                 "-s",
-                &format!("{width}x{height}"),
+                &format!("{in_width}x{in_height}"),
             ])
             .input("-")
-            .args(["-vf", &format!("fps={fps}")])
-            .args(["-c:v", "libx265", "-pix_fmt", "yuv420p", "-crf", "40"])
+            .args([
+                "-c:v",
+                "libx265",
+                "-pix_fmt",
+                "yuv420p",
+                "-crf",
+                "40",
+                "-vf",
+                &format!("fps={fps},scale={out_width}:{out_height}"),
+                "-sws_flags",
+                &scale_filter.to_string(),
+            ])
             .args([
                 "-preset",
                 "veryfast",
@@ -303,24 +369,22 @@ impl VideoDataDump {
             }
         });
 
-        Ok((Self::new(width, height, output)?, receiver))
+        Ok((
+            Self::new(in_width, in_height, VideoDataDumpType::Rtp(addr), output)?,
+            receiver,
+        ))
     }
 
-    fn new(width: u32, height: u32, mut output: FfmpegChild) -> Result<Self, VideoDumpInitError> {
+    fn new(
+        in_width: u32,
+        in_height: u32,
+        dump_type: VideoDataDumpType,
+        mut output: FfmpegChild,
+    ) -> Result<Self, VideoDumpInitError> {
         let queue_sender = Arc::new(ArrayQueue::<DynamicImage>::new(1));
         let queue_receiver = queue_sender.clone();
         let writer_drop = DropCheck::default();
         let reader_drop = writer_drop.clone();
-
-        let mut resizer = fast_image_resize::Resizer::new(
-            fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Box),
-        );
-
-        let mut dst_image = fast_image_resize::Image::new(
-            NonZeroU32::new(width).unwrap(),
-            NonZeroU32::new(height).unwrap(),
-            fast_image_resize::PixelType::U8x3,
-        );
 
         let mut video_out = output.take_stdin().unwrap();
 
@@ -328,84 +392,79 @@ impl VideoDataDump {
             .iter()
             .map_err(|e| VideoDumpInitError::VideoError(e.to_string()))?;
 
+        let dump_type2 = dump_type.clone();
+
         spawn_persistent_thread(move || {
             events.for_each(|event| match event {
                 FfmpegEvent::Log(level, msg) => match level {
-                    ffmpeg_sidecar::event::LogLevel::Info => info!("{msg}"),
-                    ffmpeg_sidecar::event::LogLevel::Warning => warn!("{msg}"),
+                    ffmpeg_sidecar::event::LogLevel::Info => info!("[{dump_type2}] {msg}"),
+                    ffmpeg_sidecar::event::LogLevel::Warning => warn!("[{dump_type2}] {msg}"),
                     ffmpeg_sidecar::event::LogLevel::Unknown => {}
-                    _ => error!("{msg}"),
+                    _ => error!("[{dump_type2}] {msg}"),
                 },
                 _ => {}
             });
         });
 
-        spawn_persistent_thread(move || {
-            loop {
-                if reader_drop.has_dropped() {
-                    if let Err(e) = video_out.flush() {
-                        error!("Failed to flush encoder: {e}");
-                    }
-                    break;
+        let dump_type2 = dump_type.clone();
+
+        spawn_persistent_thread(move || loop {
+            if reader_drop.has_dropped() {
+                if let Err(e) = video_out.flush() {
+                    error!("Failed to flush {}: {e}", dump_type2);
                 }
-                let backoff = Backoff::new();
-                let frame = loop {
-                    let Some(frame) = queue_receiver.pop() else {
-                        backoff.snooze();
-                        continue;
-                    };
-                    break frame;
+                break;
+            }
+            let backoff = Backoff::new();
+            let frame = loop {
+                let Some(frame) = queue_receiver.pop() else {
+                    backoff.snooze();
+                    continue;
                 };
-                let src_image = fast_image_resize::Image::from_vec_u8(
-                    NonZeroU32::new(frame.width())
-                        .expect("incoming image width should be non-zero"),
-                    NonZeroU32::new(frame.height())
-                        .expect("incoming image height should be non-zero"),
-                    frame.into_rgb8().into_vec(),
-                    fast_image_resize::PixelType::U8x3,
-                )
-                .unwrap();
+                break frame;
+            };
 
-                // Get mutable view of destination image data
-                let mut dst_view = dst_image.view_mut();
-                resizer.resize(&src_image.view(), &mut dst_view).unwrap();
-
-                let frame = dst_image.buffer();
-                if let Err(e) = video_out.write_all(frame) {
-                    if e.kind() == ErrorKind::BrokenPipe {
-                        error!("Video out has closed!");
-                        break;
-                    } else {
-                        error!("Faced the following error while writing video frame: {e}");
-                    }
+            if let Err(e) = video_out.write_all(frame.into_rgb8().as_bytes()) {
+                if e.kind() == ErrorKind::BrokenPipe {
+                    error!("{} has closed!", dump_type2);
+                    break;
+                } else {
+                    error!("Faced the following error while writing video frame to {}: {e}", dump_type2);
                 }
             }
         });
 
         Ok(Self {
             video_writer: queue_sender,
-            writer_drop
+            writer_drop,
+            width: in_width,
+            height: in_height,
+            dump_type
             // start: Instant::now(),
             // path: path.to_path_buf(),
         })
     }
 
-    pub fn write_frame(&mut self, frame: DynamicImage, name: &str) -> Result<(), VideoWriteError> {
+    pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
+        if frame.width() != self.width || frame.height() != self.height {
+            return Err(VideoWriteError::IncorrectDimensions { expected_width: self.width, expected_height: self.height, actual_width: frame.width(), actual_height: frame.height() })
+        }
+
         if self.writer_drop.has_dropped() {
-            return Err(VideoWriteError);
+            return Err(VideoWriteError::Unknown);
         }
         match self.video_writer.force_push(frame) {
             Some(_) => {
-                warn!("Overwriting last frame: {name} as queue was full!");
+                warn!("Overwriting last frame in {} as queue was full!", self.dump_type);
                 Ok(())
             }
-            None => Ok(())
+            None => Ok(()),
         }
     }
 
     pub fn write_frame_quiet(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
         if self.writer_drop.has_dropped() {
-            return Err(VideoWriteError);
+            return Err(VideoWriteError::Unknown);
         }
         self.video_writer.force_push(frame);
         Ok(())
