@@ -1711,9 +1711,12 @@ dependencies = [
 
 [[package]]
 name = "ffmpeg-sidecar"
-version = "0.5.1"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5b56b7872b0cbc828e83043a82268b111e3648dab25f29079fce448648e572a"
+checksum = "2f58e54d21e9f4babfa194b424b90306648567af1c907ca7ffd2b17e6bd861e9"
+dependencies = [
+ "anyhow",
+]
 
 [[package]]
 name = "fixedbitset"
