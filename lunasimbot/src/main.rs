@@ -14,15 +14,13 @@ use unros_core::{
         io::{AsyncReadExt, AsyncWriteExt, BufStream},
         net::TcpListener,
     },
-    Application,
 };
 
 type Float = f32;
 
 fn main() -> anyhow::Result<()> {
     start_unros_runtime(
-        || async {
-            let mut grp = Application::default();
+        |mut app| async {
             let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
             let (mut elements, robot_base) =
                 rig.destructure::<FxBuildHasher>(["camera", "debug"])?;
@@ -80,7 +78,7 @@ fn main() -> anyhow::Result<()> {
             driver.accept_steering_sub(steering_sub.create_subscription());
 
             let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
-            grp.add_task(|_| async move {
+            app.add_task(|_| async move {
                 loop {
                     let (stream, _) = tcp_listener
                         .accept()
@@ -302,18 +300,12 @@ fn main() -> anyhow::Result<()> {
                 }
             }, "telemetry");
 
-            async_run_all(
-                [
-                    // video_maker.into(),
-                    costmap.into(),
-                    sim_conn.into(),
-                    driver.into(),
-                    pathfinder.into(),
-                    localizer.into(),
-                ],
-                run_options,
-            )
-            .await
+            app.add_node(costmap);
+            app.add_node(driver);
+            app.add_node(pathfinder);
+            app.add_node(localizer);
+
+            Ok(app)
         },
         default_run_options!(),
     )

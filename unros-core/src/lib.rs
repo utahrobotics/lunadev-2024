@@ -24,7 +24,7 @@ use std::{
     future::Future, marker::PhantomData, sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
-    }, thread::JoinHandle, time::Instant
+    }, thread::{panicking, JoinHandle}, time::Instant
 };
 
 pub mod logging;
@@ -53,23 +53,41 @@ pub use tokio_rayon::{self, rayon};
 
 use crate::logging::init_logger;
 
+#[derive(Clone, PartialEq, Eq)]
+enum Running {
+    No,
+    Yes(Arc<str>),
+    Ignored
+}
+
 pub struct NodeIntrinsics<N: Node + ?Sized> {
-    running: bool,
+    running: Running,
     _phantom: PhantomData<N>
+}
+
+
+impl<N: Node + ?Sized> NodeIntrinsics<N> {
+    pub fn ignore_drop(&mut self) {
+        self.running = Running::Ignored;
+    }
 }
 
 
 impl<N: Node + ?Sized> Default for NodeIntrinsics<N> {
     fn default() -> Self {
-        Self { running: false, _phantom: PhantomData }
+        Self { running: Running::No, _phantom: PhantomData }
     }
 }
 
 
 impl<N: Node + ?Sized> Drop for NodeIntrinsics<N> {
     fn drop(&mut self) {
-        if !self.running {
-            info!("{} was dropped without being ran!", N::DEFAULT_NAME);
+        match &self.running {
+            Running::No => warn!("{} was dropped without being ran!", N::DEFAULT_NAME),
+            Running::Yes(name) => if panicking() {
+                error!("{name} has panicked!");
+            }
+            Running::Ignored => {}
         }
     }
 }
@@ -127,15 +145,19 @@ pub struct Application {
 
 impl Application {
     pub fn add_node<N: Node>(&mut self, mut node: N) {
-        self.add_task(|x| {
-            node.get_intrinsics().running = true;
+        let name: Arc<str> = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
+        let name2 = name.clone();
+        self.add_task_inner(|x| {
+            node.get_intrinsics().running = Running::Yes(name2);
             node.run(x)
-        }, N::DEFAULT_NAME);
+        }, name);
     }
 
     pub fn add_node_with_name<N: Node>(&mut self, mut node: N, name: impl Into<String>) {
-        self.add_task(|x| {
-            node.get_intrinsics().running = true;
+        let name: Arc<str> = Arc::from(name.into().into_boxed_str());
+        let name2 = name.clone();
+        self.add_task_inner(|x| {
+            node.get_intrinsics().running = Running::Yes(name2);
             node.run(x)
         }, name);
     }
@@ -159,7 +181,14 @@ impl Application {
         f: impl FnOnce(RuntimeContext) -> F + Send + 'static,
         name: impl Into<String>,
     ) {
-        let name: Arc<str> = Arc::from(name.into().into_boxed_str());
+        self.add_task_inner(f, Arc::from(name.into().into_boxed_str()));
+    }
+
+    fn add_task_inner<F: Future<Output = anyhow::Result<()>> + Send + 'static>(
+        &mut self,
+        f: impl FnOnce(RuntimeContext) -> F + Send + 'static,
+        name: Arc<str>,
+    ) {
         self.pending.push(Box::new(move |join_set, node_sender| {
             join_set.spawn(async move {
                 f(RuntimeContext {
@@ -224,7 +253,7 @@ impl RuntimeContext {
         new_context.name = name.clone();
         let _ = self.node_sender.send(Box::new(|join_set| {
             join_set.spawn(async {
-                node.get_intrinsics().running = true;
+                node.get_intrinsics().running = Running::Yes(name.clone());
                 node.run(new_context)
                     .await
                     .with_context(move || format!("{name} has faced an error"))
@@ -239,7 +268,7 @@ impl RuntimeContext {
         new_context.name = name.clone();
         let _ = self.node_sender.send(Box::new(|join_set| {
             join_set.spawn(async {
-                node.get_intrinsics().running = true;
+                node.get_intrinsics().running = Running::Yes(name.clone());
                 node.run(new_context)
                     .await
                     .with_context(move || format!("{name} has faced an error"))
@@ -336,7 +365,7 @@ fn default_enable_console_subscriber() -> bool {
 macro_rules! default_run_options {
     () => {
         $crate::RunOptions {
-            runtime_name: env!("CARGO_PKG_NAME").into(),
+            runtime_name: env!("CARGO_PKG_NAME"),
             auxilliary_control: true,
             enable_console_subscriber: true,
         }
@@ -491,6 +520,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
             grp = tokio::spawn(main(grp)).await??;
             grp.run().await
         };
+        info!("Runtime started with pid: {}", std::process::id());
         tokio::select! {
             res = fut => res,
             _ = ctrl_c_recv.recv() => Ok(()),

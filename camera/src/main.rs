@@ -6,14 +6,13 @@ use unros_core::{
     default_run_options,
     log::info,
     pubsub::Subscriber,
-    start_unros_runtime, tokio, Application,
+    start_unros_runtime, tokio,
 };
 
 fn main() -> anyhow::Result<()> {
     start_unros_runtime(
-        || async {
+        |mut app| async {
             let fps = 20;
-            let mut grp = Application::default();
             discover_all_cameras()
                 .context("Failed to discover cameras")?
                 .for_each(|mut camera| {
@@ -30,10 +29,10 @@ fn main() -> anyhow::Result<()> {
                             }
                         }
                     });
-                    grp.add_node(camera);
+                    app.add_node(camera);
                 });
 
-            grp.run().await
+            Ok(app)
         },
         default_run_options!(),
     )

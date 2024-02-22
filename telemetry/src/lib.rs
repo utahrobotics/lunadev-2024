@@ -212,7 +212,7 @@ impl Node for Telemetry {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
-
+        
         let enet = Enet::new()?;
         let outgoing_limit = if self.bandwidth_limit == 0 {
             BandwidthLimit::Unlimited

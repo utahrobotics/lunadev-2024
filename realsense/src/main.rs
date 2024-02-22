@@ -1,12 +1,11 @@
 #[cfg(unix)]
 fn main() -> unros_core::anyhow::Result<()> {
     use unros_core::{
-        default_run_options, pubsub::Subscriber, start_unros_runtime, tokio, Application,
+        default_run_options, pubsub::Subscriber, start_unros_runtime, tokio,
     };
 
     start_unros_runtime(
-        || async {
-            let mut grp = Application::default();
+        |mut app| async {
             realsense::discover_all_realsense()?.for_each(|mut x| {
                 let mut img_sub = Subscriber::new(4);
                 x.accept_image_received_sub(img_sub.create_subscription());
@@ -26,9 +25,9 @@ fn main() -> unros_core::anyhow::Result<()> {
                         // );
                     }
                 });
-                grp.add_node(x);
+                app.add_node(x);
             });
-            grp.run().await
+            Ok(app)
         },
         default_run_options!(),
     )

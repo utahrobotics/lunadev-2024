@@ -15,11 +15,7 @@ use fxhash::FxHashMap;
 use nalgebra::{Isometry3, Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros_core::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging,
-    tokio::{self, sync::mpsc::channel},
-    tokio_rayon, Node, RuntimeContext,
+    anyhow, async_trait, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio::{self, sync::mpsc::channel}, tokio_rayon, Node, NodeIntrinsics, RuntimeContext
 };
 
 /// An observation of the global orientation and position
@@ -74,6 +70,7 @@ pub struct AprilTagDetector {
     image_height: u32,
     robot_element: RobotElementRef,
     pub velocity_window: usize,
+    intrinsics: NodeIntrinsics<Self>
 }
 
 impl AprilTagDetector {
@@ -101,6 +98,7 @@ impl AprilTagDetector {
             image_height,
             robot_element,
             velocity_window: 200,
+            intrinsics: Default::default()
         }
     }
 
@@ -142,6 +140,10 @@ impl AprilTagDetector {
 #[async_trait]
 impl Node for AprilTagDetector {
     const DEFAULT_NAME: &'static str = "apriltag";
+
+    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
+        &mut self.intrinsics
+    }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         let (err_sender, mut err_receiver) = channel(1);

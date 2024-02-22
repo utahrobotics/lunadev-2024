@@ -5,9 +5,7 @@ use nalgebra::{Point2, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros_core::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging, tokio_rayon, Node, RuntimeContext,
+    anyhow, async_trait, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext
 };
 
 pub mod pathfinders;
@@ -16,7 +14,7 @@ type Float = f32;
 
 const PI: Float = std::f64::consts::PI as Float;
 
-pub struct DifferentialDriver<F> {
+pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
     path_sub: Subscriber<Vec<Point2<Float>>>,
     steering_signal: Publisher<Steering>,
     robot_base: RobotBaseRef,
@@ -24,6 +22,7 @@ pub struct DifferentialDriver<F> {
     pub can_reverse: bool,
     pub full_turn_angle: Float,
     pub turn_fn: F,
+    intrinsics: NodeIntrinsics<Self>
 }
 
 impl DifferentialDriver<fn(Float) -> Float> {
@@ -37,6 +36,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
             // 30 degrees
             full_turn_angle: 0.5235987756,
             turn_fn: |frac| -2.0 * frac + 1.0,
+            intrinsics: Default::default()
         }
     }
 
@@ -55,6 +55,10 @@ where
     F: FnMut(Float) -> Float + Send + 'static,
 {
     const DEFAULT_NAME: &'static str = "waypoint-driver";
+
+    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
+        &mut self.intrinsics
+    }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);

@@ -25,13 +25,10 @@ use realsense_rust::{
 };
 use rig::RobotElementRef;
 use unros_core::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscription},
-    rayon::{
+    anyhow, async_trait, pubsub::{Publisher, Subscription}, rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
-    },
-    setup_logging, tokio_rayon, DropCheck, Node, RuntimeContext,
+    }, setup_logging, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext
 };
 
 #[derive(Clone)]
@@ -62,6 +59,7 @@ pub struct RealSenseCamera {
     robot_element: Option<RobotElementRef>,
     pub focal_length_frac: f32,
     pub min_distance: f32,
+    intrinsics: NodeIntrinsics<Self>
 }
 
 impl RealSenseCamera {
@@ -78,6 +76,7 @@ impl RealSenseCamera {
             robot_element: None,
             focal_length_frac: 0.5,
             min_distance: 0.4,
+            intrinsics: Default::default()
         })
     }
 
@@ -129,6 +128,10 @@ impl RealSenseCamera {
 #[async_trait]
 impl Node for RealSenseCamera {
     const DEFAULT_NAME: &'static str = "realsense";
+
+    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
+        &mut self.intrinsics
+    }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
@@ -379,5 +382,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         robot_element: None,
         focal_length_frac: 0.5,
         min_distance: 0.4,
+        intrinsics: Default::default()
     }))
 }

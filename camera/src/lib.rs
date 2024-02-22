@@ -13,10 +13,7 @@ use nokhwa::{
     utils::{CameraIndex, RequestedFormat, RequestedFormatType},
 };
 use unros_core::{
-    anyhow::{self, Context},
-    async_trait, log,
-    pubsub::{Publisher, Subscription},
-    setup_logging, tokio_rayon, Node, RuntimeContext,
+    anyhow::{self, Context}, async_trait, log, pubsub::{Publisher, Subscription}, setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext
 };
 
 /// A pending connection to a camera.
@@ -28,6 +25,7 @@ pub struct Camera {
     pub res_x: u32,
     pub res_y: u32,
     image_received: Publisher<Arc<DynamicImage>>,
+    intrinsics: NodeIntrinsics<Self>
 }
 
 impl Camera {
@@ -49,6 +47,7 @@ impl Camera {
             res_y: 0,
             camera_index,
             image_received: Default::default(),
+            intrinsics: Default::default()
         })
     }
 
@@ -61,6 +60,10 @@ impl Camera {
 #[async_trait]
 impl Node for Camera {
     const DEFAULT_NAME: &'static str = "camera";
+
+    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
+        &mut self.intrinsics
+    }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);

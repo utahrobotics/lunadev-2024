@@ -21,14 +21,10 @@ use rand_distr::{Distribution, Normal};
 use rig::{RobotBase, RobotElementRef};
 use smach::{start_machine, Transition};
 use unros_core::{
-    anyhow, async_trait,
-    pubsub::{Subscriber, Subscription},
-    rayon::{
+    anyhow, async_trait, pubsub::{Subscriber, Subscription}, rayon::{
         iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
         join,
-    },
-    rng::QuickRng,
-    setup_logging, tokio, Node, RuntimeContext,
+    }, rng::QuickRng, setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext
 };
 
 type Float = f32;
@@ -177,6 +173,7 @@ pub struct Localizer {
     orientation_sub: Subscriber<OrientationFrame>,
 
     robot_base: RobotBase,
+    intrinsics: NodeIntrinsics<Self>
 }
 
 impl Localizer {
@@ -194,6 +191,7 @@ impl Localizer {
             robot_base,
             max_delta: Duration::from_millis(50),
             resistance_modifier: 0.2,
+            intrinsics: Default::default()
         }
     }
 
@@ -645,6 +643,10 @@ impl Transition<(), LocalizerBlackboard> for RunTransition {
 #[async_trait]
 impl Node for Localizer {
     const DEFAULT_NAME: &'static str = "positioning";
+
+    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
+        &mut self.intrinsics
+    }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
