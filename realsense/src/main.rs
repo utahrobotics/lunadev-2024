@@ -1,8 +1,6 @@
 #[cfg(unix)]
 fn main() -> unros_core::anyhow::Result<()> {
-    use unros_core::{
-        default_run_options, pubsub::Subscriber, start_unros_runtime, tokio,
-    };
+    use unros_core::{default_run_options, pubsub::Subscriber, start_unros_runtime, tokio};
 
     start_unros_runtime(
         |mut app| async {

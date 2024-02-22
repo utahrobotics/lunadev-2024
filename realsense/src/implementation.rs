@@ -25,10 +25,13 @@ use realsense_rust::{
 };
 use rig::RobotElementRef;
 use unros_core::{
-    anyhow, async_trait, pubsub::{Publisher, Subscription}, rayon::{
+    anyhow, async_trait,
+    pubsub::{Publisher, Subscription},
+    rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
-    }, setup_logging, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    },
+    setup_logging, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 #[derive(Clone)]
@@ -59,7 +62,7 @@ pub struct RealSenseCamera {
     robot_element: Option<RobotElementRef>,
     pub focal_length_frac: f32,
     pub min_distance: f32,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl RealSenseCamera {
@@ -76,7 +79,7 @@ impl RealSenseCamera {
             robot_element: None,
             focal_length_frac: 0.5,
             min_distance: 0.4,
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         })
     }
 
@@ -382,6 +385,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         robot_element: None,
         focal_length_frac: 0.5,
         min_distance: 0.4,
-        intrinsics: Default::default()
+        intrinsics: Default::default(),
     }))
 }

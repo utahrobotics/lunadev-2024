@@ -21,10 +21,14 @@
 )]
 
 use std::{
-    future::Future, marker::PhantomData, sync::{
+    future::Future,
+    marker::PhantomData,
+    sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
-    }, thread::{panicking, JoinHandle}, time::Instant
+    },
+    thread::{panicking, JoinHandle},
+    time::Instant,
 };
 
 pub mod logging;
@@ -57,14 +61,13 @@ use crate::logging::init_logger;
 enum Running {
     No,
     Yes(Arc<str>),
-    Ignored
+    Ignored,
 }
 
 pub struct NodeIntrinsics<N: Node + ?Sized> {
     running: Running,
-    _phantom: PhantomData<N>
+    _phantom: PhantomData<N>,
 }
-
 
 impl<N: Node + ?Sized> NodeIntrinsics<N> {
     pub fn ignore_drop(&mut self) {
@@ -72,20 +75,23 @@ impl<N: Node + ?Sized> NodeIntrinsics<N> {
     }
 }
 
-
 impl<N: Node + ?Sized> Default for NodeIntrinsics<N> {
     fn default() -> Self {
-        Self { running: Running::No, _phantom: PhantomData }
+        Self {
+            running: Running::No,
+            _phantom: PhantomData,
+        }
     }
 }
-
 
 impl<N: Node + ?Sized> Drop for NodeIntrinsics<N> {
     fn drop(&mut self) {
         match &self.running {
             Running::No => warn!("{} was dropped without being ran!", N::DEFAULT_NAME),
-            Running::Yes(name) => if panicking() {
-                error!("{name} has panicked!");
+            Running::Yes(name) => {
+                if panicking() {
+                    error!("{name} has panicked!");
+                }
             }
             Running::Ignored => {}
         }
@@ -147,19 +153,25 @@ impl Application {
     pub fn add_node<N: Node>(&mut self, mut node: N) {
         let name: Arc<str> = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
         let name2 = name.clone();
-        self.add_task_inner(|x| {
-            node.get_intrinsics().running = Running::Yes(name2);
-            node.run(x)
-        }, name);
+        self.add_task_inner(
+            |x| {
+                node.get_intrinsics().running = Running::Yes(name2);
+                node.run(x)
+            },
+            name,
+        );
     }
 
     pub fn add_node_with_name<N: Node>(&mut self, mut node: N, name: impl Into<String>) {
         let name: Arc<str> = Arc::from(name.into().into_boxed_str());
         let name2 = name.clone();
-        self.add_task_inner(|x| {
-            node.get_intrinsics().running = Running::Yes(name2);
-            node.run(x)
-        }, name);
+        self.add_task_inner(
+            |x| {
+                node.get_intrinsics().running = Running::Yes(name2);
+                node.run(x)
+            },
+            name,
+        );
     }
 
     pub fn add_future(
@@ -514,9 +526,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
 
     runtime.block_on(async {
         let fut = async {
-            let mut grp = Application {
-                pending: vec![]
-            };
+            let mut grp = Application { pending: vec![] };
             grp = tokio::spawn(main(grp)).await??;
             grp.run().await
         };

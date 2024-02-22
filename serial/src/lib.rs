@@ -5,10 +5,15 @@ use std::{ops::Deref, sync::Arc, time::Duration};
 
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros_core::{
-    anyhow, async_trait, bytes::Bytes, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio::{
+    anyhow, async_trait,
+    bytes::Bytes,
+    pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging,
+    tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
-    }, Node, NodeIntrinsics, RuntimeContext
+    },
+    Node, NodeIntrinsics, RuntimeContext,
 };
 
 /// A single duplex connection to a serial port
@@ -18,7 +23,7 @@ pub struct SerialConnection {
     msg_received: Publisher<Bytes>,
     messages_to_send: Subscriber<Bytes>,
     tolerate_error: bool,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl SerialConnection {
@@ -34,7 +39,7 @@ impl SerialConnection {
             msg_received: Publisher::default(),
             messages_to_send: Subscriber::new(8),
             tolerate_error,
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         }
     }
 
@@ -135,7 +140,7 @@ pub struct VescConnection {
     serial: SerialConnection,
     current: Subscriber<u32>,
     duty: Subscriber<u32>,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl VescConnection {
@@ -147,7 +152,7 @@ impl VescConnection {
             serial,
             current: Subscriber::new(32),
             duty: Subscriber::new(32),
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         }
     }
 

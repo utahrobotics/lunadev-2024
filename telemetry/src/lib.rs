@@ -13,7 +13,10 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros_core::{
-    anyhow, async_trait, log, logging::dump::{ScalingFilter, VideoDataDump}, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, log,
+    logging::dump::{ScalingFilter, VideoDataDump},
+    pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -44,7 +47,7 @@ pub struct Telemetry {
     image_subscriptions: Option<Subscriber<Arc<DynamicImage>>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
     video_dump: Option<VideoDataDump>,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl Telemetry {
@@ -78,7 +81,7 @@ impl Telemetry {
             packet_queue: SegQueue::new(),
             max_image_chunk_width: 32,
             video_dump: Some(video_dump),
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         })
     }
 
@@ -212,7 +215,7 @@ impl Node for Telemetry {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
-        
+
         let enet = Enet::new()?;
         let outgoing_limit = if self.bandwidth_limit == 0 {
             BandwidthLimit::Unlimited

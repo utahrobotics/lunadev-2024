@@ -21,10 +21,14 @@ use rand_distr::{Distribution, Normal};
 use rig::{RobotBase, RobotElementRef};
 use smach::{start_machine, Transition};
 use unros_core::{
-    anyhow, async_trait, pubsub::{Subscriber, Subscription}, rayon::{
+    anyhow, async_trait,
+    pubsub::{Subscriber, Subscription},
+    rayon::{
         iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
         join,
-    }, rng::QuickRng, setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext
+    },
+    rng::QuickRng,
+    setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
 };
 
 type Float = f32;
@@ -173,7 +177,7 @@ pub struct Localizer {
     orientation_sub: Subscriber<OrientationFrame>,
 
     robot_base: RobotBase,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl Localizer {
@@ -191,7 +195,7 @@ impl Localizer {
             robot_base,
             max_delta: Duration::from_millis(50),
             resistance_modifier: 0.2,
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         }
     }
 

@@ -12,7 +12,11 @@ use ordered_float::NotNan;
 use pathfinding::directed::astar::astar;
 use rig::RobotBaseRef;
 use unros_core::{
-    anyhow, async_trait, pubsub::{Publisher, Subscription}, setup_logging, task::{ExclusiveTask, TaskInit}, tokio_rayon, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait,
+    pubsub::{Publisher, Subscription},
+    setup_logging,
+    task::{ExclusiveTask, TaskInit},
+    tokio_rayon, Node, NodeIntrinsics, RuntimeContext,
 };
 
 use crate::Float;
@@ -58,7 +62,7 @@ pub struct DirectPathfinder {
     pub refresh_rate: Duration,
     pub agent_radius: Float,
     pub max_height_diff: Float,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl DirectPathfinder {
@@ -81,7 +85,7 @@ impl DirectPathfinder {
             refresh_rate: Duration::from_millis(50),
             agent_radius,
             max_height_diff,
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         }
     }
 

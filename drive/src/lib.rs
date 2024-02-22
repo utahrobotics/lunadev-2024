@@ -1,13 +1,15 @@
 use global_msgs::Steering;
 use serial::SerialConnection;
 use unros_core::{
-    anyhow, async_trait, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait,
+    pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
 };
 
 pub struct Drive {
     drive_controller: SerialConnection,
     steering_sub: Subscriber<Steering>,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl Drive {
@@ -15,7 +17,7 @@ impl Drive {
         Self {
             drive_controller: serial,
             steering_sub: Subscriber::new(8),
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         }
     }
 

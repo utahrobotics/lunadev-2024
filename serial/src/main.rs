@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
             });
 
             app.add_node(serial);
-            
+
             Ok(app)
         },
         default_run_options!(),

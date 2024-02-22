@@ -5,7 +5,9 @@ use nalgebra::{Point2, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros_core::{
-    anyhow, async_trait, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait,
+    pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext,
 };
 
 pub mod pathfinders;
@@ -22,7 +24,7 @@ pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
     pub can_reverse: bool,
     pub full_turn_angle: Float,
     pub turn_fn: F,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl DifferentialDriver<fn(Float) -> Float> {
@@ -36,7 +38,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
             // 30 degrees
             full_turn_angle: 0.5235987756,
             turn_fn: |frac| -2.0 * frac + 1.0,
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         }
     }
 

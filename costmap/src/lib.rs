@@ -15,13 +15,16 @@ use nalgebra::{Dyn, Matrix, Point2, Point3, VecStorage};
 use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros_core::{
-    anyhow, async_trait, pubsub::{Subscriber, Subscription}, rayon::{
+    anyhow, async_trait,
+    pubsub::{Subscriber, Subscription},
+    rayon::{
         self,
         iter::{
             IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
             ParallelIterator,
         },
-    }, setup_logging, Node, NodeIntrinsics, RuntimeContext
+    },
+    setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
 
 struct PointMeasurement {
@@ -41,7 +44,7 @@ pub struct Costmap {
     points_sub: Subscriber<Arc<[PointMeasurement]>>,
     heights: Arc<[AtomicIsize]>,
     counts: Arc<[AtomicUsize]>,
-    intrinsics: NodeIntrinsics<Self>
+    intrinsics: NodeIntrinsics<Self>,
 }
 
 impl Costmap {
@@ -69,7 +72,7 @@ impl Costmap {
             counts: (0..(area_length * area_width))
                 .map(|_| Default::default())
                 .collect(),
-            intrinsics: Default::default()
+            intrinsics: Default::default(),
         }
     }
 
