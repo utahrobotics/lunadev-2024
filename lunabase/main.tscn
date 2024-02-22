@@ -116,7 +116,7 @@ func _ready() -> void:
 			ffmpeg_thr.start(
 				func():
 					var output := []
-					var err := OS.execute(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-strict\", \"2\", \"-f\", \"rawvideo\", \"-pix_fmt\", \"rgb24\", \"tcp://127.0.0.1:%s\" % (Lunabot.RECV_FROM + 3)], output, true, true)
+					var err := OS.execute(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-strict\", \"2\", \"-f\", \"rawvideo\", \"-pix_fmt\", \"rgb24\", \"tcp://127.0.0.1:%s\" % (Lunabot.RECV_FROM + 3)], output, false, true)
 					##OS.create_process(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-strict\", \"2\", \"-y\", \"output.mkv\"], true)
 					for line in output:
 						print(line)
@@ -135,6 +135,8 @@ func _ready() -> void:
 			var tcp_server := TCPServer.new()
 			while true:
 				var err := tcp_server.listen(Lunabot.RECV_FROM + 3)
+				if err == ERR_FILE_EOF:
+					continue
 				if err != 0:
 					push_error(\"Faced the following error while binding cam tcp: %s\" % err)
 					OS.delay_msec(2000)
@@ -148,11 +150,9 @@ func _ready() -> void:
 				
 				while true:
 					var result := cam_tcp.get_data(IMAGE_SIZE)
-					if result[0] == ERR_FILE_EOF:
-						break
 					if result[0] != 0:
 						push_error(\"Faced the following error while reading cam tcp: %s\" % result[0])
-						continue
+						break
 					call_deferred(\"emit_signal\", \"image_received\", Image.create_from_data(IMAGE_WIDTH, IMAGE_HEIGHT, false, Image.FORMAT_RGB8, result[1])),
 			
 		Thread.PRIORITY_HIGH
