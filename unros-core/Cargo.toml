@@ -10,22 +10,19 @@ fern = { version = "0.6", features = ["colored"] }
 chrono = { workspace = true }
 log = "0.4"
 tokio = { workspace = true }
-fxhash = { workspace = true }
 crossbeam = { workspace = true }
 rand = { workspace = true }
 async-trait = "0.1"
 static_assertions = { workspace = true }
 bytes = "1"
-futures = "0.3"
 console-subscriber = { version = "0.2", features = ["parking_lot"]}
 serde = { workspace = true }
 anyhow = { workspace = true }
 image = { workspace = true, optional = false }
-# fast_image_resize = { workspace = true }
-spin_sleep = { workspace = true }
+# spin_sleep = { workspace = true }
 tokio-rayon = { workspace = true }
 ffmpeg-sidecar = "0.5"
-srtlib = "0.1"
+# srtlib = "0.1"
 sysinfo = "0.30"
 config = "0.14"
 color-eyre = { version = "0.6", default-features = false }

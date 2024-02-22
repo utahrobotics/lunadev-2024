@@ -1567,15 +1567,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11157ac094ffbdde99aa67b23417ebdd801842852b500e395a45a9c0aac03e4a"
 
 [[package]]
-name = "encoding_rs"
-version = "0.8.33"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7268b386296a025e474d5140678f75d6de9493ae55a5d709eeb9dd08149945e1"
-dependencies = [
- "cfg-if 1.0.0",
-]
-
-[[package]]
 name = "enet"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2664,20 +2655,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
-name = "las"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6021d378135165202cd287627dd6fbb25fb80cc740adf72ce5576fab1946a4c3"
-dependencies = [
- "byteorder",
- "chrono",
- "log",
- "num-traits",
- "thiserror",
- "uuid",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2750,16 +2727,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libwebp-sys"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "829b6b604f31ed6d2bccbac841fe0788de93dbd87e4eb1ba2c4adfe8c012a838"
-dependencies = [
- "cc",
- "glob",
-]
-
-[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2809,7 +2776,6 @@ dependencies = [
  "camera",
  "costmap",
  "fxhash",
- "las",
  "localization",
  "nalgebra",
  "navigator",
@@ -4526,15 +4492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "srtlib"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f1e833468139c102e57293a0ac969aaea5750565e05e293a18f6acbb540b07c"
-dependencies = [
- "encoding_rs",
-]
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4718,7 +4675,6 @@ dependencies = [
  "ordered-float",
  "spin_sleep",
  "unros-core",
- "webp",
 ]
 
 [[package]]
@@ -5241,14 +5197,10 @@ dependencies = [
  "ctrlc",
  "fern",
  "ffmpeg-sidecar",
- "futures",
- "fxhash",
  "image",
  "log",
  "rand",
  "serde",
- "spin_sleep",
- "srtlib",
  "static_assertions",
  "sysinfo 0.30.5",
  "tokio",
@@ -5460,16 +5412,6 @@ checksum = "9b85cbef8c220a6abc02aefd892dfc0fc23afb1c6a426316ec33253a3877249b"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webp"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bb5d8e7814e92297b0e1c773ce43d290bef6c17452dafd9fc49e5edb5beba71"
-dependencies = [
- "image",
- "libwebp-sys",
 ]
 
 [[package]]

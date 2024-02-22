@@ -12,7 +12,6 @@ global-msgs = { path = "../global-msgs" }
 num_enum = "0.7.1"
 image = { workspace = true }
 crossbeam = "0.8"
-webp = "0.2"
 ordered-float = { workspace = true }
 # rand = { workspace = true }
 spin_sleep = { workspace = true }
