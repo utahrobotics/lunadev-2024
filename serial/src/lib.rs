@@ -5,15 +5,10 @@ use std::{ops::Deref, sync::Arc, time::Duration};
 
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros_core::{
-    anyhow, async_trait,
-    bytes::Bytes,
-    pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging,
-    tokio::{
+    anyhow, async_trait, bytes::Bytes, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
-    },
-    Node, RuntimeContext,
+    }, Node, NodeIntrinsics, RuntimeContext
 };
 
 /// A single duplex connection to a serial port
@@ -23,6 +18,7 @@ pub struct SerialConnection {
     msg_received: Publisher<Bytes>,
     messages_to_send: Subscriber<Bytes>,
     tolerate_error: bool,
+    intrinsics: NodeIntrinsics<Self>
 }
 
 impl SerialConnection {
@@ -38,6 +34,7 @@ impl SerialConnection {
             msg_received: Publisher::default(),
             messages_to_send: Subscriber::new(8),
             tolerate_error,
+            intrinsics: Default::default()
         }
     }
 
@@ -90,6 +87,10 @@ impl SerialConnection {
 impl Node for SerialConnection {
     const DEFAULT_NAME: &'static str = "serial_connection";
 
+    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
+        &mut self.intrinsics
+    }
+
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
@@ -134,6 +135,7 @@ pub struct VescConnection {
     serial: SerialConnection,
     current: Subscriber<u32>,
     duty: Subscriber<u32>,
+    intrinsics: NodeIntrinsics<Self>
 }
 
 impl VescConnection {
@@ -145,6 +147,7 @@ impl VescConnection {
             serial,
             current: Subscriber::new(32),
             duty: Subscriber::new(32),
+            intrinsics: Default::default()
         }
     }
 
@@ -162,6 +165,10 @@ impl VescConnection {
 #[async_trait]
 impl Node for VescConnection {
     const DEFAULT_NAME: &'static str = "vesc_connection";
+
+    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
+        &mut self.intrinsics
+    }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);

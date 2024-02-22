@@ -1,41 +1,37 @@
 #[cfg(unix)]
-use unros_core::tokio;
-
-#[cfg(unix)]
-#[tokio::main]
-async fn main() -> unros_core::anyhow::Result<()> {
+fn main() -> unros_core::anyhow::Result<()> {
     use unros_core::{
-        async_run_all, default_run_options, pubsub::Subscriber, tokio, FinalizedNode,
+        default_run_options, pubsub::Subscriber, start_unros_runtime, tokio, Application,
     };
-    let cameras = realsense::discover_all_realsense()?;
 
-    // let frame_count = AtomicUsize::new(0);
-    // let frame_count: &_ = Box::leak(Box::new(frame_count));
-    async_run_all(
-        cameras.map(|mut x| {
-            let mut img_sub = Subscriber::new(4);
-            x.accept_image_received_sub(img_sub.create_subscription());
-            // let mut imu_sub = x.imu_frame_received().watch();
-            tokio::spawn(async move {
-                let mut i = 0;
-                loop {
-                    let img = img_sub.recv().await;
-                    img.save(format!("{i}.png")).unwrap();
-                    i += 1;
-                    // println!("{:?}", img_sub.recv().await.dimensions());
-                    // let imu = imu_sub.wait_for_change().await;
-                    // println!(
-                    //     "ang_vel: {} accel: {}",
-                    //     imu.angular_velocity / PI * 180.0,
-                    //     imu.acceleration
-                    // );
-                }
+    start_unros_runtime(
+        || async {
+            let mut grp = Application::default();
+            realsense::discover_all_realsense()?.for_each(|mut x| {
+                let mut img_sub = Subscriber::new(4);
+                x.accept_image_received_sub(img_sub.create_subscription());
+                // let mut imu_sub = x.imu_frame_received().watch();
+                tokio::spawn(async move {
+                    let mut i = 0;
+                    loop {
+                        let img = img_sub.recv().await;
+                        img.save(format!("{i}.png")).unwrap();
+                        i += 1;
+                        // println!("{:?}", img_sub.recv().await.dimensions());
+                        // let imu = imu_sub.wait_for_change().await;
+                        // println!(
+                        //     "ang_vel: {} accel: {}",
+                        //     imu.angular_velocity / PI * 180.0,
+                        //     imu.acceleration
+                        // );
+                    }
+                });
+                grp.add_node(x);
             });
-            FinalizedNode::from(x)
-        }),
+            grp.run().await
+        },
         default_run_options!(),
     )
-    .await
 }
 
 #[cfg(not(unix))]

@@ -6,12 +6,12 @@ use unros_core::{
     bytes::Bytes,
     default_run_options,
     pubsub::{Publisher, Subscriber},
-    spawn_persistent_thread, start_unros_runtime, tokio, NodeGroup,
+    spawn_persistent_thread, start_unros_runtime, tokio,
 };
 
 fn main() -> anyhow::Result<()> {
     start_unros_runtime(
-        || async {
+        |mut app| async {
             // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
             let mut serial = SerialConnection::new("/dev/ttyACM1".into(), 115200, true).await;
             let mut sub = Subscriber::<Bytes>::new(8);
@@ -44,9 +44,9 @@ fn main() -> anyhow::Result<()> {
                 }
             });
 
-            let mut grp = NodeGroup::default();
-            grp.add_node(serial);
-            grp.run().await
+            app.add_node(serial);
+            
+            Ok(app)
         },
         default_run_options!(),
     )

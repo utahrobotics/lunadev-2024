@@ -21,13 +21,10 @@
 )]
 
 use std::{
-    future::Future,
-    sync::{
+    future::Future, marker::PhantomData, sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
-    },
-    thread::JoinHandle,
-    time::Instant,
+    }, thread::JoinHandle, time::Instant
 };
 
 pub mod logging;
@@ -36,6 +33,7 @@ pub mod rng;
 pub mod task;
 
 pub use anyhow;
+use anyhow::Context;
 pub use async_trait::async_trait;
 pub use bytes;
 use config::Config;
@@ -54,6 +52,27 @@ use tokio::{
 pub use tokio_rayon::{self, rayon};
 
 use crate::logging::init_logger;
+
+pub struct NodeIntrinsics<N: Node + ?Sized> {
+    running: bool,
+    _phantom: PhantomData<N>
+}
+
+
+impl<N: Node + ?Sized> Default for NodeIntrinsics<N> {
+    fn default() -> Self {
+        Self { running: false, _phantom: PhantomData }
+    }
+}
+
+
+impl<N: Node + ?Sized> Drop for NodeIntrinsics<N> {
+    fn drop(&mut self) {
+        if !self.running {
+            info!("{} was dropped without being ran!", N::DEFAULT_NAME);
+        }
+    }
+}
 
 /// A Node just represents a long running task.
 ///
@@ -91,10 +110,11 @@ pub trait Node: Send + 'static {
     /// Do keep in mind that `tokio_rayon` threads do not terminate if their handles are dropped,
     /// which relates back to the issue previously mentioned.
     async fn run(self, context: RuntimeContext) -> anyhow::Result<()>;
+
+    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self>;
 }
 
-#[derive(Default)]
-pub struct NodeGroup {
+pub struct Application {
     pending: Vec<
         Box<
             dyn FnOnce(
@@ -105,37 +125,54 @@ pub struct NodeGroup {
     >,
 }
 
-impl NodeGroup {
-    pub fn add_node<N: Node>(&mut self, node: N) {
-        let name = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
-        self.pending.push(Box::new(|join_set, node_sender| {
-            join_set.spawn(node.run(RuntimeContext { name, node_sender }));
-        }));
+impl Application {
+    pub fn add_node<N: Node>(&mut self, mut node: N) {
+        self.add_task(|x| {
+            node.get_intrinsics().running = true;
+            node.run(x)
+        }, N::DEFAULT_NAME);
     }
 
-    pub fn add_node_with_name<N: Node>(&mut self, node: N, name: impl Into<String>) {
-        let name = Arc::from(name.into().into_boxed_str());
-        self.pending.push(Box::new(|join_set, node_sender| {
-            join_set.spawn(node.run(RuntimeContext { name, node_sender }));
-        }));
+    pub fn add_node_with_name<N: Node>(&mut self, mut node: N, name: impl Into<String>) {
+        self.add_task(|x| {
+            node.get_intrinsics().running = true;
+            node.run(x)
+        }, name);
     }
 
-    pub fn add_future(&mut self, fut: impl Future<Output = anyhow::Result<()>> + Send + 'static) {
-        self.pending.push(Box::new(|join_set, _| {
-            join_set.spawn(fut);
+    pub fn add_future(
+        &mut self,
+        fut: impl Future<Output = anyhow::Result<()>> + Send + 'static,
+        name: impl Into<String>,
+    ) {
+        let name: Arc<str> = Arc::from(name.into().into_boxed_str());
+        self.pending.push(Box::new(move |join_set, _| {
+            join_set.spawn(async move {
+                fut.await
+                    .with_context(|| format!("{name} has faced an error"))
+            });
         }));
     }
 
     pub fn add_task<F: Future<Output = anyhow::Result<()>> + Send + 'static>(
         &mut self,
-        f: impl FnOnce() -> F + Send + 'static,
+        f: impl FnOnce(RuntimeContext) -> F + Send + 'static,
+        name: impl Into<String>,
     ) {
-        self.pending.push(Box::new(|join_set, _| {
-            join_set.spawn(f());
+        let name: Arc<str> = Arc::from(name.into().into_boxed_str());
+        self.pending.push(Box::new(move |join_set, node_sender| {
+            join_set.spawn(async move {
+                f(RuntimeContext {
+                    name: name.clone(),
+                    node_sender,
+                })
+                .await
+                .with_context(|| format!("{name} has faced an error"))
+            });
         }));
     }
 
-    pub async fn run(self) -> anyhow::Result<()> {
+    async fn run(self) -> anyhow::Result<()> {
         let mut join_set = JoinSet::new();
         let (node_sender, mut node_recv) = mpsc::unbounded_channel();
 
@@ -147,9 +184,12 @@ impl NodeGroup {
             tokio::select! {
                 pending = node_recv.recv() => (pending.unwrap())(&mut join_set),
                 result = join_set.join_next() => {
-                    let Some(result) = result else { break Ok(()); };
+                    let Some(result) = result else {
+                        info!("All nodes have terminated");
+                        break Ok(());
+                    };
                     match result {
-                        Ok(x) => break x,
+                        Ok(result) => break result,
                         Err(e) => {
                             error!("Faced the following error while trying to join with node task: {e}");
                         }
@@ -178,20 +218,32 @@ impl RuntimeContext {
     }
 
     /// Spawn a new node into the runtime that the runtime will keep track of.
-    pub fn spawn_node<N: Node>(&self, node: N) {
+    pub fn spawn_node<N: Node>(&self, mut node: N) {
         let mut new_context = self.clone();
-        new_context.name = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
+        let name: Arc<str> = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
+        new_context.name = name.clone();
         let _ = self.node_sender.send(Box::new(|join_set| {
-            join_set.spawn(node.run(new_context));
+            join_set.spawn(async {
+                node.get_intrinsics().running = true;
+                node.run(new_context)
+                    .await
+                    .with_context(move || format!("{name} has faced an error"))
+            });
         }));
     }
 
     /// Spawn a new node into the runtime that the runtime will keep track of.
-    pub fn spawn_node_with_name<N: Node>(&self, node: N, name: impl Into<String>) {
+    pub fn spawn_node_with_name<N: Node>(&self, mut node: N, name: impl Into<String>) {
         let mut new_context = self.clone();
-        new_context.name = Arc::from(name.into().into_boxed_str());
+        let name: Arc<str> = Arc::from(name.into().into_boxed_str());
+        new_context.name = name.clone();
         let _ = self.node_sender.send(Box::new(|join_set| {
-            join_set.spawn(node.run(new_context));
+            join_set.spawn(async {
+                node.get_intrinsics().running = true;
+                node.run(new_context)
+                    .await
+                    .with_context(move || format!("{name} has faced an error"))
+            });
         }));
     }
 }
@@ -324,8 +376,8 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
         .map_err(Into::into)
 }
 
-pub fn start_unros_runtime<F: Future<Output = anyhow::Result<()>> + Send + 'static>(
-    main: impl FnOnce() -> F,
+pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Send + 'static>(
+    main: impl FnOnce(Application) -> F,
     run_options: RunOptions,
 ) -> anyhow::Result<()> {
     init_logger(&run_options)?;
@@ -432,8 +484,15 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<()>> + Send + 'stat
     }
 
     runtime.block_on(async {
+        let fut = async {
+            let mut grp = Application {
+                pending: vec![]
+            };
+            grp = tokio::spawn(main(grp)).await??;
+            grp.run().await
+        };
         tokio::select! {
-            res = tokio::spawn(main()) => res.map_err(Into::into).flatten(),
+            res = fut => res,
             _ = ctrl_c_recv.recv() => Ok(()),
 
         }
