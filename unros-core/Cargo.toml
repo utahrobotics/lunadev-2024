@@ -29,3 +29,4 @@ srtlib = "0.1"
 sysinfo = "0.30"
 config = "0.13"
 color-eyre = { version = "0.6", default-features = false }
+ctrlc = "3.4.2"

@@ -69,7 +69,7 @@ pub(crate) static START_TIME: OnceLock<Instant> = OnceLock::new();
 /// be ignored if the logger was not set up yet. As such, you may call this
 /// method manually, when needed. Calling this multiple times is safe and
 /// will not return errors.
-pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
+pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
     const LOGS_DIR: &str = "logs";
 
     SUB_LOGGING_DIR.get_or_try_init::<_, anyhow::Error>(|| {
@@ -86,7 +86,7 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                 .create(LOGS_DIR)
                 .context("Failed to create logging directory. Do we have permissions?")?;
         }
-        let mut runtime_name = run_options.runtime_name.clone();
+        let mut runtime_name = run_options.runtime_name.to_string();
         if !runtime_name.is_empty() {
             runtime_name = "=".to_string() + &runtime_name;
         }
@@ -162,7 +162,7 @@ pub fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             )
             // Apply globally
             .apply()
-            .expect("Logger should have initialized correctly");
+            .context("Logger should have initialized correctly")?;
 
         if run_options.enable_console_subscriber {
             console_subscriber::init();

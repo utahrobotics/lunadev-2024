@@ -389,6 +389,7 @@ a=rtpmap:96 H265/90000",
         });
 
         let dump_type2 = dump_type.clone();
+        let backoff = Backoff::new();
 
         spawn_persistent_thread(move || loop {
             if reader_drop.has_dropped() {
@@ -397,14 +398,11 @@ a=rtpmap:96 H265/90000",
                 }
                 break;
             }
-            let backoff = Backoff::new();
-            let frame = loop {
-                let Some(frame) = queue_receiver.pop() else {
-                    backoff.snooze();
-                    continue;
-                };
-                break frame;
+            let Some(frame) = queue_receiver.pop() else {
+                backoff.snooze();
+                continue;
             };
+            backoff.reset();
 
             if let Err(e) = video_out.write_all(frame.into_rgb8().as_bytes()) {
                 if e.kind() == ErrorKind::BrokenPipe {

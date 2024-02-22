@@ -13,12 +13,10 @@
 //! 4. Signals, with 3 subscription variants (analagous to ROS publisher and subscribers)
 //! 5. The Task trait (analagous to ROS actions)
 
-#![feature(associated_type_defaults, once_cell_try, iter_collect_into)]
+#![feature(associated_type_defaults, once_cell_try, iter_collect_into, result_flattening)]
 
 use std::{
     future::Future,
-    ops::{Add, AddAssign},
-    pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
@@ -37,20 +35,17 @@ pub use async_trait::async_trait;
 pub use bytes;
 use config::Config;
 use crossbeam::queue::SegQueue;
-use fxhash::FxHashMap;
 pub use log;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 pub use tokio;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    sync::{broadcast, mpsc},
-    task::JoinSet,
+    io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, runtime::Runtime, sync::mpsc, task::JoinSet
 };
 pub use tokio_rayon::{self, rayon};
 
 use crate::logging::init_logger;
+
 
 /// A Node just represents a long running task.
 ///
@@ -90,37 +85,59 @@ pub trait Node: Send + 'static {
     async fn run(self, context: RuntimeContext) -> anyhow::Result<()>;
 }
 
-/// A Node that is just an async function that runs once.
-pub struct FnNode<Fut, F>
-where
-    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-    F: FnOnce(RuntimeContext) -> Fut + Send + 'static,
-{
-    f: F,
+
+#[derive(Default)]
+pub struct NodeGroup {
+    pending: Vec<Box<dyn FnOnce(&mut JoinSet<anyhow::Result<()>>, mpsc::UnboundedSender<Box<dyn FnOnce(&mut JoinSet<anyhow::Result<()>>) + Send>>) + Send>>
 }
 
-impl<Fut, F> FnNode<Fut, F>
-where
-    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-    F: FnOnce(RuntimeContext) -> Fut + Send + 'static,
-{
-    pub fn new(f: F) -> Self {
-        Self { f }
+
+impl NodeGroup {
+    pub fn add_node<N: Node>(&mut self, node: N) {
+        let name = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
+        self.pending.push(Box::new(|join_set, node_sender| {
+            join_set.spawn(node.run(RuntimeContext {
+                name,
+                node_sender
+            }));
+        }));
+    }
+
+    pub fn add_node_with_name<N: Node>(&mut self, node: N, name: impl Into<String>) {
+        let name = Arc::from(name.into().into_boxed_str());
+        self.pending.push(Box::new(|join_set, node_sender| {
+            join_set.spawn(node.run(RuntimeContext {
+                name,
+                node_sender
+            }));
+        }));
+    }
+
+    pub async fn run(self) -> anyhow::Result<()> {
+        let mut join_set = JoinSet::new();
+        let (node_sender, mut node_recv) = mpsc::unbounded_channel();
+
+        for pending in self.pending {
+            pending(&mut join_set, node_sender.clone());
+        }
+
+        loop {
+            tokio::select! {
+                pending = node_recv.recv() => (pending.unwrap())(&mut join_set),
+                result = join_set.join_next() => {
+                    let Some(result) = result else { break Ok(()); };
+                    match result {
+                        Ok(x) => break x,
+                        Err(e) => {
+                            error!("Faced the following error while trying to join with node task: {e}");
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
-#[async_trait]
-impl<Fut, F> Node for FnNode<Fut, F>
-where
-    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-    F: FnOnce(RuntimeContext) -> Fut + Send + 'static,
-{
-    const DEFAULT_NAME: &'static str = "fn_node";
-
-    async fn run(self, context: RuntimeContext) -> anyhow::Result<()> {
-        (self.f)(context).await
-    }
-}
 
 /// A reference to the runtime that is currently running.
 ///
@@ -130,7 +147,7 @@ where
 #[derive(Clone)]
 pub struct RuntimeContext {
     name: Arc<str>,
-    node_sender: mpsc::UnboundedSender<FinalizedNode>,
+    node_sender: mpsc::UnboundedSender<Box<dyn FnOnce(&mut JoinSet<anyhow::Result<()>>) + Send>>,
 }
 
 impl RuntimeContext {
@@ -140,154 +157,24 @@ impl RuntimeContext {
     }
 
     /// Spawn a new node into the runtime that the runtime will keep track of.
-    pub fn spawn_node(&self, node: impl Into<FinalizedNode>) {
-        let _ = self.node_sender.send(node.into());
+    pub fn spawn_node<N: Node>(&self, node: N) {
+        let mut new_context = self.clone();
+        new_context.name = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
+        let _ = self.node_sender.send(Box::new(|join_set| {
+            join_set.spawn(node.run(new_context));
+        }));
+    }
+
+    /// Spawn a new node into the runtime that the runtime will keep track of.
+    pub fn spawn_node_with_name<N: Node>(&self, node: N, name: impl Into<String>) {
+        let mut new_context = self.clone();
+        new_context.name = Arc::from(name.into().into_boxed_str());
+        let _ = self.node_sender.send(Box::new(|join_set| {
+            join_set.spawn(node.run(new_context));
+        }));
     }
 }
 
-struct RunError {
-    critical: bool,
-}
-
-/// A node that has been boxed up and is ready to run.
-///
-/// Finalized nodes may be added together such that they run
-/// as a group. When one node in a group terminates, all other
-/// nodes terminate. If one of these other nodes are critical,
-/// the whole runtime will terminate even if the original node
-/// that terminated was not critical.
-pub struct FinalizedNode {
-    critical: bool,
-    runs: Vec<(
-        Arc<str>,
-        Box<
-            dyn FnOnce(
-                    mpsc::UnboundedSender<FinalizedNode>,
-                ) -> Pin<
-                    Box<dyn Future<Output = Result<(), (anyhow::Error, Arc<str>)>> + Send>,
-                > + Send,
-        >,
-    )>,
-}
-
-impl<N: Node> From<N> for FinalizedNode {
-    fn from(value: N) -> Self {
-        Self::new(value, None)
-    }
-}
-
-impl FinalizedNode {
-    /// Box up the given node.
-    ///
-    /// The given name will be used as the name of the node.
-    pub fn new<N: Node>(node: N, name: Option<String>) -> Self {
-        let name = name.unwrap_or_else(|| N::DEFAULT_NAME.into());
-        let name: Arc<str> = Arc::from(name.into_boxed_str());
-
-        Self {
-            critical: false,
-            runs: vec![(
-                name.clone(),
-                Box::new(move |node_sender| {
-                    Box::pin(async move {
-                        info!("Running {name}");
-                        let context = RuntimeContext {
-                            name: name.clone(),
-                            node_sender,
-                        };
-                        node.run(context).await.map_err(|e| (e, name))
-                    })
-                }),
-            )],
-        }
-    }
-
-    /// Sets the `critical` flag of the node.
-    ///
-    /// Critical nodes terminate the whole runtime when they terminate.
-    pub fn set_critical(&mut self, value: bool) {
-        self.critical = value;
-    }
-
-    /// Gets the `critical` flag of the node.
-    pub fn get_critical(&mut self) -> bool {
-        self.critical
-    }
-
-    async fn run(
-        self,
-        mut abort: broadcast::Receiver<()>,
-        node_sender: mpsc::UnboundedSender<FinalizedNode>,
-    ) -> Result<(), RunError> {
-        let mut tasks = JoinSet::new();
-        let mut task_names = FxHashMap::default();
-
-        for (name, run) in self.runs {
-            let id = tasks.spawn(run(node_sender.clone())).id();
-            task_names.insert(id, name);
-        }
-
-        let result = tokio::select! {
-            _ = abort.recv() => {
-                tasks.abort_all();
-                while let Some(result) = tasks.join_next().await {
-                    match result {
-                        Ok(Ok(())) => continue,
-                        Ok(Err((err, name))) => error!("{} has faced the following error: {err}", name),
-                        Err(e) => if !e.is_cancelled() {
-                            error!("{} has panicked", task_names.get(&e.id()).unwrap());
-                        }
-                    }
-                }
-                return Ok(());
-            }
-            option = tasks.join_next() => {
-                match option.unwrap() {
-                    Ok(x) => x,
-                    Err(e) => {
-                        debug_assert!(!e.is_cancelled());
-                        error!("{} has panicked", task_names.get(&e.id()).unwrap());
-                        return Err(RunError {
-                            critical: self.critical,
-                        });
-                    }
-                }
-            }
-        };
-
-        tasks.abort_all();
-        while let Some(result) = tasks.join_next().await {
-            match result {
-                Ok(Ok(())) => continue,
-                Ok(Err((err, name))) => error!("{} has faced the following error: {err}", name),
-                Err(e) => error!("{} has panicked", task_names.get(&e.id()).unwrap()),
-            }
-        }
-
-        result.map_err(|(err, name)| {
-            error!("{} has faced the following error: {err}", name);
-            RunError {
-                critical: self.critical,
-            }
-        })
-    }
-}
-
-impl AddAssign for FinalizedNode {
-    fn add_assign(&mut self, mut rhs: Self) {
-        self.critical = self.critical || rhs.critical;
-        self.runs.append(&mut rhs.runs);
-    }
-}
-
-impl Add for FinalizedNode {
-    type Output = Self;
-
-    fn add(mut self, rhs: Self) -> Self::Output {
-        self += rhs;
-        self
-    }
-}
 
 #[derive(Clone)]
 pub struct DropCheck {
@@ -331,13 +218,13 @@ impl DropCheck {
 }
 
 /// Configurations for the runtime
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Copy)]
 pub struct RunOptions {
     /// The name of this runtime.
     ///
     /// This changes what the sub-logging directory name is.
     #[serde(default)]
-    pub runtime_name: String,
+    pub runtime_name: &'static str,
 
     /// Whether or not auxilliary control should be enabled.
     ///
@@ -401,81 +288,59 @@ where
     THREADS.push(std::thread::spawn(f));
 }
 
-/// The entry point of the runtime itself.
-///
-/// This function automatically starts up a `tokio` runtime.
-/// As such, this method should not be called within a `tokio`
-/// runtime, or any `async` code in general.
-///
-/// Refer to `async_run_all` for more info.
-#[tokio::main]
-pub async fn run_all(
-    runnables: impl IntoIterator<Item = FinalizedNode>,
-    run_options: RunOptions,
-) -> anyhow::Result<()> {
-    async_run_all(runnables, run_options).await
+static CONFIG: OnceLock<Config> = OnceLock::new();
+
+pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
+    CONFIG
+        .get_or_try_init(|| {
+            Config::builder()
+                // Add in `./Settings.toml`
+                .add_source(config::File::with_name(".env"))
+                .add_source(config::Environment::with_prefix(""))
+                .build()
+        })?
+        .clone()
+        .try_deserialize()
+        .map_err(Into::into)
 }
 
-#[derive(Default)]
-struct LastDrop {
-    force_exit: bool,
-}
 
-impl Drop for LastDrop {
-    fn drop(&mut self) {
-        if self.force_exit {
-            std::process::exit(1);
-        }
-    }
-}
-
-/// The entry point of the runtime itself.
-///
-/// This function runs all of the provided `FinalizedNode`s
-/// in parallel, according to the given `RunOptions`. A
-/// logging implementation will be initialized if not present.
-///
-/// This function only returns `Ok(())` if `Ctrl-C` was received,
-/// or an auxilliary stop signal was received. In either case,
-/// this method always attempts to exit gracefully. It will signal
-/// to each `Node` to stop running, but the actual outcome of this
-/// varies based on the actual implementations of these `Node`s. Since
-/// this method waits on all `Node`s to exit, if one `Node` refuses to
-/// terminate, this method will never return gracefully.
-///
-/// Receiving a second stop signal from `Ctrl-C` or auxilliary will force
-/// exit the program. All threads other than the main thread will not exit
-/// gracefully (all objects in their stacks will not be dropped), but objects
-/// in the main thread will still be able to be dropped safely. This was chosen
-/// to be the best case scenario.
-pub async fn async_run_all(
-    runnables: impl IntoIterator<Item = FinalizedNode>,
-    run_options: RunOptions,
-) -> anyhow::Result<()> {
+pub fn start_unros_runtime<F: Future<Output = anyhow::Result<()>> + Send + 'static>(main: impl FnOnce() -> F, run_options: RunOptions) -> anyhow::Result<()> {
     init_logger(&run_options)?;
+    std::thread::spawn(|| {
+        let mut sys = sysinfo::System::new();
+        let mut last_cpu_check = Instant::now();
+        loop {
+            std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+            sys.refresh_cpu(); // Refreshing CPU information.
+            if last_cpu_check.elapsed().as_secs() < 3 {
+                continue;
+            }
+            let cpus = sys.cpus();
+            let usage = cpus.into_iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
+            if usage >= 80.0 {
+                warn!("CPU Usage at {usage}%");
+                last_cpu_check = Instant::now();
+            }
+        }
+    });
 
-    let mut last_drop = LastDrop::default();
+    let (ctrl_c_sender, mut ctrl_c_recv) = tokio::sync::mpsc::channel(1);
+    let ctrl_c_sender2 = ctrl_c_sender.clone();
 
-    let abort_sender = broadcast::Sender::new(1);
-    let (node_sender, mut node_receiver) = mpsc::unbounded_channel();
-    let mut tasks = JoinSet::new();
-    for runnable in runnables {
-        tasks.spawn(runnable.run(abort_sender.subscribe(), node_sender.clone()));
-    }
-    if tasks.is_empty() {
-        warn!("No nodes to run. Exiting...");
-        return Ok(());
-    }
+    ctrlc::set_handler(move || {
+        info!("Ctrl-C received. Exiting...");
+        let _ = ctrl_c_sender2.blocking_send(());
+    })?;
 
-    let (auxilliary_interrupt_sender, mut auxilliary_interrupt_sender_recv) = mpsc::channel(1);
-
+    let runtime = Runtime::new()?;
+    let ctrl_c_sender2 = ctrl_c_sender.clone();
     if run_options.auxilliary_control {
-        tokio::spawn(async move {
+        runtime.spawn(async move {
             let tcp_listener = match TcpListener::bind("0.0.0.0:0").await {
                 Ok(x) => x,
                 Err(e) => {
                     debug!(target: "auxilliary-control", "Failed to initialize auxilliary control port: {e}");
-                    std::mem::forget(auxilliary_interrupt_sender);
                     return;
                 }
             };
@@ -484,7 +349,6 @@ pub async fn async_run_all(
                 Ok(addr) => debug!(target: "auxilliary-control", "Successfully binded to: {addr}"),
                 Err(e) => {
                     debug!(target: "auxilliary-control", "Failed to get local address of auxilliary control port: {e}");
-                    std::mem::forget(auxilliary_interrupt_sender);
                     return;
                 }
             }
@@ -497,7 +361,7 @@ pub async fn async_run_all(
                         continue;
                     }
                 };
-                let auxilliary_interrupt_sender = auxilliary_interrupt_sender.clone();
+                let ctrl_c_sender = ctrl_c_sender2.clone();
                 tokio::spawn(async move {
                     let mut string_buf = Vec::with_capacity(1024);
                     let mut buf = [0u8; 1024];
@@ -531,7 +395,7 @@ pub async fn async_run_all(
 
                         match command {
                             "stop" => {
-                                let _ = auxilliary_interrupt_sender.send(()).await;
+                                let _ = ctrl_c_sender.send(()).await;
                                 write_all!(b"Stopping...\n");
                             }
                             _ => write_all!(b"Unrecognized command"),
@@ -542,112 +406,26 @@ pub async fn async_run_all(
                 });
             }
         });
-    } else {
-        std::mem::forget(auxilliary_interrupt_sender);
     }
 
-    let mut ctrl_c_failed = false;
-    let mut sys = sysinfo::System::new();
-    let mut last_cpu_check = Instant::now();
-
-    loop {
-        let ctrl_c_fut: Pin<Box<dyn Future<Output = _>>> = if ctrl_c_failed {
-            Box::pin(std::future::pending())
-        } else {
-            Box::pin(tokio::signal::ctrl_c())
-        };
+    runtime.block_on(async {
         tokio::select! {
-            option = tasks.join_next() => {
-                let Some(result) = option else {
-                    info!("All Nodes terminated. Exiting...");
-                    break;
-                };
-                if let Err(RunError { critical }) = result.unwrap() {
-                    if critical {
-                        error!("Critical node has terminated! Exiting...");
-                        break;
-                    }
-                }
-            }
-            _ = tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL) => {
-                sys.refresh_cpu(); // Refreshing CPU information.
-                if last_cpu_check.elapsed().as_secs() < 3 {
-                    continue;
-                }
-                let cpus = sys.cpus();
-                let usage = cpus.into_iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
-                if usage >= 80.0 {
-                    warn!("CPU Usage at {usage}%");
-                    last_cpu_check = Instant::now();
-                }
-            }
-            result = ctrl_c_fut => {
-                if let Err(e) = result {
-                    error!("Ctrl C handler has failed: {e}");
-                    ctrl_c_failed = true;
-                } else {
-                    info!("Ctrl-C received. Exiting...");
-                    break;
-                }
-            }
-            _ = auxilliary_interrupt_sender_recv.recv() => {
-                info!("Auxilliary stop received. Exiting...");
-                break;
-            }
-            node = async {
-                let Some(node) = node_receiver.recv().await else {
-                    std::future::pending::<()>().await;
-                    unreachable!();
-                };
-                node
-            } => {
-                tasks.spawn(node.run(abort_sender.subscribe(), node_sender.clone()));
+            res = tokio::spawn(main()) => res.map_err(Into::into).flatten(),
+            _ = ctrl_c_recv.recv() => Ok(()),
+            
+        }
+    })?;
+
+    std::thread::spawn(move || {
+        drop(runtime);
+        while let Some(x) = THREADS.pop() {
+            if let Err(e) = x.join() {
+                error!("Failed to join thread: {e:?}");
             }
         }
-    }
+        let _ = ctrl_c_sender.blocking_send(());
+    });
 
-    drop(abort_sender);
-    tokio::select! {
-        () = async {
-            tokio::join!(
-                async { if let Err(e) = tokio::task::spawn_blocking(|| {
-                    while let Some(x) = THREADS.pop() {
-                        if let Err(e) = x.join() {
-                            error!("Failed to join thread: {e:?}");
-                        }
-                    }
-                }).await { error!("Failed to wait on persistent threads: {e}"); }},
-                async {while let Some(_) = tasks.join_next().await {}}
-            );
-        } => {}
-        () = async {
-            if tokio::signal::ctrl_c().await.is_err() {
-                std::future::pending::<()>().await;
-            }
-            warn!("Force exiting...");
-            last_drop.force_exit = true;
-        } => {}
-        _ = auxilliary_interrupt_sender_recv.recv() => {
-            warn!("Force exiting...");
-            last_drop.force_exit = true;
-        }
-    }
-
+    ctrl_c_recv.blocking_recv().unwrap();
     Ok(())
-}
-
-static CONFIG: OnceLock<Config> = OnceLock::new();
-
-pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
-    CONFIG
-        .get_or_try_init(|| {
-            Config::builder()
-                // Add in `./Settings.toml`
-                .add_source(config::File::with_name(".env"))
-                .add_source(config::Environment::with_prefix(""))
-                .build()
-        })?
-        .clone()
-        .try_deserialize()
-        .map_err(Into::into)
 }
