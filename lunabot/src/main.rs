@@ -74,7 +74,8 @@ async fn main() -> anyhow::Result<()> {
 
     let costmap_ref = costmap.get_ref();
 
-    let mut costmap_writer = VideoDataDump::new_file(80, 80, 720, 720, ScalingFilter::Neighbor, "costmap.mkv", 24)?;
+    let mut costmap_writer =
+        VideoDataDump::new_file(80, 80, 720, 720, ScalingFilter::Neighbor, "costmap.mkv", 24)?;
     // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
     let video_maker = FnNode::new(|_| async move {

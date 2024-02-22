@@ -16,9 +16,7 @@ use unros_core::{
     anyhow, async_trait, log,
     logging::dump::{ScalingFilter, VideoDataDump},
     pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging,
-    tokio,
-    tokio_rayon, DropCheck, Node, RuntimeContext,
+    setup_logging, tokio, tokio_rayon, DropCheck, Node, RuntimeContext,
 };
 
 #[derive(Debug, Eq, PartialEq, IntoPrimitive, TryFromPrimitive)]
@@ -62,8 +60,16 @@ impl Telemetry {
         let mut video_addr = server_addr;
         video_addr.set_port(video_addr.port() + 1);
 
-        let video_dump =
-            VideoDataDump::new_rtp(cam_width, cam_height, 1280, 720, ScalingFilter::FastBilinear, video_addr, cam_fps).await?;
+        let video_dump = VideoDataDump::new_rtp(
+            cam_width,
+            cam_height,
+            1280,
+            720,
+            ScalingFilter::FastBilinear,
+            video_addr,
+            cam_fps,
+        )
+        .await?;
 
         Ok(Self {
             bandwidth_limit: 0,

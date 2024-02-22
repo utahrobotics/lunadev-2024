@@ -13,7 +13,12 @@
 //! 4. Signals, with 3 subscription variants (analagous to ROS publisher and subscribers)
 //! 5. The Task trait (analagous to ROS actions)
 
-#![feature(associated_type_defaults, once_cell_try, iter_collect_into, result_flattening)]
+#![feature(
+    associated_type_defaults,
+    once_cell_try,
+    iter_collect_into,
+    result_flattening
+)]
 
 use std::{
     future::Future,
@@ -40,12 +45,15 @@ use log::{debug, error, info, warn};
 use serde::Deserialize;
 pub use tokio;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, runtime::Runtime, sync::mpsc, task::JoinSet
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    runtime::Runtime,
+    sync::mpsc,
+    task::JoinSet,
 };
 pub use tokio_rayon::{self, rayon};
 
 use crate::logging::init_logger;
-
 
 /// A Node just represents a long running task.
 ///
@@ -85,31 +93,30 @@ pub trait Node: Send + 'static {
     async fn run(self, context: RuntimeContext) -> anyhow::Result<()>;
 }
 
-
 #[derive(Default)]
 pub struct NodeGroup {
-    pending: Vec<Box<dyn FnOnce(&mut JoinSet<anyhow::Result<()>>, mpsc::UnboundedSender<Box<dyn FnOnce(&mut JoinSet<anyhow::Result<()>>) + Send>>) + Send>>
+    pending: Vec<
+        Box<
+            dyn FnOnce(
+                    &mut JoinSet<anyhow::Result<()>>,
+                    mpsc::UnboundedSender<Box<dyn FnOnce(&mut JoinSet<anyhow::Result<()>>) + Send>>,
+                ) + Send,
+        >,
+    >,
 }
-
 
 impl NodeGroup {
     pub fn add_node<N: Node>(&mut self, node: N) {
         let name = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
         self.pending.push(Box::new(|join_set, node_sender| {
-            join_set.spawn(node.run(RuntimeContext {
-                name,
-                node_sender
-            }));
+            join_set.spawn(node.run(RuntimeContext { name, node_sender }));
         }));
     }
 
     pub fn add_node_with_name<N: Node>(&mut self, node: N, name: impl Into<String>) {
         let name = Arc::from(name.into().into_boxed_str());
         self.pending.push(Box::new(|join_set, node_sender| {
-            join_set.spawn(node.run(RuntimeContext {
-                name,
-                node_sender
-            }));
+            join_set.spawn(node.run(RuntimeContext { name, node_sender }));
         }));
     }
 
@@ -137,7 +144,6 @@ impl NodeGroup {
         }
     }
 }
-
 
 /// A reference to the runtime that is currently running.
 ///
@@ -174,7 +180,6 @@ impl RuntimeContext {
         }));
     }
 }
-
 
 #[derive(Clone)]
 pub struct DropCheck {
@@ -304,8 +309,10 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
         .map_err(Into::into)
 }
 
-
-pub fn start_unros_runtime<F: Future<Output = anyhow::Result<()>> + Send + 'static>(main: impl FnOnce() -> F, run_options: RunOptions) -> anyhow::Result<()> {
+pub fn start_unros_runtime<F: Future<Output = anyhow::Result<()>> + Send + 'static>(
+    main: impl FnOnce() -> F,
+    run_options: RunOptions,
+) -> anyhow::Result<()> {
     init_logger(&run_options)?;
     std::thread::spawn(|| {
         let mut sys = sysinfo::System::new();
@@ -317,7 +324,8 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<()>> + Send + 'stat
                 continue;
             }
             let cpus = sys.cpus();
-            let usage = cpus.into_iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
+            let usage =
+                cpus.into_iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
             if usage >= 80.0 {
                 warn!("CPU Usage at {usage}%");
                 last_cpu_check = Instant::now();
@@ -412,7 +420,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<()>> + Send + 'stat
         tokio::select! {
             res = tokio::spawn(main()) => res.map_err(Into::into).flatten(),
             _ = ctrl_c_recv.recv() => Ok(()),
-            
+
         }
     })?;
 

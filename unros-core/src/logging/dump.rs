@@ -156,9 +156,9 @@ pub enum VideoWriteError {
         expected_width: u32,
         expected_height: u32,
         actual_width: u32,
-        actual_height: u32
+        actual_height: u32,
     },
-    Unknown
+    Unknown,
 }
 
 impl Display for VideoWriteError {
@@ -171,23 +171,22 @@ impl Display for VideoWriteError {
 }
 impl Error for VideoWriteError {}
 
-
 #[derive(Clone)]
 enum VideoDataDumpType {
     Rtp(SocketAddrV4),
-    File(PathBuf)
+    File(PathBuf),
 }
-
 
 impl std::fmt::Display for VideoDataDumpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VideoDataDumpType::Rtp(addr) => write!(f, "{addr}"),
-            VideoDataDumpType::File(path) => write!(f, "{}", path.file_name().unwrap().to_string_lossy()),
+            VideoDataDumpType::File(path) => {
+                write!(f, "{}", path.file_name().unwrap().to_string_lossy())
+            }
         }
     }
 }
-
 
 pub struct VideoDataDump {
     video_writer: Arc<ArrayQueue<DynamicImage>>,
@@ -254,7 +253,7 @@ impl VideoDataDump {
             return None;
         };
         Some(format!(
-"v=0
+            "v=0
 o=- 0 0 IN IP4 127.0.0.1
 s=No Name
 c=IN IP4 {}
@@ -309,7 +308,12 @@ a=rtpmap:96 H265/90000",
             .spawn()
             .map_err(VideoDumpInitError::IOError)?;
 
-        Self::new(in_width, in_height, VideoDataDumpType::File(pathbuf), output)
+        Self::new(
+            in_width,
+            in_height,
+            VideoDataDumpType::File(pathbuf),
+            output,
+        )
     }
 
     pub async fn new_rtp(
@@ -409,7 +413,10 @@ a=rtpmap:96 H265/90000",
                     error!("{} has closed!", dump_type2);
                     break;
                 } else {
-                    error!("Faced the following error while writing video frame to {}: {e}", dump_type2);
+                    error!(
+                        "Faced the following error while writing video frame to {}: {e}",
+                        dump_type2
+                    );
                 }
             }
         });
@@ -419,15 +426,19 @@ a=rtpmap:96 H265/90000",
             writer_drop,
             width: in_width,
             height: in_height,
-            dump_type
-            // start: Instant::now(),
-            // path: path.to_path_buf(),
+            dump_type, // start: Instant::now(),
+                       // path: path.to_path_buf(),
         })
     }
 
     pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
         if frame.width() != self.width || frame.height() != self.height {
-            return Err(VideoWriteError::IncorrectDimensions { expected_width: self.width, expected_height: self.height, actual_width: frame.width(), actual_height: frame.height() })
+            return Err(VideoWriteError::IncorrectDimensions {
+                expected_width: self.width,
+                expected_height: self.height,
+                actual_width: frame.width(),
+                actual_height: frame.height(),
+            });
         }
 
         if self.writer_drop.has_dropped() {
@@ -435,7 +446,10 @@ a=rtpmap:96 H265/90000",
         }
         match self.video_writer.force_push(frame) {
             Some(_) => {
-                warn!("Overwriting last frame in {} as queue was full!", self.dump_type);
+                warn!(
+                    "Overwriting last frame in {} as queue was full!",
+                    self.dump_type
+                );
                 Ok(())
             }
             None => Ok(()),
@@ -444,7 +458,12 @@ a=rtpmap:96 H265/90000",
 
     pub fn write_frame_quiet(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
         if frame.width() != self.width || frame.height() != self.height {
-            return Err(VideoWriteError::IncorrectDimensions { expected_width: self.width, expected_height: self.height, actual_width: frame.width(), actual_height: frame.height() })
+            return Err(VideoWriteError::IncorrectDimensions {
+                expected_width: self.width,
+                expected_height: self.height,
+                actual_width: frame.width(),
+                actual_height: frame.height(),
+            });
         }
 
         if self.writer_drop.has_dropped() {
