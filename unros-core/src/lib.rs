@@ -120,6 +120,21 @@ impl NodeGroup {
         }));
     }
 
+    pub fn add_future(&mut self, fut: impl Future<Output = anyhow::Result<()>> + Send + 'static) {
+        self.pending.push(Box::new(|join_set, _| {
+            join_set.spawn(fut);
+        }));
+    }
+
+    pub fn add_task<F: Future<Output = anyhow::Result<()>> + Send + 'static>(
+        &mut self,
+        f: impl FnOnce() -> F + Send + 'static,
+    ) {
+        self.pending.push(Box::new(|join_set, _| {
+            join_set.spawn(f());
+        }));
+    }
+
     pub async fn run(self) -> anyhow::Result<()> {
         let mut join_set = JoinSet::new();
         let (node_sender, mut node_recv) = mpsc::unbounded_channel();
