@@ -23,7 +23,7 @@ use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt, BufWriter},
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::mpsc,
 };
 
 use crate::{spawn_persistent_thread, DropCheck};
@@ -183,7 +183,7 @@ impl std::fmt::Display for VideoDataDumpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VideoDataDumpType::Rtp(addr) => write!(f, "{addr}"),
-            VideoDataDumpType::File(path) => write!(f, "{}", path.display()),
+            VideoDataDumpType::File(path) => write!(f, "{}", path.file_name().unwrap().to_string_lossy()),
         }
     }
 }
@@ -249,6 +249,24 @@ pub enum SubtitleWriteError {
 }
 
 impl VideoDataDump {
+    pub fn generate_sdp(&self) -> Option<String> {
+        let VideoDataDumpType::Rtp(addr) = &self.dump_type else {
+            return None;
+        };
+        Some(format!(
+"v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=No Name
+c=IN IP4 {}
+t=0 0
+a=tool:libavformat 58.76.100
+m=video {} RTP/AVP 96
+a=rtpmap:96 H265/90000",
+            addr.ip(),
+            addr.port()
+        ))
+    }
+
     pub fn new_file(
         in_width: u32,
         in_height: u32,
@@ -270,6 +288,7 @@ impl VideoDataDump {
         };
 
         let output = FfmpegCommand::new()
+            .hwaccel("auto")
             .args([
                 "-f",
                 "rawvideo",
@@ -301,33 +320,21 @@ impl VideoDataDump {
         scale_filter: ScalingFilter,
         addr: SocketAddrV4,
         fps: usize,
-    ) -> Result<(Self, oneshot::Receiver<String>), VideoDumpInitError> {
+    ) -> Result<Self, VideoDumpInitError> {
         ffmpeg_sidecar::download::auto_download()
             .map_err(|e| VideoDumpInitError::FFMPEGInstallError(e.to_string()))?;
 
-        let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
-            return Err(VideoDumpInitError::LoggingError(anyhow::anyhow!("Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`")));
-        };
-        let sdp_file_path = PathBuf::from(sub_log_dir).join(format!("{addr}.sdp"));
-
         let output = FfmpegCommand::new()
             .hwaccel("auto")
-            .args([
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "rgb24",
-                "-s",
-                &format!("{in_width}x{in_height}"),
-            ])
+            .format("rawvideo")
+            .pix_fmt("rgb24")
+            .size(in_width, in_height)
             .input("-")
+            .codec_video("libx265")
+            .pix_fmt("yuv420p")
             .args([
-                "-c:v",
-                "libx265",
-                "-pix_fmt",
-                "yuv420p",
                 "-crf",
-                "40",
+                "35",
                 "-vf",
                 &format!("fps={fps},scale={out_width}:{out_height}"),
                 "-sws_flags",
@@ -341,38 +348,13 @@ impl VideoDataDump {
                 "-strict",
                 "2",
             ])
-            .args(["-sdp_file".as_ref(), sdp_file_path.as_path()])
-            .args(["-f", "rtp", &format!("rtp://{addr}")])
+            // .args(["-sdp_file".as_ref(), sdp_file_path.as_path()])
+            .format("rtp")
+            .output(format!("rtp://{addr}"))
             .spawn()
             .map_err(VideoDumpInitError::IOError)?;
 
-        let (sender, receiver) = oneshot::channel();
-        tokio::spawn(async move {
-            loop {
-                match tokio::fs::read_to_string(&sdp_file_path).await {
-                    Ok(x) => {
-                        if x.is_empty() {
-                            continue;
-                        }
-                        let _ = sender.send(x);
-                        break;
-                    }
-                    Err(e) => match e.kind() {
-                        std::io::ErrorKind::NotFound => {}
-                        _ => {
-                            error!("Faced the following error while trying to read sdp file: {e}");
-                            break;
-                        }
-                    },
-                }
-                std::hint::spin_loop();
-            }
-        });
-
-        Ok((
-            Self::new(in_width, in_height, VideoDataDumpType::Rtp(addr), output)?,
-            receiver,
-        ))
+        Self::new(in_width, in_height, VideoDataDumpType::Rtp(addr), output)
     }
 
     fn new(
@@ -463,6 +445,10 @@ impl VideoDataDump {
     }
 
     pub fn write_frame_quiet(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
+        if frame.width() != self.width || frame.height() != self.height {
+            return Err(VideoWriteError::IncorrectDimensions { expected_width: self.width, expected_height: self.height, actual_width: frame.width(), actual_height: frame.height() })
+        }
+
         if self.writer_drop.has_dropped() {
             return Err(VideoWriteError::Unknown);
         }

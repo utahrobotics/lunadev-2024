@@ -17,7 +17,7 @@ use unros_core::{
     logging::dump::{ScalingFilter, VideoDataDump},
     pubsub::{Publisher, Subscriber, Subscription},
     setup_logging,
-    tokio::{self, sync::oneshot},
+    tokio,
     tokio_rayon, DropCheck, Node, RuntimeContext,
 };
 
@@ -49,7 +49,6 @@ pub struct Telemetry {
     image_subscriptions: Option<Subscriber<Arc<DynamicImage>>>,
     packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
     video_dump: Option<VideoDataDump>,
-    sdp: Option<oneshot::Receiver<String>>,
 }
 
 impl Telemetry {
@@ -63,7 +62,7 @@ impl Telemetry {
         let mut video_addr = server_addr;
         video_addr.set_port(video_addr.port() + 1);
 
-        let (video_dump, sdp) =
+        let video_dump =
             VideoDataDump::new_rtp(cam_width, cam_height, 1280, 720, ScalingFilter::FastBilinear, video_addr, cam_fps).await?;
 
         Ok(Self {
@@ -75,7 +74,6 @@ impl Telemetry {
             packet_queue: SegQueue::new(),
             max_image_chunk_width: 32,
             video_dump: Some(video_dump),
-            sdp: Some(sdp),
         })
     }
 
@@ -218,6 +216,7 @@ impl Node for Telemetry {
         let _drop_check = drop_check.clone();
         let mut image_subscriptions = self.image_subscriptions.take().unwrap();
         let mut video_dump = self.video_dump.take().unwrap();
+        let sdp = video_dump.generate_sdp().unwrap();
 
         let cam_fut = tokio_rayon::spawn(move || {
             let mut start_service = Instant::now();
@@ -237,8 +236,6 @@ impl Node for Telemetry {
                 sleeper.sleep(self.camera_delta.saturating_sub(elapsed));
             }
         });
-
-        let sdp = self.sdp.take().unwrap().await?;
 
         info!("Connecting to lunabase...");
         let enet_fut = tokio_rayon::spawn(move || 'main: loop {

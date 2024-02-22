@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     let telemetry = Telemetry::new(
         SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
         1920,
-        1080,
+        1200,
         24,
     )
     .await?;
@@ -196,7 +196,8 @@ async fn main() -> anyhow::Result<()> {
         costmap.into(),
         navigator.into(),
         dumper.into(),
-        telemetry.into(), // las_node.into()
+        telemetry.into(),
+        // las_node.into()
         camera.into(),
     ];
 
