@@ -417,6 +417,11 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
         .map_err(Into::into)
 }
 
+enum EndCondition {
+    CtrlC,
+    Dropped
+}
+
 pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Send + 'static>(
     main: impl FnOnce(Application) -> F,
     run_options: RunOptions,
@@ -427,7 +432,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
         let mut last_cpu_check = Instant::now();
         loop {
             std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-            sys.refresh_cpu(); // Refreshing CPU information.
+            sys.refresh_cpu();
             if last_cpu_check.elapsed().as_secs() < 3 {
                 continue;
             }
@@ -441,16 +446,15 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
         }
     });
 
-    let (ctrl_c_sender, mut ctrl_c_recv) = tokio::sync::mpsc::channel(1);
-    let ctrl_c_sender2 = ctrl_c_sender.clone();
+    let (end_sender, mut end_recv) = tokio::sync::mpsc::channel(1);
+    let end_sender2 = end_sender.clone();
 
     ctrlc::set_handler(move || {
-        info!("Ctrl-C received. Exiting...");
-        let _ = ctrl_c_sender2.blocking_send(());
+        let _ = end_sender2.blocking_send(EndCondition::CtrlC);
     })?;
 
     let runtime = Runtime::new()?;
-    let ctrl_c_sender2 = ctrl_c_sender.clone();
+    let ctrl_c_sender2 = end_sender.clone();
     if run_options.auxilliary_control {
         runtime.spawn(async move {
             let tcp_listener = match TcpListener::bind("0.0.0.0:0").await {
@@ -477,7 +481,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
                         continue;
                     }
                 };
-                let ctrl_c_sender = ctrl_c_sender2.clone();
+                let end_sender = ctrl_c_sender2.clone();
                 tokio::spawn(async move {
                     let mut string_buf = Vec::with_capacity(1024);
                     let mut buf = [0u8; 1024];
@@ -511,7 +515,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
 
                         match command {
                             "stop" => {
-                                let _ = ctrl_c_sender.send(()).await;
+                                let _ = end_sender.send(EndCondition::CtrlC).await;
                                 write_all!(b"Stopping...\n");
                             }
                             _ => write_all!(b"Unrecognized command"),
@@ -533,21 +537,27 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
         info!("Runtime started with pid: {}", std::process::id());
         tokio::select! {
             res = fut => res,
-            _ = ctrl_c_recv.recv() => Ok(()),
+            _ = end_recv.recv() => Ok(()),
 
         }
     })?;
 
-    std::thread::spawn(move || {
+    info!("Ctrl-C received. Exiting...");
+
+    let dropper = std::thread::spawn(move || {
         drop(runtime);
         while let Some(x) = THREADS.pop() {
             if let Err(e) = x.join() {
                 error!("Failed to join thread: {e:?}");
             }
         }
-        let _ = ctrl_c_sender.blocking_send(());
+        let _ = end_sender.blocking_send(EndCondition::Dropped);
     });
 
-    ctrl_c_recv.blocking_recv().unwrap();
+    match end_recv.blocking_recv().unwrap() {
+        EndCondition::CtrlC => warn!("Ctrl-C received. Force exiting..."),
+        EndCondition::Dropped => dropper.join().unwrap(),
+    }
+
     Ok(())
 }
