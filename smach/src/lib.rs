@@ -35,7 +35,7 @@ impl<B> TransitionInit<B> {
                 };
                 tokio::spawn(async move {
                     tokio::select! {
-                        _ = self.alive_recv.recv() => return,
+                        _ = self.alive_recv.recv() => {}
                         () = fut => { }
                     }
                 });

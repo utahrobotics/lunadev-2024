@@ -438,7 +438,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
             }
             let cpus = sys.cpus();
             let usage =
-                cpus.into_iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
+                cpus.iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
             if usage >= 80.0 {
                 warn!("CPU Usage at {usage}%");
                 last_cpu_check = Instant::now();

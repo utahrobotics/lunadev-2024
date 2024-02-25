@@ -131,7 +131,7 @@ pub struct PendingRobotElement {
 
 #[derive(Deserialize, Serialize)]
 pub struct Robot {
-    pub children: FxHashMap<Box<str>, PendingRobotElement>,
+    children: FxHashMap<Box<str>, PendingRobotElement>,
 }
 
 impl Robot {
@@ -415,7 +415,7 @@ impl RobotBase {
 
     pub fn set_orientation(&self, orientation: UnitQuaternion<Float>) {
         let mut isometry = self.get_isometry();
-        isometry.rotation = orientation.into();
+        isometry.rotation = orientation;
         self.set_isometry(isometry);
     }
 }

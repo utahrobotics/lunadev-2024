@@ -228,7 +228,7 @@ impl Node for DirectPathfinder {
                     new_path.push(start.cast::<isize>());
                     let mut last = path.next().unwrap();
 
-                    while let Some(next) = path.next() {
+                    for next in path {
                         if traverse_to(start, next, &obstacles) {
                             last = next;
                         } else {

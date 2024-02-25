@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display};
+use std::{cmp::Ordering, fmt::{Debug, Display}};
 
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +28,7 @@ impl TryFrom<f32> for Drive {
     type Error = DriveOutOfRange;
 
     fn try_from(value: f32) -> Result<Self, Self::Error> {
-        if value < -1.0 || value > 1.0 {
+        if (-1.0..1.0).contains(&value) {
             return Err(DriveOutOfRange);
         }
         let mut drive = (value * 128.0).round();
@@ -49,13 +49,18 @@ impl TryFrom<f64> for Drive {
 
 impl From<Drive> for f32 {
     fn from(value: Drive) -> Self {
-        if value.drive == 0 {
-            0.0
-        } else if value.drive < 0 {
-            value.drive as f32 / 128.0
-        } else {
-            value.drive as f32 / 127.0
+        match value.drive.cmp(&0) {
+            Ordering::Greater => value.drive as f32 / 127.0,
+            Ordering::Less => value.drive as f32 / 128.0,
+            Ordering::Equal => 0.0
         }
+        // if value.drive == 0 {
+        //     0.0
+        // } else if value.drive < 0 {
+        //     value.drive as f32 / 128.0
+        // } else {
+        //     value.drive as f32 / 127.0
+        // }
     }
 }
 

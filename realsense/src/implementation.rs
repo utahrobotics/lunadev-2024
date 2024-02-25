@@ -193,13 +193,12 @@ impl Node for RealSenseCamera {
                         frame.height() as u32,
                         frame
                             .iter()
-                            .map(|px| {
+                            .flat_map(|px| {
                                 let PixelKind::Bgr8 { r, g, b } = px else {
                                     unreachable!()
                                 };
                                 [*r, *g, *b]
                             })
-                            .flatten()
                             .collect(),
                     ) else {
                         error!("Failed to copy realsense color image");
@@ -304,9 +303,8 @@ impl Node for RealSenseCamera {
                                 ExtrinsicParameters::from_pose(&nalgebra::convert(isometry)),
                             );
                             let pixel_coords =
-                                (0..frame_height / 4).into_iter().rev().flat_map(|y| {
+                                (0..frame_height / 4).rev().flat_map(|y| {
                                     (0..frame_width / 4)
-                                        .into_iter()
                                         .flat_map(move |x| [x as f32, y as f32])
                                 });
 

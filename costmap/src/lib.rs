@@ -222,7 +222,7 @@ impl CostmapRef {
         current_height: f32,
         agent_radius: f32,
     ) -> Matrix<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>> {
-        let agent_radius: usize = (agent_radius / self.cell_width as f32).round() as usize;
+        let agent_radius: usize = (agent_radius / self.cell_width).round() as usize;
         let tmp = Matrix::<bool, Dyn, Dyn, VecStorage<bool, Dyn, Dyn>>::from_iterator(
             matrix.nrows(),
             matrix.ncols(),
@@ -263,7 +263,7 @@ impl CostmapRef {
         let max = matrix
             .data
             .as_slice()
-            .into_iter()
+            .iter()
             .map(|n| NotNan::new(*n).unwrap())
             .max()
             .unwrap()
@@ -271,7 +271,7 @@ impl CostmapRef {
         let min = matrix
             .data
             .as_slice()
-            .into_iter()
+            .iter()
             .map(|n| NotNan::new(*n).unwrap())
             .min()
             .unwrap()
@@ -325,7 +325,7 @@ impl Node for Costmap {
 
         let (del_sender, del_recv) = channel::<(Duration, Arc<[PointMeasurement]>)>();
         let start = Instant::now();
-        let start2 = start.clone();
+        let start2 = start;
         let heights2 = self.heights.clone();
         let counts2 = self.counts.clone();
 

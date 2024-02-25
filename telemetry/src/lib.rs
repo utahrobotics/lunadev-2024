@@ -128,14 +128,13 @@ impl Telemetry {
                 1 => {
                     info!("Resending SDP");
                     self.packet_queue.push((
-                        sdp.as_bytes().into_iter().copied().collect(),
+                        sdp.as_bytes().iter().copied().collect(),
                         PacketMode::ReliableSequenced,
                         Channels::Camera,
                     ));
                 }
                 x => {
                     error!("Received invalid CameraMessage: {x}");
-                    return;
                 }
             },
             Channels::Odometry => todo!(),

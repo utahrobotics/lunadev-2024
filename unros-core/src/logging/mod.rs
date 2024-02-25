@@ -103,7 +103,7 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             runtime_name,
         );
 
-        let log_folder_name = PathBuf::from(LOGS_DIR).join(&log_folder_name);
+        let log_folder_name = PathBuf::from(LOGS_DIR).join(log_folder_name);
 
         std::fs::DirBuilder::new()
             .create(&log_folder_name)

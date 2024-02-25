@@ -51,7 +51,7 @@ impl DataGen for TrainingItemGen {
     type Output = TrainingItem;
 
     fn gen(&self) -> Self::Output {
-        let mut rng = self.rngs.pop().unwrap_or_else(|| SmallRng::from_entropy());
+        let mut rng = self.rngs.pop().unwrap_or_else(SmallRng::from_entropy);
         let mut item = TrainingItem {
             input: [[0.0; 2]; SEQ_LENGTH],
             target: 0.0,

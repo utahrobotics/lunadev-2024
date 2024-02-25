@@ -50,7 +50,7 @@ impl Display for PoseObservation {
             .pose
             .rotation
             .axis()
-            .unwrap_or_else(|| Vector3::x_axis());
+            .unwrap_or_else(Vector3::x_axis);
         write!(f, "Observer pos: ({:.2}, {:.2}, {:.2}), axis: ({:.2}, {:.2}, {:.2}), angle: {:.0}, margin: {:.0}", self.pose.translation.x, self.pose.translation.y, self.pose.translation.z, axis.x, axis.y, axis.z, self.pose.rotation.angle() / PI * 180.0, self.decision_margin)
         // write!(f, "Observer pos: ({:.2}, {:.2}, {:.2}), quat: ({:.2}, {:.2}, {:.2}, {:.2}), margin: {:.0}", self.pose.translation.x, self.pose.translation.y, self.pose.translation.z, self.pose.rotation.w, self.pose.rotation.i, self.pose.rotation.j, self.pose.rotation.k, self.decision_margin)
     }
@@ -153,7 +153,7 @@ impl Node for AprilTagDetector {
         let (err_sender, mut err_receiver) = channel(1);
         let (img_sender, img_receiver) = sync_channel::<Arc<DynamicImage>>(0);
 
-        let _ = tokio_rayon::spawn(move || {
+        std::mem::drop(tokio_rayon::spawn(move || {
             setup_logging!(context);
 
             macro_rules! unwrap {
@@ -173,12 +173,7 @@ impl Node for AprilTagDetector {
 
             // let mut seen: FxHashMap<usize, (Instant, Vector3<f64>)> = FxHashMap::default();
 
-            loop {
-                let img = match img_receiver.recv() {
-                    Ok(x) => x,
-                    Err(_) => break,
-                };
-
+            while let Ok(img) = img_receiver.recv() {
                 let img = img.to_luma8();
                 if img.width() != self.image_width || img.height() != self.image_height {
                     error!(
@@ -245,7 +240,7 @@ impl Node for AprilTagDetector {
                     });
                 }
             }
-        });
+        }));
 
         loop {
             tokio::select! {
