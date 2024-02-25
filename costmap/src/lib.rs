@@ -14,7 +14,7 @@ use std::{
 use nalgebra::{Dyn, Matrix, Point2, Point3, VecStorage};
 use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
-use unros_core::{
+use unros::{
     anyhow, async_trait,
     pubsub::{Subscriber, Subscription},
     rayon::{

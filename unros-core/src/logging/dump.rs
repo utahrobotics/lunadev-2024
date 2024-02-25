@@ -381,12 +381,14 @@ a=rtpmap:96 H265/90000",
         let dump_type2 = dump_type.clone();
 
         spawn_persistent_thread(move || {
-            events.for_each(|event| if let FfmpegEvent::Log(level, msg) = event {
-                match level {
-                    ffmpeg_sidecar::event::LogLevel::Info => info!("[{dump_type2}] {msg}"),
-                    ffmpeg_sidecar::event::LogLevel::Warning => warn!("[{dump_type2}] {msg}"),
-                    ffmpeg_sidecar::event::LogLevel::Unknown => {}
-                    _ => error!("[{dump_type2}] {msg}"),
+            events.for_each(|event| {
+                if let FfmpegEvent::Log(level, msg) = event {
+                    match level {
+                        ffmpeg_sidecar::event::LogLevel::Info => info!("[{dump_type2}] {msg}"),
+                        ffmpeg_sidecar::event::LogLevel::Warning => warn!("[{dump_type2}] {msg}"),
+                        ffmpeg_sidecar::event::LogLevel::Unknown => {}
+                        _ => error!("[{dump_type2}] {msg}"),
+                    }
                 }
             });
         });

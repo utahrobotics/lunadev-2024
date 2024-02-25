@@ -11,8 +11,11 @@ use nalgebra::{DMatrix, Point2, Point3, Vector2};
 use ordered_float::NotNan;
 use pathfinding::directed::astar::astar;
 use rig::RobotBaseRef;
-use unros_core::{
-    anyhow, async_trait, pubsub::{Publisher, Subscription}, service::{new_service, Service, ServiceHandle}, setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext
+use unros::{
+    anyhow, async_trait,
+    pubsub::{Publisher, Subscription},
+    service::{new_service, Service, ServiceHandle},
+    setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext,
 };
 
 use crate::Float;
@@ -49,7 +52,8 @@ pub struct DirectPathfinder {
     service_handle: NavigationServiceHandle,
     path_signal: Publisher<Vec<Point2<Float>>>,
     robot_base: RobotBaseRef,
-    service: Service<Point3<Float>, NavigationError, NavigationProgress, Result<(), NavigationError>>,
+    service:
+        Service<Point3<Float>, NavigationError, NavigationProgress, Result<(), NavigationError>>,
     pub completion_distance: Float,
     costmap_ref: CostmapRef,
     pub refresh_rate: Duration,

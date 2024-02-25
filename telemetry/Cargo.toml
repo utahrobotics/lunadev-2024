@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-unros-core = { path = "../unros-core" }
+unros = { path = "../unros" }
 enet = "0.3.0"
 global-msgs = { path = "../global-msgs" }
 num_enum = "0.7.1"

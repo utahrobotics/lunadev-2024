@@ -1,4 +1,7 @@
-use std::{cmp::Ordering, fmt::{Debug, Display}};
+use std::{
+    cmp::Ordering,
+    fmt::{Debug, Display},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +55,7 @@ impl From<Drive> for f32 {
         match value.drive.cmp(&0) {
             Ordering::Greater => value.drive as f32 / 127.0,
             Ordering::Less => value.drive as f32 / 128.0,
-            Ordering::Equal => 0.0
+            Ordering::Equal => 0.0,
         }
         // if value.drive == 0 {
         //     0.0

@@ -4,7 +4,7 @@
 use std::{ops::Deref, sync::Arc, time::Duration};
 
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
-use unros_core::{
+use unros::{
     anyhow, async_trait,
     bytes::Bytes,
     pubsub::{Publisher, Subscriber, Subscription},

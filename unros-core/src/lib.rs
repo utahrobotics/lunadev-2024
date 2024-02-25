@@ -419,7 +419,7 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
 
 enum EndCondition {
     CtrlC,
-    Dropped
+    Dropped,
 }
 
 pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Send + 'static>(
@@ -437,8 +437,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
                 continue;
             }
             let cpus = sys.cpus();
-            let usage =
-                cpus.iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
+            let usage = cpus.iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / cpus.len() as f32;
             if usage >= 80.0 {
                 warn!("CPU Usage at {usage}%");
                 last_cpu_check = Instant::now();

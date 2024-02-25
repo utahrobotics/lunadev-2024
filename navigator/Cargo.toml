@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 # crossbeam = { workspace = true }
-unros-core = { path = "../unros-core" }
+unros = { path = "../unros" }
 global-msgs = { path = "../global-msgs" }
 rig = { path = "../rig" }
 nalgebra = { workspace = true }

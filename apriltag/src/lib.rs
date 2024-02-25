@@ -14,7 +14,7 @@ use apriltag_nalgebra::PoseExt;
 use fxhash::FxHashMap;
 use nalgebra::{Isometry3, Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
-use unros_core::{
+use unros::{
     anyhow, async_trait,
     pubsub::{Publisher, Subscriber, Subscription},
     setup_logging,
@@ -46,11 +46,7 @@ impl Debug for PoseObservation {
 
 impl Display for PoseObservation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let axis = self
-            .pose
-            .rotation
-            .axis()
-            .unwrap_or_else(Vector3::x_axis);
+        let axis = self.pose.rotation.axis().unwrap_or_else(Vector3::x_axis);
         write!(f, "Observer pos: ({:.2}, {:.2}, {:.2}), axis: ({:.2}, {:.2}, {:.2}), angle: {:.0}, margin: {:.0}", self.pose.translation.x, self.pose.translation.y, self.pose.translation.z, axis.x, axis.y, axis.z, self.pose.rotation.angle() / PI * 180.0, self.decision_margin)
         // write!(f, "Observer pos: ({:.2}, {:.2}, {:.2}), quat: ({:.2}, {:.2}, {:.2}, {:.2}), margin: {:.0}", self.pose.translation.x, self.pose.translation.y, self.pose.translation.z, self.pose.rotation.w, self.pose.rotation.i, self.pose.rotation.j, self.pose.rotation.k, self.decision_margin)
     }

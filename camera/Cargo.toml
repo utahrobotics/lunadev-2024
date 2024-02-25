@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 nokhwa = { version = "0.10", features = ["input-native"] }
-unros-core = { path = "../unros-core" }
+unros = { path = "../unros" }
 image = { workspace = true }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use unros_core::rayon::iter::{
+use unros::rayon::iter::{
     plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer},
     IndexedParallelIterator, ParallelIterator,
 };
@@ -141,7 +141,7 @@ impl<T: Sync + Send + Copy> Producer for IterProducer<T> {
 mod tests {
     use std::{collections::HashSet, sync::Arc};
 
-    use unros_core::rayon::iter::{IntoParallelIterator, ParallelIterator};
+    use unros::rayon::iter::{IntoParallelIterator, ParallelIterator};
 
     use super::ArcIter;
 

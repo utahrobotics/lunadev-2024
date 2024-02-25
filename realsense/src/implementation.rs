@@ -24,7 +24,7 @@ use realsense_rust::{
     pipeline::InactivePipeline,
 };
 use rig::RobotElementRef;
-use unros_core::{
+use unros::{
     anyhow, async_trait,
     pubsub::{Publisher, Subscription},
     rayon::{
@@ -302,11 +302,9 @@ impl Node for RealSenseCamera {
                                 }),
                                 ExtrinsicParameters::from_pose(&nalgebra::convert(isometry)),
                             );
-                            let pixel_coords =
-                                (0..frame_height / 4).rev().flat_map(|y| {
-                                    (0..frame_width / 4)
-                                        .flat_map(move |x| [x as f32, y as f32])
-                                });
+                            let pixel_coords = (0..frame_height / 4).rev().flat_map(|y| {
+                                (0..frame_width / 4).flat_map(move |x| [x as f32, y as f32])
+                            });
 
                             let pixel_coords = Pixels::new(Matrix::<
                                 f32,

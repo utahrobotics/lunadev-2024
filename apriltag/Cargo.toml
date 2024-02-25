@@ -9,7 +9,7 @@ edition = "2021"
 apriltag-inner = { version = "0.4", package = "apriltag" }
 apriltag-image = "0.1"
 apriltag-nalgebra = "0.1"
-unros-core = { path = "../unros-core" }
+unros = { path = "../unros" }
 rig = { path = "../rig" }
 nalgebra = { workspace = true }
 fxhash = { workspace = true }

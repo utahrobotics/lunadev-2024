@@ -12,7 +12,7 @@ use image::DynamicImage;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
-use unros_core::{
+use unros::{
     anyhow, async_trait, log,
     logging::dump::{ScalingFilter, VideoDataDump},
     pubsub::{Publisher, Subscriber, Subscription},

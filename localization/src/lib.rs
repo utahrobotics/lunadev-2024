@@ -20,7 +20,7 @@ use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use rig::{RobotBase, RobotElementRef};
 use smach::{start_machine, Transition};
-use unros_core::{
+use unros::{
     anyhow, async_trait,
     pubsub::{Subscriber, Subscription},
     rayon::{

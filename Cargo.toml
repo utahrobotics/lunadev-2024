@@ -13,7 +13,7 @@ members = [
     "navigator",
     "rig", "tools", "smach", "costmap",
     "smooth-diff-drive",
-    "lunasimbot",
+    "lunasimbot", "unros-macros", "unros",
 ]
 resolver = "2"
 

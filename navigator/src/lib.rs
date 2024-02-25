@@ -4,7 +4,7 @@ use global_msgs::Steering;
 use nalgebra::{Point2, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
-use unros_core::{
+use unros::{
     anyhow, async_trait,
     pubsub::{Publisher, Subscriber, Subscription},
     setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext,

@@ -1,6 +1,6 @@
 use global_msgs::Steering;
 use serial::SerialConnection;
-use unros_core::{
+use unros::{
     anyhow, async_trait,
     pubsub::{Publisher, Subscriber, Subscription},
     setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,

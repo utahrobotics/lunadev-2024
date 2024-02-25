@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-unros-core = { path = "../unros-core" }
+unros = { path = "../unros" }
 machine-academy = { git = "https://github.com/manglemix/machine-academy.git" }
 serde = { workspace = true }
 rand = { workspace = true }

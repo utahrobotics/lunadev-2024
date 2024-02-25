@@ -12,7 +12,7 @@ use nokhwa::{
     query,
     utils::{CameraIndex, RequestedFormat, RequestedFormatType},
 };
-use unros_core::{
+use unros::{
     anyhow::{self, Context},
     async_trait, log,
     pubsub::{Publisher, Subscription},
