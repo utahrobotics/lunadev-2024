@@ -8,7 +8,6 @@ use unros_core::{
     anyhow, default_run_options, log,
     pubsub::{Publisher, Subscriber},
     start_unros_runtime,
-    task::Task,
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt, BufStream},
@@ -56,7 +55,7 @@ fn main() -> anyhow::Result<()> {
             let mut driver = DifferentialDriver::new(robot_base.get_ref());
             // driver.can_reverse = true;
             pathfinder.accept_path_sub(driver.create_path_sub());
-            let nav_task = pathfinder.get_navigation_task().clone();
+            let nav_task = pathfinder.get_navigation_handle();
 
             // let robot_base_ref = robot_base.get_ref();
             let localizer = Localizer::new(robot_base, 0.0);
@@ -234,11 +233,10 @@ fn main() -> anyhow::Result<()> {
                                 let y =
                                     stream.read_f32_le().await.expect("Failed to receive point");
                                 match nav_task.try_schedule(Point3::new(x, 0.0, y)).await {
-                                    Ok(mut handle) => {
+                                    Ok(handle) => {
                                         tokio::spawn(async move {
-                                            match handle.wait_for_completion().await {
-                                                Ok(Ok(())) => log::info!("Navigation complete"),
-                                                Ok(Err(e)) => log::error!("{e}"),
+                                            match handle.wait().await {
+                                                Ok(()) => log::info!("Navigation complete"),
                                                 Err(e) => log::error!("{e}"),
                                             }
                                         });

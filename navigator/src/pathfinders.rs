@@ -12,11 +12,7 @@ use ordered_float::NotNan;
 use pathfinding::directed::astar::astar;
 use rig::RobotBaseRef;
 use unros_core::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscription},
-    setup_logging,
-    task::{ExclusiveTask, TaskInit},
-    tokio_rayon, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, async_trait, pubsub::{Publisher, Subscription}, service::{new_service, Service, ServiceHandle}, setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext
 };
 
 use crate::Float;
@@ -46,17 +42,14 @@ impl NavigationProgress {
     }
 }
 
-pub type NavigationTask =
-    ExclusiveTask<Result<(), NavigationError>, Point3<Float>, NavigationProgress>;
+pub type NavigationServiceHandle =
+    ServiceHandle<Point3<Float>, NavigationError, NavigationProgress, Result<(), NavigationError>>;
 
 pub struct DirectPathfinder {
-    nav_task: NavigationTask,
+    service_handle: NavigationServiceHandle,
     path_signal: Publisher<Vec<Point2<Float>>>,
     robot_base: RobotBaseRef,
-    task_receiver: std::sync::mpsc::Receiver<(
-        Point3<f32>,
-        TaskInit<NavigationProgress, Result<(), NavigationError>>,
-    )>,
+    service: Service<Point3<Float>, NavigationError, NavigationProgress, Result<(), NavigationError>>,
     pub completion_distance: Float,
     costmap_ref: CostmapRef,
     pub refresh_rate: Duration,
@@ -72,20 +65,20 @@ impl DirectPathfinder {
         agent_radius: Float,
         max_height_diff: Float,
     ) -> Self {
-        let (nav_task, task_receiver) = ExclusiveTask::new("direct-pathfinder-task");
+        let (service, service_handle) = new_service();
         assert!(agent_radius >= 0.0);
         assert!(max_height_diff >= 0.0);
         Self {
-            nav_task,
             path_signal: Default::default(),
             robot_base,
-            task_receiver,
+            service,
             completion_distance: 0.15,
             costmap_ref,
             refresh_rate: Duration::from_millis(50),
             agent_radius,
             max_height_diff,
             intrinsics: Default::default(),
+            service_handle,
         }
     }
 
@@ -93,8 +86,8 @@ impl DirectPathfinder {
         self.path_signal.accept_subscription(sub);
     }
 
-    pub fn get_navigation_task(&self) -> &NavigationTask {
-        &self.nav_task
+    pub fn get_navigation_handle(&self) -> NavigationServiceHandle {
+        self.service_handle.clone()
     }
 }
 
@@ -111,13 +104,14 @@ impl Node for DirectPathfinder {
         tokio_rayon::spawn(move || {
             let sleeper = spin_sleep::SpinSleeper::default();
             'outer: loop {
-                let Ok((dest, task_init)) = self.task_receiver.recv() else {
+                let Some(mut req) = self.service.blocking_wait_for_request() else {
                     break Ok(());
                 };
 
+                let dest = req.take_input().unwrap();
                 let completion_percentage = Arc::new(AtomicU8::default());
 
-                let Some(pending_task) = task_init.send_task_data(NavigationProgress {
+                let Some(pending_task) = req.accept(NavigationProgress {
                     completion_percentage: completion_percentage.clone(),
                 }) else {
                     error!("Scheduler of task dropped task init before we could respond");

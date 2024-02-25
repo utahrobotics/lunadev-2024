@@ -34,7 +34,7 @@ use std::{
 pub mod logging;
 pub mod pubsub;
 pub mod rng;
-pub mod task;
+pub mod service;
 
 pub use anyhow;
 use anyhow::Context;
