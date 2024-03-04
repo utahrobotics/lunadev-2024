@@ -253,6 +253,14 @@ impl VideoDataDump {
             return None;
         };
         Some(format!(
+//             "v=0
+// o=- 0 0 IN IP4 127.0.0.1
+// s=No Name
+// c=IN IP4 {}
+// t=0 0
+// a=tool:libavformat 58.76.100
+// m=video {} RTP/AVP 96
+// a=rtpmap:96 H264/90000",
             "v=0
 o=- 0 0 IN IP4 127.0.0.1
 s=No Name
@@ -260,7 +268,8 @@ c=IN IP4 {}
 t=0 0
 a=tool:libavformat 58.76.100
 m=video {} RTP/AVP 96
-a=rtpmap:96 H265/90000",
+a=rtpmap:96 H264/90000
+a=fmtp:96 packetization-mode=1",
             addr.ip(),
             addr.port()
         ))
@@ -334,11 +343,12 @@ a=rtpmap:96 H265/90000",
             .pix_fmt("rgb24")
             .size(in_width, in_height)
             .input("-")
-            .codec_video("libx265")
+            .codec_video("libx264")
             .pix_fmt("yuv420p")
             .args([
                 "-crf",
                 "35",
+                "-an",
                 "-vf",
                 &format!("fps={fps},scale={out_width}:{out_height}"),
                 "-sws_flags",
@@ -346,13 +356,17 @@ a=rtpmap:96 H265/90000",
             ])
             .args([
                 "-preset",
-                "veryfast",
+                "ultrafast",
                 "-tune",
                 "zerolatency",
                 "-strict",
                 "2",
+                "-avioflags",
+                "direct",
+                "-rtsp_transport",
+                "udp",
             ])
-            // .args(["-sdp_file".as_ref(), sdp_file_path.as_path()])
+            .args(["-sdp_file".as_ref(), "sdp.txt"])
             .format("rtp")
             .output(format!("rtp://{addr}"))
             .spawn()

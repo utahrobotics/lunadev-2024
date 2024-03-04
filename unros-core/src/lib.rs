@@ -366,6 +366,27 @@ fn default_enable_console_subscriber() -> bool {
     true
 }
 
+/// A safe way to terminate the program with ample logged information.
+///
+/// Panics do not get logged, and panics intentionally are not able to terminate
+/// the runtime. The only way to terminate the program forcefully, other than pressing Ctrl-C
+/// twice, is to use `std::process::exit`, which this macro uses, on top of some helpful logging.
+///
+/// Usage is discouraged if clean exits are required, but this macro is one of the fastest ways
+/// to terminate *all* threads of the program to ensure that all computations stop immediately.
+#[macro_export]
+macro_rules! super_panic {
+    () => {{
+        $crate::log::error!("super_panic was invoked from {}:{}", file!(), line!());
+        std::process::exit(1);
+    }};
+    ($($arg: tt)*) => {{
+        $crate::log::error!("super_panic was invoked from {}:{} due to {}", file!(), line!(), format!($($arg)*));
+        std::process::exit(1);
+    }}
+}
+
+
 /// Creates a default `RunOptions`.
 ///
 /// This macro was created instead of implementing `Default`

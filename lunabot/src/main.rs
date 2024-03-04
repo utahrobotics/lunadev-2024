@@ -17,11 +17,7 @@ use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use telemetry::Telemetry;
 use unros::{
-    anyhow,
-    log::info,
-    logging::dump::{DataDump, ScalingFilter, VideoDataDump},
-    pubsub::Subscriber,
-    tokio, Application, Node,
+    anyhow, log::info, logging::dump::{DataDump, ScalingFilter, VideoDataDump}, pubsub::Subscriber, tokio, Application, Node
 };
 
 #[unros::main]
@@ -63,7 +59,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
         1920,
         1200,
-        24,
+        20,
     )
     .await?;
     camera.accept_image_received_sub(telemetry.create_image_subscription());

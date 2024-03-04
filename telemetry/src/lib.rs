@@ -239,7 +239,7 @@ impl Node for Telemetry {
                     return Ok(());
                 }
                 if let Some(img) = image_subscriptions.try_recv() {
-                    video_dump.write_frame_quiet(img.deref().clone())?;
+                    video_dump.write_frame(img.deref().clone())?;
                 }
 
                 let elapsed = start_service.elapsed();
