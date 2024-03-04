@@ -1,0 +1,107 @@
+[gd_scene load_steps=6 format=3 uid="uid://yf5505fsktwh"]
+
+[ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_wyh6u"]
+
+[sub_resource type="GDScript" id="GDScript_mi5wd"]
+script/source = "extends RichTextLabel
+
+
+func setTextBox(data:String,debug = false):
+	if debug:
+		push_color(Color.RED)
+		append_text(data)
+		pop()
+	else:
+		append_text(data)
+	
+
+func _on_process_manager_stdout(data):
+	setTextBox(data.get_string_from_ascii())
+
+func _on_process_manager_stderr(data):
+	setTextBox(data.get_string_from_ascii(),true)
+
+
+func _on_process_node_finished(returnCode:int):
+	setTextBox(\"<<FINISHED WITH {0} >>\".format([returnCode]),true)
+"
+
+[sub_resource type="Animation" id="Animation_fspp7"]
+length = 0.001
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:rotation")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [0.0]
+}
+
+[sub_resource type="Animation" id="Animation_xk6si"]
+resource_name = "spin"
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:rotation")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [0.0, 6.28319]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_lkfnh"]
+_data = {
+"RESET": SubResource("Animation_fspp7"),
+"spin": SubResource("Animation_xk6si")
+}
+
+[node name="PanelContainer" type="PanelContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+
+[node name="box" type="RichTextLabel" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+scroll_following = true
+script = SubResource("GDScript_mi5wd")
+
+[node name="ProcessNode" type="ProcessNode" parent="MarginContainer/VBoxContainer"]
+start_on_ready = true
+cmd = "ping"
+args = PackedStringArray("google.com", "-n", "10")
+
+[node name="Icon" type="Sprite2D" parent="."]
+z_index = -1
+position = Vector2(114, 93)
+texture = ExtResource("1_wyh6u")
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="Icon"]
+libraries = {
+"": SubResource("AnimationLibrary_lkfnh")
+}
+autoplay = "spin"
+
+[connection signal="finished" from="MarginContainer/VBoxContainer/ProcessNode" to="MarginContainer/VBoxContainer/box" method="_on_process_node_finished"]
+[connection signal="stderr" from="MarginContainer/VBoxContainer/ProcessNode" to="MarginContainer/VBoxContainer/box" method="_on_process_manager_stderr"]
+[connection signal="stdout" from="MarginContainer/VBoxContainer/ProcessNode" to="MarginContainer/VBoxContainer/box" method="_on_process_manager_stdout"]

@@ -87,7 +87,6 @@ func _process(delta: float) -> void:
 script/source = "extends TextureRect
 
 
-signal image_received(Image)
 signal ffmpeg_thr_finished
 
 
@@ -115,52 +114,15 @@ func _ready() -> void:
 			
 			ffmpeg_thr.start(
 				func():
-					var output := []
-					var err := OS.execute(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-strict\", \"2\", \"-f\", \"rawvideo\", \"-pix_fmt\", \"rgb24\", \"tcp://127.0.0.1:%s\" % (Lunabot.RECV_FROM + 3)], output, false, true)
-					##OS.create_process(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-strict\", \"2\", \"-y\", \"output.mkv\"], true)
-					for line in output:
-						print(line)
-					print(\"Error code %s\" % err)
-					call_deferred(\"emit_signal\", \"ffmpeg_thr_finished\")
+					#OS.execute(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-flags\", \"low_delay\", \"-avioflags\", \"direct\", \"-rtsp_transport\", \"udp\", \"-f\", \"rawvideo\", \"-pix_fmt\", \"rgb24\", \"tcp://127.0.0.1:%s\" % (Lunabot.RECV_FROM + 3)]),
+					OS.execute(\"ffplay\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-flags\", \"low_delay\"]),
+				Thread.PRIORITY_HIGH
 			)
 			
 			await ffmpeg_thr_finished
 			ffmpeg_thr.wait_to_finish()
 			ffmpeg_thr = null
 			Lunabot.raw_send_reliable(Lunabot.Channels.CAMERA, [1])
-	)
-	
-	udp_thr.start(
-		func():
-			var tcp_server := TCPServer.new()
-			while true:
-				var err := tcp_server.listen(Lunabot.RECV_FROM + 3)
-				if err == ERR_FILE_EOF:
-					continue
-				if err != 0:
-					push_error(\"Faced the following error while binding cam tcp: %s\" % err)
-					OS.delay_msec(2000)
-					continue
-				
-				while not tcp_server.is_connection_available():
-					OS.delay_msec(20)
-				
-				var cam_tcp := tcp_server.take_connection()
-				tcp_server.stop()
-				
-				while true:
-					var result := cam_tcp.get_data(IMAGE_SIZE)
-					if result[0] != 0:
-						push_error(\"Faced the following error while reading cam tcp: %s\" % result[0])
-						break
-					call_deferred(\"emit_signal\", \"image_received\", Image.create_from_data(IMAGE_WIDTH, IMAGE_HEIGHT, false, Image.FORMAT_RGB8, result[1])),
-			
-		Thread.PRIORITY_HIGH
-	)
-	
-	image_received.connect(
-		func(img: Image):
-			texture.update(img)
 	)
 "
 
@@ -386,12 +348,7 @@ func _gui_input(event: InputEvent) -> void:
 		pressed = event.pressed
 "
 
-[sub_resource type="Environment" id="Environment_bvywr"]
-background_mode = 1
-background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
-
 [sub_resource type="World3D" id="World3D_pep74"]
-environment = SubResource("Environment_bvywr")
 
 [sub_resource type="BoxMesh" id="BoxMesh_0laka"]
 size = Vector3(0.15, 0.15, 0.15)
@@ -405,6 +362,10 @@ albedo_color = Color(0.027451, 0.0235294, 0.0627451, 1)
 [sub_resource type="PlaneMesh" id="PlaneMesh_hrbaw"]
 material = SubResource("StandardMaterial3D_7fexe")
 size = Vector2(20, 20)
+
+[sub_resource type="Environment" id="Environment_bvywr"]
+background_mode = 1
+background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_51jn0"]
 shading_mode = 0
