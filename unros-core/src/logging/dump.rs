@@ -248,6 +248,7 @@ pub enum SubtitleWriteError {
 }
 
 impl VideoDataDump {
+    #[must_use]
     pub fn generate_sdp(&self) -> Option<String> {
         let VideoDataDumpType::Rtp(addr) = &self.dump_type else {
             return None;
@@ -325,7 +326,7 @@ a=fmtp:96 packetization-mode=1",
         )
     }
 
-    pub async fn new_rtp(
+    pub fn new_rtp(
         in_width: u32,
         in_height: u32,
         out_width: u32,
@@ -366,7 +367,7 @@ a=fmtp:96 packetization-mode=1",
                 "-rtsp_transport",
                 "udp",
             ])
-            .args(["-sdp_file".as_ref(), "sdp.txt"])
+            // .args(["-sdp_file", "sdp.txt"])
             .format("rtp")
             .output(format!("rtp://{addr}"))
             .spawn()

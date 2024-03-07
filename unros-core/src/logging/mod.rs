@@ -131,7 +131,7 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                             record.level(),
                             record.target(),
                             message
-                        ))
+                        ));
                     })
                     .chain(
                         fern::log_file(log_folder_name.join(".log"))
@@ -156,7 +156,7 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                             secs % 60.0,
                             record.target(),
                             message
-                        ))
+                        ));
                     })
                     .chain(std::io::stdout()),
             )

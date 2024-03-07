@@ -178,7 +178,7 @@ impl Node for DirectPathfinder {
                         &position,
                         |current| {
                             let current = current.cast::<isize>();
-                            const ROOT_2: Float = 1.4142135623730;
+                            const ROOT_2: Float = std::f64::consts::SQRT_2 as Float;
                             [
                                 (Vector2::new(-1, -1) + current, ROOT_2),
                                 (Vector2::new(-1, 0) + current, 1.0),

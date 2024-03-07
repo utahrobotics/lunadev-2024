@@ -69,8 +69,7 @@ impl Telemetry {
             ScalingFilter::FastBilinear,
             video_addr,
             cam_fps,
-        )
-        .await?;
+        )?;
 
         Ok(Self {
             bandwidth_limit: 0,

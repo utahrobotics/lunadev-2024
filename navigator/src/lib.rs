@@ -36,7 +36,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
             refresh_rate: Duration::from_millis(20),
             can_reverse: false,
             // 30 degrees
-            full_turn_angle: 0.5235987756,
+            full_turn_angle: std::f64::consts::FRAC_PI_6 as Float,
             turn_fn: |frac| -2.0 * frac + 1.0,
             intrinsics: Default::default(),
         }

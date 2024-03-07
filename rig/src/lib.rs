@@ -54,9 +54,9 @@ impl Default for RotationSequence {
     }
 }
 
-impl Into<quaternion_core::RotationSequence> for RotationSequence {
-    fn into(self) -> quaternion_core::RotationSequence {
-        match self {
+impl From<RotationSequence> for quaternion_core::RotationSequence {
+    fn from(value: RotationSequence) -> Self {
+        match value {
             RotationSequence::ZXZ => quaternion_core::RotationSequence::ZXZ,
             RotationSequence::XYX => quaternion_core::RotationSequence::XYX,
             RotationSequence::YZY => quaternion_core::RotationSequence::YZY,
@@ -98,9 +98,9 @@ pub enum RotationType {
     Extrinsic,
 }
 
-impl Into<quaternion_core::RotationType> for RotationType {
-    fn into(self) -> quaternion_core::RotationType {
-        match self {
+impl From<RotationType> for quaternion_core::RotationType {
+    fn from(value: RotationType) -> Self {
+        match value {
             RotationType::Intrinsic => quaternion_core::RotationType::Intrinsic,
             RotationType::Extrinsic => quaternion_core::RotationType::Extrinsic,
         }

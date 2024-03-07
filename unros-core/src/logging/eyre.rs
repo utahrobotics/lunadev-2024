@@ -26,7 +26,7 @@ impl PanicMessage for UnrosEyreMessage {
             .payload()
             .downcast_ref::<String>()
             .map(String::as_str)
-            .or_else(|| pi.payload().downcast_ref::<&str>().cloned())
+            .or_else(|| pi.payload().downcast_ref::<&str>().copied())
             .unwrap_or("<non string panic payload>");
 
         write!(f, "Message:  ")?;

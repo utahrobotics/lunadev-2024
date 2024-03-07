@@ -65,6 +65,7 @@ pub struct Service<ScheduleInput, ScheduleError, ScheduleData, TaskOutput> {
     >,
 }
 
+#[must_use]
 pub fn new_service<ScheduleInput, ScheduleError, ScheduleData, TaskOutput>() -> (
     Service<ScheduleInput, ScheduleError, ScheduleData, TaskOutput>,
     ServiceHandle<ScheduleInput, ScheduleError, ScheduleData, TaskOutput>,
@@ -130,6 +131,7 @@ impl<TaskOutput> Pending<TaskOutput> {
         let _ = self.output_sender.send(output);
     }
 
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.output_sender.is_closed()
     }

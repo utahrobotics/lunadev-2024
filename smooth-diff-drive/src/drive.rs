@@ -69,12 +69,10 @@ impl From<Drive> for f32 {
 
 impl From<Drive> for f64 {
     fn from(value: Drive) -> Self {
-        if value.drive == 0 {
-            0.0
-        } else if value.drive < 0 {
-            value.drive as f64 / 128.0
-        } else {
-            value.drive as f64 / 127.0
+        match value.drive.cmp(&0) {
+            Ordering::Less => value.drive as f64 / 128.0,
+            Ordering::Equal => 0.0,
+            Ordering::Greater => value.drive as f64 / 127.0,
         }
     }
 }

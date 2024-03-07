@@ -36,7 +36,7 @@ pub struct Publisher<T> {
 impl<T> Default for Publisher<T> {
     fn default() -> Self {
         Self {
-            subs: Default::default(),
+            subs: VecDeque::default(),
         }
     }
 }
@@ -145,6 +145,7 @@ pub struct Subscription<T> {
 }
 
 impl<T: Clone + Send + 'static> Subscriber<T> {
+    #[must_use]
     pub fn new(size: usize) -> Self {
         Self {
             queue: Arc::new(ArrayQueue::new(size)),
@@ -185,6 +186,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     /// all received messages formatted using the `display` function.
     ///
     /// Logs are saved to `path` using a `DataDump`.
+    #[must_use]
     pub async fn into_logger(
         mut self,
         mut display: impl FnMut(T) -> String + Send + 'static,
@@ -211,6 +213,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 
     /// Creates a `Subscription` that needs to be passed to a `Publisher`.
+    #[must_use]
     pub fn create_subscription(&self) -> Subscription<T> {
         Subscription {
             queue: Box::new(Arc::downgrade(&self.queue)),
@@ -271,6 +274,7 @@ impl<T: 'static> Subscription<T> {
     /// we say that the `Subscription` is lagging. Catching lagging is important
     /// as it indicates data loss and a lack of processing speed. With a name,
     /// these lags will be logged as warnings in the standard log file (`.log`).
+    #[must_use]
     pub fn set_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into().into_boxed_str());
         self
@@ -357,6 +361,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     /// all received messages formatted using the `display` function.
     ///
     /// Logs are saved to `path` using a `DataDump`.
+    #[must_use]
     pub async fn into_logger(
         self,
         display: impl FnMut(T) -> String + Send + 'static,

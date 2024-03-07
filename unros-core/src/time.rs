@@ -14,6 +14,7 @@ pub struct TimeVec<T, F = fn(&VecDeque<T>) -> T> {
 }
 
 impl<T, F: FnMut(&VecDeque<T>) -> T> TimeVec<T, F> {
+    #[must_use]
     pub fn new(max_length: usize, duration: Duration, mut default: F) -> Self {
         let mut vec = VecDeque::with_capacity(max_length);
         for _ in 0..max_length {
@@ -28,6 +29,7 @@ impl<T, F: FnMut(&VecDeque<T>) -> T> TimeVec<T, F> {
         }
     }
 
+    #[must_use]
     pub fn new_default(max_length: usize, duration: Duration) -> TimeVec<T>
     where
         T: Default,
