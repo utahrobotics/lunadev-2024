@@ -17,7 +17,11 @@ use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use telemetry::Telemetry;
 use unros::{
-    anyhow, log::info, logging::dump::{DataDump, ScalingFilter, VideoDataDump}, pubsub::Subscriber, tokio, Application, Node
+    anyhow,
+    log::info,
+    logging::dump::{DataDump, ScalingFilter, VideoDataDump},
+    pubsub::Subscriber,
+    tokio, Application, Node,
 };
 
 #[unros::main]

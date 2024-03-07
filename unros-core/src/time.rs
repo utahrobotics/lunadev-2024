@@ -1,13 +1,17 @@
-use std::{collections::VecDeque, time::{Duration, Instant}};
+use std::{
+    cmp::Ordering,
+    collections::VecDeque,
+    ops::{Deref, DerefMut},
+    time::{Duration, Instant},
+};
 
-pub struct TimeVec<T, F=fn(&VecDeque<T>) -> T> {
+pub struct TimeVec<T, F = fn(&VecDeque<T>) -> T> {
     vec: VecDeque<T>,
     head_time: Instant,
     duration: Duration,
     max_length: usize,
-    default: F
+    default: F,
 }
-
 
 impl<T, F: FnMut(&VecDeque<T>) -> T> TimeVec<T, F> {
     pub fn new(max_length: usize, duration: Duration, mut default: F) -> Self {
@@ -20,11 +24,14 @@ impl<T, F: FnMut(&VecDeque<T>) -> T> TimeVec<T, F> {
             head_time: Instant::now(),
             duration,
             max_length,
-            default
+            default,
         }
     }
 
-    pub fn new_default(max_length: usize, duration: Duration) -> TimeVec<T> where T: Default {
+    pub fn new_default(max_length: usize, duration: Duration) -> TimeVec<T>
+    where
+        T: Default,
+    {
         TimeVec::new(max_length, duration, |_| Default::default())
     }
 
@@ -69,7 +76,7 @@ impl<T, F: FnMut(&VecDeque<T>) -> T> TimeVec<T, F> {
         if i >= self.max_length - 1 {
             None
         } else {
-            let mut iter = self.vec.range_mut(i..=i+1);
+            let mut iter = self.vec.range_mut(i..=i + 1);
             let a = iter.next().unwrap();
             let b = iter.next().unwrap();
             Some((a, b))
@@ -81,8 +88,41 @@ impl<T, F: FnMut(&VecDeque<T>) -> T> TimeVec<T, F> {
         self.head_time
     }
 
-    pub fn get_vec(&mut self) -> &mut VecDeque<T> {
+    pub fn get_vec(&mut self) -> BorrowedVecDeque<T, F> {
         self.update();
-        &mut self.vec
+        BorrowedVecDeque(self)
+    }
+}
+
+pub struct BorrowedVecDeque<'a, T, F: FnMut(&VecDeque<T>) -> T>(&'a mut TimeVec<T, F>);
+
+impl<'a, T, F: FnMut(&VecDeque<T>) -> T> Deref for BorrowedVecDeque<'a, T, F> {
+    type Target = VecDeque<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.vec
+    }
+}
+
+impl<'a, T, F: FnMut(&VecDeque<T>) -> T> DerefMut for BorrowedVecDeque<'a, T, F> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0.vec
+    }
+}
+
+impl<'a, T, F: FnMut(&VecDeque<T>) -> T> Drop for BorrowedVecDeque<'a, T, F> {
+    fn drop(&mut self) {
+        match self.0.vec.len().cmp(&self.0.max_length) {
+            Ordering::Less => {
+                for _ in 0..(self.0.max_length - self.0.vec.len()) {
+                    self.0.vec.push_back((self.0.default)(&self.0.vec));
+                }
+            }
+
+            Ordering::Equal => {}
+            Ordering::Greater => {
+                self.0.vec.drain(0..self.0.vec.len() - self.0.max_length);
+            }
+        }
     }
 }

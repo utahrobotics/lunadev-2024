@@ -388,7 +388,6 @@ macro_rules! super_panic {
     }}
 }
 
-
 /// Creates a default `RunOptions`.
 ///
 /// This macro was created instead of implementing `Default`
