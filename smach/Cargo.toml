@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 tokio = { workspace = true }
 # async-trait = "0.1"
+# crossbeam = { workspace = true }

@@ -19,7 +19,7 @@ use nalgebra::{
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use rig::{RobotBase, RobotElementRef};
-use smach::{start_machine, Transition};
+use smach::{State, StateResult};
 use unros::{
     anyhow, async_trait,
     pubsub::{Subscriber, Subscription},
@@ -267,7 +267,7 @@ struct LocalizerBlackboard {
 /// The calibration stage of the localizer.
 ///
 /// This stage runs for `calibration_duration` before applying the calibrations and exiting.
-async fn calibrate_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ()) {
+async fn calibrate_localizer(mut bb: LocalizerBlackboard) -> StateResult<LocalizerBlackboard> {
     let context = bb.context;
     setup_logging!(context);
     info!("Calibrating localizer");
@@ -342,7 +342,7 @@ async fn calibrate_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboar
     }
     info!("Localizer calibrated");
     bb.context = context;
-    (bb, ())
+    bb.into()
 }
 
 const E: Float = std::f64::consts::E as Float;
@@ -393,7 +393,7 @@ pub struct Particle {
 /// During this stage, the localizer accepts observations and updates its estimate of the robot's Isometry.
 ///
 /// If recalibration is triggered, this stage exits. Otherwise, this stage runs forever.
-async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ()) {
+async fn run_localizer(mut bb: LocalizerBlackboard) -> StateResult<LocalizerBlackboard> {
     let context = bb.context;
     setup_logging!(context);
 
@@ -617,31 +617,7 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> (LocalizerBlackboard, ())
         start += delta_duration;
     }
     bb.context = context;
-    (bb, ())
-}
-
-struct CalibrateTransition;
-
-impl Transition<(), LocalizerBlackboard> for CalibrateTransition {
-    fn transition(
-        _: (),
-        blackboard: LocalizerBlackboard,
-        init: smach::TransitionInit<LocalizerBlackboard>,
-    ) -> smach::Transitioned {
-        init.next_state::<RunTransition, _, _>(blackboard, run_localizer)
-    }
-}
-
-struct RunTransition;
-
-impl Transition<(), LocalizerBlackboard> for RunTransition {
-    fn transition(
-        _: (),
-        blackboard: LocalizerBlackboard,
-        init: smach::TransitionInit<LocalizerBlackboard>,
-    ) -> smach::Transitioned {
-        init.next_state::<CalibrateTransition, _, _>(blackboard, calibrate_localizer)
-    }
+    bb.into()
 }
 
 #[async_trait]
@@ -673,7 +649,15 @@ impl Node for Localizer {
             resistance_modifier: self.resistance_modifier,
         };
 
-        start_machine::<CalibrateTransition, _, _, _>(bb, calibrate_localizer).await;
+        let (calib, calib_trans) = State::new(calibrate_localizer);
+        let (run, run_trans) = State::new(run_localizer);
+
+        let start_state = calib.clone();
+
+        calib_trans.set_transition(move |_| Some(run.clone()));
+        run_trans.set_transition(move |_| Some(calib.clone()));
+
+        start_state.start(bb).await;
         unreachable!()
     }
 }

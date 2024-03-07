@@ -1,126 +1,185 @@
-use std::{future::Future, pin::Pin};
+use std::{
+    any::Any,
+    future::Future,
+    marker::PhantomData,
+    pin::Pin,
+    sync::{Arc, OnceLock},
+};
 
-use tokio::sync::{broadcast, mpsc};
-
-pub struct TransitionInit<B> {
-    sender: mpsc::Sender<B>,
-    alive_recv: broadcast::Receiver<()>,
+/// A `State` is a unit of computation.
+///
+/// In a State Machine, only 1 `State` can run at a time. When a `State` finishes,
+/// it is transitioned into a new `State`, which immediately begins to run, or the
+/// State Machine terminates. `State`s are stateless, which means the information
+/// they work on should be contained in the blackboard, which is passed from `State`
+/// to `State`. All `State`s in a State Machine must use the same type of blackboard.
+///
+/// In this framework, a `State` is simply an async `fn` pointer, which is more likely to
+/// be pure unlike closures. The return value of this `fn` is passed to the transition
+/// function (if it exists) to determine the next state to transition to.
+pub struct State<S> {
+    main: Arc<dyn Fn(S) -> Pin<Box<dyn Future<Output = (S, Box<dyn Any>)> + Send>> + Send + Sync>,
+    transition: Arc<OnceLock<Box<dyn Fn(Box<dyn Any>) -> Option<State<S>> + Send + Sync>>>,
 }
 
-pub struct Transitioned {
-    fut: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
-}
-
-impl<B> TransitionInit<B> {
-    pub fn next_state<T, R, Fut>(mut self, blackboard: B, state: fn(B) -> Fut) -> Transitioned
-    where
-        B: Send + 'static,
-        Fut: Future<Output = (B, R)> + Send + 'static,
-        T: Transition<R, B>,
-    {
-        Transitioned {
-            fut: Some(Box::pin(async move {
-                let (blackboard, output) = state(blackboard).await;
-
-                let trans = T::transition(
-                    output,
-                    blackboard,
-                    TransitionInit {
-                        sender: self.sender.clone(),
-                        alive_recv: self.alive_recv.resubscribe(),
-                    },
-                );
-                let Some(fut) = trans.fut else {
-                    return;
-                };
-                tokio::spawn(async move {
-                    tokio::select! {
-                        _ = self.alive_recv.recv() => {}
-                        () = fut => { }
-                    }
-                });
-            })),
+impl<S> Clone for State<S> {
+    fn clone(&self) -> Self {
+        Self {
+            main: self.main.clone(),
+            transition: self.transition.clone(),
         }
     }
+}
 
-    pub fn exit_machine(self, blackboard: B) -> Transitioned {
-        self.sender.try_send(blackboard).unwrap();
-        Transitioned { fut: None }
+/// The logic for the transition of a finished `State`.
+///
+/// When a `State` finishes, it returns a value that is handled
+/// by its transition, which tells the State Machine what to do.
+pub struct StateTransition<S, R> {
+    transition: Arc<OnceLock<Box<dyn Fn(Box<dyn Any>) -> Option<State<S>> + Send + Sync>>>,
+    _phantom: PhantomData<R>,
+}
+
+/// The return value of all `State`s.
+///
+/// Since borrowing closures do not exist yet, async closures must
+/// receive and yield ownership of the blackboard when they are entered or exited.
+/// This struct ensures that.
+pub struct StateResult<S, R = ()> {
+    pub blackboard: S,
+    pub result: R,
+}
+
+impl<S, R> StateResult<S, R> {
+    #[must_use]
+    pub fn new(blackboard: S, result: R) -> Self {
+        Self { blackboard, result }
     }
 }
 
-pub trait Transition<T, B> {
-    fn transition(input: T, blackboard: B, init: TransitionInit<B>) -> Transitioned;
+impl<S> From<S> for StateResult<S, ()> {
+    fn from(blackboard: S) -> Self {
+        Self {
+            blackboard,
+            result: (),
+        }
+    }
 }
 
-pub async fn start_machine<T, B, R, Fut>(blackboard: B, init_state: fn(B) -> Fut) -> B
-where
-    B: Send + 'static,
-    Fut: Future<Output = (B, R)> + Send,
-    T: Transition<R, B>,
-{
-    let (blackboard, output) = init_state(blackboard).await;
-    let (sender, mut receiver) = mpsc::channel(1);
-    let (_alive_sender, alive_recv) = broadcast::channel(1);
+impl<S: 'static + Send> State<S> {
+    /// Creates a new `State` from the given async `fn` pointer.
+    ///
+    /// The `State`, and its `StateTransition` is returned. The `StateTransition` can be
+    /// used to configure the logic of the transition.
+    #[must_use]
+    pub fn new<R: 'static, Fut: Future<Output = StateResult<S, R>> + Send + 'static>(
+        main: fn(S) -> Fut,
+    ) -> (Self, StateTransition<S, R>) {
+        let transition = Arc::new(OnceLock::new());
+        let main: Box<
+            dyn Fn(S) -> Pin<Box<dyn Future<Output = (S, Box<dyn Any>)> + Send>> + Send + Sync,
+        > = Box::new(move |s| {
+            Box::pin(async move {
+                let StateResult { blackboard, result } = main(s).await;
+                let result: Box<dyn Any> = Box::new(result);
+                (blackboard, result)
+            })
+        });
+        (
+            Self {
+                main: Arc::from(main),
+                transition: transition.clone(),
+            },
+            StateTransition {
+                transition,
+                _phantom: PhantomData,
+            },
+        )
+    }
 
-    let trans = T::transition(output, blackboard, TransitionInit { sender, alive_recv });
-    let Some(fut) = trans.fut else {
-        return receiver.recv().await.expect("State has panicked");
-    };
-    fut.await;
-    receiver.recv().await.expect("State has panicked")
+    /// Starts up a State Machine with this `State` being
+    /// the initial `State`.
+    ///
+    /// An initial blackboard is provided, and is subsequently returned
+    /// when a `State` has no transitions.
+    ///
+    /// The State Machine is defined by the combination of `State`s
+    /// and transitions, so there isn't a State Machine type. As long
+    /// as several `State`s are transitioning between each other, any
+    /// `State` can be used as the initial `State` for a State Machine.
+    ///
+    /// All `State`s in the State Machine are ran on the current thread.
+    pub async fn start(&self, blackboard: S) -> S {
+        let mut fut = (self.main)(blackboard);
+        let mut transition = self.transition.clone();
+
+        loop {
+            let (bb, r) = fut.await;
+            let Some(next_transition) = transition.get() else {
+                break bb;
+            };
+            let Some(next) = next_transition(r) else {
+                break bb;
+            };
+            transition = next.transition.clone();
+            fut = (next.main)(bb);
+        }
+    }
+}
+
+impl<S: 'static, R: 'static> StateTransition<S, R> {
+    /// Sets the transition logic for the associated `State`.
+    ///
+    /// The given closure must accept the return value of the finished `State`
+    /// and return the next `State` to transition to. If `None` is returned,
+    /// the `State` will have no transitions, causing the State Machine to terminate.
+    ///
+    /// Not calling this method has the same effect as passing a closure that always returns `None`.
+    ///
+    /// It is strongly encouraged that the given closure be pure. If the transition logic depends on
+    /// the blackboard, then that should be inside the `State` itself and reflected in its returned
+    /// value.
+    pub fn set_transition(self, f: impl Fn(R) -> Option<State<S>> + Send + Sync + 'static) {
+        let _ = self.transition.set(Box::new(move |any| {
+            f(*Box::<dyn Any>::downcast::<R>(any).unwrap())
+        }));
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{start_machine, Transition};
+    use crate::{State, StateResult};
 
-    struct SumBlackboard {
-        sum: usize,
-    }
+    #[tokio::test]
+    async fn adder_test() {
+        let (adder, adder_trans) = State::new(|mut num: usize| async move {
+            num += 1;
+            StateResult::from(num)
+        });
+        let (checker, checker_trans) =
+            State::new(|num: usize| async move { StateResult::new(num, num == 10000) });
 
-    struct SumTransition;
+        let start_state = adder.clone();
 
-    impl Transition<(), SumBlackboard> for SumTransition {
-        fn transition(
-            _: (),
-            blackboard: SumBlackboard,
-            init: crate::TransitionInit<SumBlackboard>,
-        ) -> crate::Transitioned {
-            init.next_state::<CheckTransition, _, _>(blackboard, check_state)
-        }
-    }
+        adder_trans.set_transition(move |_| Some(checker.clone()));
+        checker_trans.set_transition(move |equals| if equals { None } else { Some(adder.clone()) });
 
-    struct CheckTransition;
-
-    impl Transition<bool, SumBlackboard> for CheckTransition {
-        fn transition(
-            input: bool,
-            blackboard: SumBlackboard,
-            init: crate::TransitionInit<SumBlackboard>,
-        ) -> crate::Transitioned {
-            if input {
-                init.exit_machine(blackboard)
-            } else {
-                init.next_state::<SumTransition, _, _>(blackboard, sum_state)
-            }
-        }
-    }
-
-    async fn sum_state(mut bb: SumBlackboard) -> (SumBlackboard, ()) {
-        bb.sum += 1;
-        (bb, ())
-    }
-
-    async fn check_state(bb: SumBlackboard) -> (SumBlackboard, bool) {
-        let finished = bb.sum >= 10;
-        (bb, finished)
+        assert_eq!(start_state.start(0).await, 10000);
     }
 
     #[tokio::test]
-    async fn test_adder01() {
-        let mut bb = SumBlackboard { sum: 0 };
-        bb = start_machine::<SumTransition, _, _, _>(bb, sum_state).await;
-        assert_eq!(bb.sum, 10);
+    async fn null_test() {
+        let (adder, _) = State::new(|mut num: usize| async move {
+            num += 1;
+            StateResult::from(num)
+        });
+        let (_, checker_trans) =
+            State::new(|num: usize| async move { StateResult::new(num, num == 10000) });
+
+        let start_state = adder.clone();
+
+        checker_trans.set_transition(move |equals| if equals { None } else { Some(adder.clone()) });
+
+        assert_eq!(start_state.start(0).await, 1);
     }
 }
