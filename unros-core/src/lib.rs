@@ -37,7 +37,7 @@ pub mod logging;
 pub mod pubsub;
 pub mod rng;
 pub mod service;
-pub mod time;
+pub mod utils;
 
 pub use anyhow;
 use anyhow::Context;

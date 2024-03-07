@@ -1,11 +1,10 @@
 use std::{
-    cmp::Ordering,
-    collections::VecDeque,
-    ops::{Deref, DerefMut},
-    time::{Duration, Instant},
+    cmp::Ordering, collections::VecDeque, ops::{Deref, DerefMut}, sync::OnceLock, time::{Duration, Instant}
 };
 
-pub struct TimeVec<T, F = fn(&VecDeque<T>) -> T> {
+use crossbeam::queue::ArrayQueue;
+
+pub struct TimeVec<T, F = Box<dyn Fn(&VecDeque<T>) -> T + Send>> {
     vec: VecDeque<T>,
     head_time: Instant,
     duration: Duration,
@@ -13,7 +12,7 @@ pub struct TimeVec<T, F = fn(&VecDeque<T>) -> T> {
     default: F,
 }
 
-impl<T, F: FnMut(&VecDeque<T>) -> T> TimeVec<T, F> {
+impl<T, F: FnMut(&VecDeque<T>) -> T + Send> TimeVec<T, F> {
     #[must_use]
     pub fn new(max_length: usize, duration: Duration, mut default: F) -> Self {
         let mut vec = VecDeque::with_capacity(max_length);
@@ -30,11 +29,14 @@ impl<T, F: FnMut(&VecDeque<T>) -> T> TimeVec<T, F> {
     }
 
     #[must_use]
-    pub fn new_default(max_length: usize, duration: Duration) -> TimeVec<T>
+    pub fn new_default(
+        max_length: usize,
+        duration: Duration,
+    ) -> TimeVec<T, Box<dyn Fn(&VecDeque<T>) -> T + Send>>
     where
         T: Default,
     {
-        TimeVec::new(max_length, duration, |_| Default::default())
+        TimeVec::new(max_length, duration, Box::new(|_| Default::default()))
     }
 
     fn update(&mut self) {
@@ -125,6 +127,70 @@ impl<'a, T, F: FnMut(&VecDeque<T>) -> T> Drop for BorrowedVecDeque<'a, T, F> {
             Ordering::Greater => {
                 self.0.vec.drain(0..self.0.vec.len() - self.0.max_length);
             }
+        }
+    }
+}
+
+
+pub struct ResourceQueue<T> {
+    queue: OnceLock<ArrayQueue<T>>,
+    max_length: usize,
+    default: fn() -> T
+}
+
+
+impl<T> ResourceQueue<T> {
+    pub const fn new(max_length: usize, default: fn() -> T) -> Self {
+        Self {
+            queue: OnceLock::new(),
+            max_length,
+            default
+        }
+    }
+
+    pub fn get(&self) -> ResourceGuard<T> {
+        let inner = self.queue.get_or_init(|| ArrayQueue::new(self.max_length)).pop().unwrap_or_else(self.default);
+        ResourceGuard {
+            inner: Some(inner),
+            queue: self
+        }
+    }
+
+    pub fn set(&self, value: T) {
+        self.queue.get_or_init(|| ArrayQueue::new(self.max_length)).force_push(value);
+    }
+}
+
+
+pub struct ResourceGuard<'a, T> {
+    inner: Option<T>,
+    queue: &'a ResourceQueue<T>
+}
+
+impl<'a, T> ResourceGuard<'a, T> {
+    pub fn do_not_return(mut self) -> T {
+        self.inner.take().unwrap()
+    }
+}
+
+impl<'a, T> Deref for ResourceGuard<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref().unwrap()
+    }
+}
+
+impl<'a, T> DerefMut for ResourceGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.as_mut().unwrap()
+    }
+}
+
+impl<'a, T> Drop for ResourceGuard<'a, T> {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.take() {
+            self.queue.queue.get().unwrap().force_push(inner);
         }
     }
 }

@@ -115,10 +115,7 @@ impl<S: 'static + Send> State<S> {
 
         loop {
             let (bb, r) = fut.await;
-            let Some(next_transition) = transition.get() else {
-                break bb;
-            };
-            let Some(next) = next_transition(r) else {
+            let Some(next) = transition.get().map(|x| x(r)).flatten() else {
                 break bb;
             };
             transition = next.transition.clone();
