@@ -10,14 +10,15 @@
 //! 1. The Node trait
 //! 2. A complete logging system
 //! 3. An asynchronous Node runtime
-//! 4. Signals, with 3 subscription variants (analagous to ROS publisher and subscribers)
-//! 5. The Task trait (analagous to ROS actions)
+//! 4. Publisher and Subscribers (analagous to ROS publisher and subscribers)
+//! 5. The Service trait (analagous to ROS actions and services)
 
 #![feature(
     associated_type_defaults,
     once_cell_try,
     iter_collect_into,
-    result_flattening
+    result_flattening,
+    div_duration
 )]
 
 use std::{
@@ -35,6 +36,7 @@ pub mod logging;
 pub mod pubsub;
 pub mod rng;
 pub mod service;
+pub mod time;
 
 pub use anyhow;
 use anyhow::Context;
