@@ -345,7 +345,8 @@ async fn run_localizer<T: Optimizer>(
 
             let max_delta = bb.max_delta.as_secs_f64() as Float;
             new_src.point.isometry.translation.vector += 0.5
-                * (new_src.point.linear_velocity + (new_src.point.acceleration - G_VEC) * max_delta)
+                * (new_src.point.linear_velocity
+                    + (new_src.point.acceleration - G_VEC) * max_delta)
                 * max_delta;
             new_src.point.linear_velocity += (new_src.point.acceleration - G_VEC) * max_delta;
             new_src.point.isometry.rotation =
@@ -413,7 +414,10 @@ impl<T: Optimizer> Node for Localizer<T> {
                     * (data_point.linear_velocity + (data_point.acceleration - G_VEC) * max_delta)
                     * max_delta;
                 data_point.linear_velocity += (data_point.acceleration - G_VEC) * max_delta;
-                data_point.isometry.rotation = data_point.isometry.rotation.append_axisangle_linearized(&data_point.angular_velocity.scaled_axis().scale(max_delta));
+                data_point.isometry.rotation =
+                    data_point.isometry.rotation.append_axisangle_linearized(
+                        &data_point.angular_velocity.scaled_axis().scale(max_delta),
+                    );
                 data_point
             } else {
                 DataPoint {

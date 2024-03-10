@@ -1,8 +1,7 @@
-use std::ops::DerefMut;
+use std::{cmp::Ordering, ops::DerefMut};
 
 use fxhash::FxHashMap;
 use nalgebra::UnitQuaternion;
-use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use rig::RobotElementRef;
 use unros::{
@@ -33,14 +32,15 @@ pub trait StochasticOptimizer: Send + Sync + 'static {
         delta: Float,
         imu_calibs: &FxHashMap<RobotElementRef, CalibratedImu>,
     ) -> DataPoint;
-    fn score_candidate(
+    fn merge_candidates(
         &self,
         old: &DataBucket,
         current: &DataBucket,
         new: &DataBucket,
-        candidate: &DataPoint,
+        candidate1: DataPoint,
+        candidate2: DataPoint,
         imu_calibs: &FxHashMap<RobotElementRef, CalibratedImu>,
-    ) -> usize;
+    ) -> DataPoint;
 }
 
 impl<T: StochasticOptimizer> Optimizer for T {
@@ -52,15 +52,18 @@ impl<T: StochasticOptimizer> Optimizer for T {
         delta: Float,
         imu_calibs: &FxHashMap<RobotElementRef, CalibratedImu>,
     ) {
-        let Some((_, candidate)) = rayon::iter::repeatn((), self.candidate_count())
+        let Some(candidate) = rayon::iter::repeatn((), self.candidate_count())
             .map(|_| {
-                let candidate = self.generate_candidate(old, current, new, delta, imu_calibs);
-                (
-                    self.score_candidate(old, current, new, &candidate, imu_calibs),
-                    candidate,
-                )
+                // let candidate = self.generate_candidate(old, current, new, delta, imu_calibs);
+                // let score = NotNan::new(self.score_candidate(old, current, new, &candidate, imu_calibs));
+                // Some((
+                //     score.ok()?,
+                //     candidate,
+                // ))
+                self.generate_candidate(old, current, new, delta, imu_calibs)
             })
-            .max_by_key(|(score, _)| *score)
+            .reduce_with(|a, b| self.merge_candidates(old, current, new, a, b, imu_calibs))
+        // .max_by_key(|(score, _)| *score)
         else {
             return;
         };
@@ -110,78 +113,137 @@ impl StochasticOptimizer for StochasticSmoothnessOptimizer {
             .rotation_to(&new.point.isometry.rotation);
         candidate.angular_velocity = UnitQuaternion::new(travel.scaled_axis().unscale(delta));
 
-        if rng.gen_bool(0.00002) {
-            println!("{candidate:?}");
-        }
+        // if rng.gen_bool(0.00002) {
+        //     println!("{candidate:?}");
+        // }
 
         candidate
     }
 
-    fn score_candidate(
+    fn merge_candidates(
         &self,
         _old: &DataBucket,
         current: &DataBucket,
-        _new: &DataBucket,
-        candidate: &DataPoint,
+        new: &DataBucket,
+        mut candidate1: DataPoint,
+        candidate2: DataPoint,
         imu_calibs: &FxHashMap<RobotElementRef, CalibratedImu>,
-    ) -> usize {
-        let mut score: Float = 0.0;
+    ) -> DataPoint {
+        let get_score = |candidate: &DataPoint| {
+            let mut score: Float = 0.0;
 
-        for pos_frame in &current.position_frames {
-            score += normal(
-                0.0,
-                pos_frame.variance.sqrt(),
-                (candidate.isometry.translation.vector - pos_frame.position.coords).magnitude(),
-            );
-        }
-
-        for vel_frame in &current.velocity_frames {
-            score += normal(
-                0.0,
-                vel_frame.variance.sqrt(),
-                (candidate.linear_velocity - vel_frame.velocity).magnitude(),
-            );
-        }
-
-        for rot_frame in &current.orientation_frames {
-            score += normal(
-                0.0,
-                rot_frame.variance.sqrt(),
-                candidate.isometry.rotation.angle_to(&rot_frame.orientation),
-            );
-        }
-
-        for mut imu_frame in current.imu_frames.iter().cloned() {
-            if let Some(calibration) = imu_calibs.get(&imu_frame.robot_element) {
-                imu_frame.angular_velocity =
-                    calibration.angular_velocity_bias.inverse() * imu_frame.angular_velocity;
-                imu_frame.acceleration = candidate.isometry.rotation
-                    * imu_frame.robot_element.get_isometry_from_base().rotation
-                    * calibration.accel_correction
-                    * imu_frame.acceleration
-                    * calibration.accel_scale;
-            } else {
-                imu_frame.acceleration = candidate.isometry.rotation
-                    * imu_frame.robot_element.get_isometry_from_base().rotation
-                    * imu_frame.acceleration;
+            for pos_frame in &current.position_frames {
+                score += normal(
+                    0.0,
+                    pos_frame.variance.sqrt(),
+                    (candidate.isometry.translation.vector - pos_frame.position.coords).magnitude(),
+                );
             }
 
-            score += normal(
-                0.0,
-                imu_frame.acceleration_variance.sqrt(),
-                (candidate.acceleration - imu_frame.acceleration).magnitude(),
-            );
-            score += normal(
-                0.0,
-                imu_frame.angular_velocity_variance.sqrt(),
-                candidate
-                    .angular_velocity
-                    .angle_to(&imu_frame.angular_velocity),
-            );
+            for vel_frame in &current.velocity_frames {
+                score += normal(
+                    0.0,
+                    vel_frame.variance.sqrt(),
+                    (candidate.linear_velocity - vel_frame.velocity).magnitude(),
+                );
+            }
+
+            for mut imu_frame in current.imu_frames.iter().cloned() {
+                if let Some(calibration) = imu_calibs.get(&imu_frame.robot_element) {
+                    imu_frame.acceleration = candidate.isometry.rotation
+                        * imu_frame.robot_element.get_isometry_from_base().rotation
+                        * calibration.accel_correction
+                        * imu_frame.acceleration
+                        * calibration.accel_scale;
+                } else {
+                    imu_frame.acceleration = candidate.isometry.rotation
+                        * imu_frame.robot_element.get_isometry_from_base().rotation
+                        * imu_frame.acceleration;
+                }
+
+                score += normal(
+                    0.0,
+                    imu_frame.acceleration_variance.sqrt(),
+                    (candidate.acceleration - imu_frame.acceleration).magnitude(),
+                );
+            }
+
+            // if quick_rng().gen_bool(0.00002) {
+            //     println!("{:}", current.position_frames.len());
+            // }
+            score
+        };
+
+        match get_score(&candidate1).total_cmp(&get_score(&candidate2)) {
+            Ordering::Greater => {},
+            Ordering::Less => {
+                candidate1.acceleration = candidate2.acceleration;
+                candidate1.linear_velocity = candidate2.linear_velocity;
+                candidate1.isometry.translation = candidate2.isometry.translation;
+            }
+            Ordering::Equal => {
+                let get_diff = |candidate: &DataPoint| {
+                    (candidate.acceleration - new.point.acceleration).magnitude_squared() +
+                    (candidate.linear_velocity - new.point.linear_velocity).magnitude_squared() +
+                    (candidate.isometry.translation.vector - new.point.isometry.translation.vector).magnitude_squared()
+                };
+
+                if get_diff(&candidate1) > get_diff(&candidate2) {
+                    candidate1.acceleration = candidate2.acceleration;
+                    candidate1.linear_velocity = candidate2.linear_velocity;
+                    candidate1.isometry.translation = candidate2.isometry.translation;
+                }
+            }
         }
 
-        // let mut diff: Float = 0.0;
+        let get_score = |candidate: &DataPoint| {
+            let mut score: Float = 0.0;
 
-        score.round() as usize
+            for rot_frame in &current.orientation_frames {
+                score += normal(
+                    0.0,
+                    rot_frame.variance.sqrt(),
+                    candidate.isometry.rotation.angle_to(&rot_frame.orientation),
+                );
+            }
+
+            for mut imu_frame in current.imu_frames.iter().cloned() {
+                if let Some(calibration) = imu_calibs.get(&imu_frame.robot_element) {
+                    imu_frame.angular_velocity =
+                        calibration.angular_velocity_bias.inverse() * imu_frame.angular_velocity;
+                }
+
+                score += normal(
+                    0.0,
+                    imu_frame.angular_velocity_variance.sqrt(),
+                    candidate
+                        .angular_velocity
+                        .angle_to(&imu_frame.angular_velocity),
+                );
+            }
+
+            score
+        };
+
+        match get_score(&candidate1).total_cmp(&get_score(&candidate2)) {
+            Ordering::Greater => {},
+            Ordering::Less => {
+                candidate1.angular_velocity = candidate2.angular_velocity;
+                candidate1.isometry.rotation = candidate2.isometry.rotation;
+            }
+            Ordering::Equal => {
+                let get_diff = |candidate: &DataPoint| {
+                    candidate.angular_velocity.angle_to(&new.point.angular_velocity).powi(2) +
+                    candidate.isometry.rotation.angle_to(&new.point.isometry.rotation).powi(2)
+                };
+
+                if get_diff(&candidate1) > get_diff(&candidate2) {
+                    candidate1.angular_velocity = candidate2.angular_velocity;
+                    candidate1.isometry.rotation = candidate2.isometry.rotation;
+                }
+            }
+        }
+
+        candidate1
     }
 }

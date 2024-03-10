@@ -1,7 +1,9 @@
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
 use localization::{
-    frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame}, optimizers::StochasticSmoothnessOptimizer, Localizer
+    frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame},
+    optimizers::StochasticSmoothnessOptimizer,
+    Localizer,
 };
 use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
