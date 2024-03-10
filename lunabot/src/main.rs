@@ -9,7 +9,7 @@ use apriltag::{AprilTagDetector, PoseObservation};
 use camera::{discover_all_cameras, Camera};
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use localization::{IMUFrame, Localizer, OrientationFrame, PositionFrame};
+use localization::{frames::{IMUFrame, OrientationFrame, PositionFrame}, Localizer};
 use nalgebra::{Isometry, Point3};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 #[cfg(unix)]
@@ -195,6 +195,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(navigator);
     app.add_node(telemetry);
     app.add_node(camera);
+    #[cfg(unix)]
     app.add_node(realsense_camera);
 
     Ok(app)
