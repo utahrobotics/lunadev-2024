@@ -13,7 +13,7 @@ use crate::iter::ArcIter;
 use bytemuck::cast_slice;
 use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
 use image::{DynamicImage, ImageBuffer, Luma, Rgb};
-use localization::IMUFrame;
+use localization::frames::IMUFrame;
 use nalgebra::{Dyn, Matrix, Point3, Quaternion, UnitQuaternion, VecStorage, Vector3, U2};
 use realsense_rust::{
     config::Config,

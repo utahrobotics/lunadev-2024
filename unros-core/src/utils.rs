@@ -1,5 +1,9 @@
 use std::{
-    cmp::Ordering, collections::VecDeque, ops::{Deref, DerefMut}, sync::OnceLock, time::{Duration, Instant}
+    cmp::Ordering,
+    collections::VecDeque,
+    ops::{Deref, DerefMut},
+    sync::OnceLock,
+    time::{Duration, Instant},
 };
 
 use crossbeam::queue::ArrayQueue;
@@ -131,40 +135,43 @@ impl<'a, T, F: FnMut(&VecDeque<T>) -> T> Drop for BorrowedVecDeque<'a, T, F> {
     }
 }
 
-
 pub struct ResourceQueue<T> {
     queue: OnceLock<ArrayQueue<T>>,
     max_length: usize,
-    default: fn() -> T
+    default: fn() -> T,
 }
-
 
 impl<T> ResourceQueue<T> {
     pub const fn new(max_length: usize, default: fn() -> T) -> Self {
         Self {
             queue: OnceLock::new(),
             max_length,
-            default
+            default,
         }
     }
 
     pub fn get(&self) -> ResourceGuard<T> {
-        let inner = self.queue.get_or_init(|| ArrayQueue::new(self.max_length)).pop().unwrap_or_else(self.default);
+        let inner = self
+            .queue
+            .get_or_init(|| ArrayQueue::new(self.max_length))
+            .pop()
+            .unwrap_or_else(self.default);
         ResourceGuard {
             inner: Some(inner),
-            queue: self
+            queue: self,
         }
     }
 
     pub fn set(&self, value: T) {
-        self.queue.get_or_init(|| ArrayQueue::new(self.max_length)).force_push(value);
+        self.queue
+            .get_or_init(|| ArrayQueue::new(self.max_length))
+            .force_push(value);
     }
 }
 
-
 pub struct ResourceGuard<'a, T> {
     inner: Option<T>,
-    queue: &'a ResourceQueue<T>
+    queue: &'a ResourceQueue<T>,
 }
 
 impl<'a, T> ResourceGuard<'a, T> {

@@ -1553,15 +1553,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eigenvalues"
-version = "0.4.0"
-source = "git+https://github.com/Masterchef365/eigenvalues.git#03d8fccc9bcb2f74934f98157fc00221b980fd60"
-dependencies = [
- "approx",
- "nalgebra",
-]
-
-[[package]]
 name = "either"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2756,7 +2747,6 @@ name = "localization"
 version = "0.1.0"
 dependencies = [
  "crossbeam",
- "eigenvalues",
  "fxhash",
  "nalgebra",
  "rand",
@@ -3044,8 +3034,6 @@ dependencies = [
  "num-complex",
  "num-rational",
  "num-traits",
- "rand",
- "rand_distr",
  "serde",
  "simba",
  "typenum",
