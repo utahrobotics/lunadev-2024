@@ -48,6 +48,7 @@ use crossbeam::queue::SegQueue;
 pub use log;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
+use sysinfo::Pid;
 pub use tokio;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -451,20 +452,31 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
     main: impl FnOnce(Application) -> F,
     run_options: RunOptions,
 ) -> anyhow::Result<()> {
+    let pid = std::process::id();
     init_logger(&run_options)?;
-    std::thread::spawn(|| {
+
+    std::thread::spawn(move || {
         let mut sys = sysinfo::System::new();
         let mut last_cpu_check = Instant::now();
+        let pid = Pid::from_u32(pid);
         loop {
             std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
             sys.refresh_cpu();
+            sys.refresh_process(pid);
             if last_cpu_check.elapsed().as_secs() < 3 {
                 continue;
             }
             let cpus = sys.cpus();
             let usage = cpus.iter().map(sysinfo::Cpu::cpu_usage).sum::<f32>() / cpus.len() as f32;
             if usage >= 80.0 {
-                warn!("CPU Usage at {usage}%");
+                if let Some(proc) = sys.process(pid) {
+                    warn!(
+                        "CPU Usage at {usage:.1}%. Process Usage: {:.1}%",
+                        proc.cpu_usage() / cpus.len() as f32
+                    );
+                } else {
+                    warn!("CPU Usage at {usage:.1}%. Err checking process");
+                }
                 last_cpu_check = Instant::now();
             }
         }
@@ -558,7 +570,7 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
             grp = tokio::spawn(main(grp)).await??;
             grp.run().await
         };
-        info!("Runtime started with pid: {}", std::process::id());
+        info!("Runtime started with pid: {pid}");
         tokio::select! {
             res = fut => res,
             _ = end_recv.recv() => Ok(()),

@@ -1,6 +1,8 @@
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use localization::{IMUFrame, Localizer, OrientationFrame, PositionFrame, VelocityFrame};
+use localization::{
+    frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame}, optimizers::StochasticSmoothnessOptimizer, Localizer
+};
 use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rig::Robot;
@@ -55,7 +57,14 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let nav_task = pathfinder.get_navigation_handle();
 
     // let robot_base_ref = robot_base.get_ref();
-    let localizer = Localizer::new(robot_base, 0.0);
+    let localizer = Localizer::new(
+        robot_base,
+        StochasticSmoothnessOptimizer {
+            candidate_count: 15,
+            position_variance: 0.05,
+            orientation_variance: 0.05,
+        },
+    );
 
     let mut position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));

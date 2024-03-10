@@ -6,7 +6,6 @@ use unros::rng::quick_rng;
 
 use crate::{random_unit_vector, Float, Point3, UnitQuaternion, Vector3};
 
-
 /// A position and variance measurement.
 #[derive(Clone)]
 pub struct PositionFrame {

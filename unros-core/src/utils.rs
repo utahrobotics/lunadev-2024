@@ -175,8 +175,8 @@ pub struct ResourceGuard<'a, T> {
 }
 
 impl<'a, T> ResourceGuard<'a, T> {
-    pub fn do_not_return(mut self) -> T {
-        self.inner.take().unwrap()
+    pub fn do_not_return(mut this: Self) -> T {
+        this.inner.take().unwrap()
     }
 }
 

@@ -16,10 +16,7 @@ use crossbeam::atomic::AtomicCell;
 // };
 use frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame};
 use fxhash::FxHashMap;
-use nalgebra::{
-    Isometry3 as I3, Point3 as P3, Quaternion,
-    UnitQuaternion as UQ, UnitVector3, Vector3 as V3,
-};
+use nalgebra::{Isometry3 as I3, Point3 as P3, UnitQuaternion as UQ, UnitVector3, Vector3 as V3};
 use optimizers::Optimizer;
 use rand::{rngs::SmallRng, Rng};
 use rig::{RobotBase, RobotElementRef};
@@ -32,15 +29,16 @@ use unros::{
     Node, NodeIntrinsics, RuntimeContext,
 };
 
-pub mod optimizers;
 pub mod frames;
+pub mod optimizers;
 
 type Float = f32;
 type Vector3 = V3<Float>;
 type Isometry3 = I3<Float>;
 type UnitQuaternion = UQ<Float>;
 type Point3 = P3<Float>;
-
+const G: Float = 9.81;
+const G_VEC: Vector3 = Vector3::new(0.0, -G, 0.0);
 
 /// A Node that can digest multiple streams of spatial input to
 /// determine where an object is in global space.
@@ -68,7 +66,7 @@ pub struct Localizer<T: Optimizer> {
 impl<T: Optimizer> Localizer<T> {
     pub fn new(robot_base: RobotBase, optimizer: T) -> Self {
         Self {
-            point_count: NonZeroUsize::new(500).unwrap(),
+            point_count: NonZeroUsize::new(150).unwrap(),
             start_position: Point3::default(),
             calibration_duration: Duration::from_secs(3),
             recalibrate_sub: Subscriber::new(1),
@@ -80,7 +78,7 @@ impl<T: Optimizer> Localizer<T> {
             intrinsics: NodeIntrinsics::default(),
             timeline_duration: Duration::from_secs(3),
             start_orientation: UnitQuaternion::default(),
-            optimizer
+            optimizer,
         }
     }
 
@@ -120,13 +118,13 @@ struct CalibratingImu {
 }
 
 #[derive(Debug)]
-struct CalibratedImu {
-    accel_scale: Float,
-    accel_correction: UnitQuaternion,
-    angular_velocity_bias: UnitQuaternion,
+pub struct CalibratedImu {
+    pub accel_scale: Float,
+    pub accel_correction: UnitQuaternion,
+    pub angular_velocity_bias: UnitQuaternion,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct DataPoint {
     pub isometry: Isometry3,
     pub linear_velocity: Vector3,
@@ -162,15 +160,17 @@ struct LocalizerBlackboard<T> {
     context: RuntimeContext,
 
     timeline: TimeVec<ResourceGuard<'static, DataBucket>>,
-    exposed_timeline: Arc<[AtomicCell<DataPoint>]>,
+    _exposed_timeline: Arc<[AtomicCell<DataPoint>]>,
 
-    optimizer: T
+    optimizer: T,
 }
 
 /// The calibration stage of the localizer.
 ///
 /// This stage runs for `calibration_duration` before applying the calibrations and exiting.
-async fn calibrate_localizer<T>(mut bb: LocalizerBlackboard<T>) -> StateResult<LocalizerBlackboard<T>> {
+async fn calibrate_localizer<T>(
+    mut bb: LocalizerBlackboard<T>,
+) -> StateResult<LocalizerBlackboard<T>> {
     let context = bb.context;
     setup_logging!(context);
     info!("Calibrating localizer");
@@ -216,7 +216,7 @@ async fn calibrate_localizer<T>(mut bb: LocalizerBlackboard<T>) -> StateResult<L
             }
 
             let calibrated = CalibratedImu {
-                accel_scale: 9.81 / calibrating.accel.magnitude() * calibrating.count as Float,
+                accel_scale: G / calibrating.accel.magnitude() * calibrating.count as Float,
                 accel_correction,
                 angular_velocity_bias: UnitQuaternion::default()
                     .try_slerp(
@@ -256,19 +256,19 @@ fn normal(mean: Float, std_dev: Float, x: Float) -> Float {
     E.powf(((x - mean) / std_dev).powi(2) / -2.0) / std_dev / TAU.sqrt()
 }
 
-#[inline]
-fn rand_quat(rng: &mut SmallRng) -> UnitQuaternion {
-    let u: Float = rng.gen_range(0.0..1.0);
-    let v: Float = rng.gen_range(0.0..1.0);
-    let w: Float = rng.gen_range(0.0..1.0);
-    // h = ( sqrt(1-u) sin(2πv), sqrt(1-u) cos(2πv), sqrt(u) sin(2πw), sqrt(u) cos(2πw))
-    UnitQuaternion::new_unchecked(Quaternion::new(
-        (1.0 - u).sqrt() * (TAU * v).sin(),
-        (1.0 - u).sqrt() * (TAU * v).cos(),
-        u.sqrt() * (TAU * w).sin(),
-        u.sqrt() * (TAU * w).cos(),
-    ))
-}
+// #[inline]
+// fn rand_quat(rng: &mut SmallRng) -> UnitQuaternion {
+//     let u: Float = rng.gen_range(0.0..1.0);
+//     let v: Float = rng.gen_range(0.0..1.0);
+//     let w: Float = rng.gen_range(0.0..1.0);
+//     // h = ( sqrt(1-u) sin(2πv), sqrt(1-u) cos(2πv), sqrt(u) sin(2πw), sqrt(u) cos(2πw))
+//     UnitQuaternion::new_unchecked(Quaternion::new(
+//         (1.0 - u).sqrt() * (TAU * v).sin(),
+//         (1.0 - u).sqrt() * (TAU * v).cos(),
+//         u.sqrt() * (TAU * w).sin(),
+//         u.sqrt() * (TAU * w).cos(),
+//     ))
+// }
 
 #[inline]
 fn random_unit_vector(rng: &mut SmallRng) -> UnitVector3<Float> {
@@ -288,7 +288,9 @@ fn random_unit_vector(rng: &mut SmallRng) -> UnitVector3<Float> {
 /// During this stage, the localizer accepts observations and updates its estimate of the robot's Isometry.
 ///
 /// If recalibration is triggered, this stage exits. Otherwise, this stage runs forever.
-async fn run_localizer<T: Optimizer>(mut bb: LocalizerBlackboard<T>) -> StateResult<LocalizerBlackboard<T>> {
+async fn run_localizer<T: Optimizer>(
+    mut bb: LocalizerBlackboard<T>,
+) -> StateResult<LocalizerBlackboard<T>> {
     let context = bb.context;
     setup_logging!(context);
 
@@ -340,19 +342,32 @@ async fn run_localizer<T: Optimizer>(mut bb: LocalizerBlackboard<T>) -> StateRes
             let mut vec = bb.timeline.get_vec();
             let mut iter = vec.iter_mut().rev();
             let mut new_src = DataBucket::default();
-            
+
             let max_delta = bb.max_delta.as_secs_f64() as Float;
-            new_src.point.isometry.translation.vector += 0.5 * (new_src.point.linear_velocity + new_src.point.acceleration * max_delta) * max_delta;
-            new_src.point.linear_velocity += new_src.point.acceleration * max_delta;
-            new_src.point.isometry.rotation = UnitQuaternion::default()
-                .slerp(&new_src.point.angular_velocity, max_delta)
-                * new_src.point.isometry.rotation;
+            new_src.point.isometry.translation.vector += 0.5
+                * (new_src.point.linear_velocity + (new_src.point.acceleration - G_VEC) * max_delta)
+                * max_delta;
+            new_src.point.linear_velocity += (new_src.point.acceleration - G_VEC) * max_delta;
+            new_src.point.isometry.rotation =
+                new_src.point.isometry.rotation.append_axisangle_linearized(
+                    &new_src
+                        .point
+                        .angular_velocity
+                        .scaled_axis()
+                        .scale(max_delta),
+                );
 
             let mut new = &mut new_src;
             let mut current = iter.next().unwrap();
-    
+
             for old in iter {
-                bb.optimizer.optimize(old, current, new);
+                bb.optimizer.optimize(
+                    old,
+                    current,
+                    new,
+                    bb.max_delta.as_secs_f64() as Float,
+                    &bb.calibrations,
+                );
                 new = current;
                 current = old;
             }
@@ -361,8 +376,7 @@ async fn run_localizer<T: Optimizer>(mut bb: LocalizerBlackboard<T>) -> StateRes
         // Apply the predicted position, orientation, and velocity onto the robot base such that
         // other nodes can observe it.
         let last_bucket = bb.timeline.peek();
-        bb.robot_base
-            .set_isometry(last_bucket.point.isometry);
+        bb.robot_base.set_isometry(last_bucket.point.isometry);
         bb.robot_base
             .set_linear_velocity(last_bucket.point.linear_velocity);
     }
@@ -395,11 +409,11 @@ impl<T: Optimizer> Node for Localizer<T> {
             let point = if let Some(data_bucket) = vec.back() {
                 let max_delta = max_delta.as_secs_f64() as Float;
                 let mut data_point = data_bucket.point;
-                data_point.isometry.translation.vector += 0.5 * (data_point.linear_velocity + data_point.acceleration * max_delta) * max_delta;
-                data_point.linear_velocity += data_point.acceleration * max_delta;
-                data_point.isometry.rotation = UnitQuaternion::default()
-                    .slerp(&data_point.angular_velocity, max_delta)
-                    * data_point.isometry.rotation;
+                data_point.isometry.translation.vector += 0.5
+                    * (data_point.linear_velocity + (data_point.acceleration - G_VEC) * max_delta)
+                    * max_delta;
+                data_point.linear_velocity += (data_point.acceleration - G_VEC) * max_delta;
+                data_point.isometry.rotation = data_point.isometry.rotation.append_axisangle_linearized(&data_point.angular_velocity.scaled_axis().scale(max_delta));
                 data_point
             } else {
                 DataPoint {
@@ -409,7 +423,7 @@ impl<T: Optimizer> Node for Localizer<T> {
                     ),
                     linear_velocity: Vector3::default(),
                     angular_velocity: UnitQuaternion::default(),
-                    acceleration: Vector3::default(),
+                    acceleration: G_VEC,
                 }
             };
             let mut bucket = DATA_BUCKETS.get();
@@ -440,9 +454,9 @@ impl<T: Optimizer> Node for Localizer<T> {
             max_delta,
             velocity_sub: self.velocity_sub,
             start_orientation: self.start_orientation,
-            exposed_timeline,
+            _exposed_timeline: exposed_timeline,
             timeline,
-            optimizer: self.optimizer
+            optimizer: self.optimizer,
         };
 
         let (calib, calib_trans) = State::new(calibrate_localizer);

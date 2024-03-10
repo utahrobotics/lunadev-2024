@@ -348,7 +348,12 @@ func _gui_input(event: InputEvent) -> void:
 		pressed = event.pressed
 "
 
+[sub_resource type="Environment" id="Environment_bvywr"]
+background_mode = 1
+background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
+
 [sub_resource type="World3D" id="World3D_pep74"]
+environment = SubResource("Environment_bvywr")
 
 [sub_resource type="BoxMesh" id="BoxMesh_0laka"]
 size = Vector3(0.15, 0.15, 0.15)
@@ -362,10 +367,6 @@ albedo_color = Color(0.027451, 0.0235294, 0.0627451, 1)
 [sub_resource type="PlaneMesh" id="PlaneMesh_hrbaw"]
 material = SubResource("StandardMaterial3D_7fexe")
 size = Vector2(20, 20)
-
-[sub_resource type="Environment" id="Environment_bvywr"]
-background_mode = 1
-background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_51jn0"]
 shading_mode = 0
