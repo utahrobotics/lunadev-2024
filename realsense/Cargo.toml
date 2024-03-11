@@ -7,14 +7,14 @@ edition = "2021"
 
 [dependencies]
 unros = { path = "../unros" }
-localization = { path = "../localization" }
-rig = { path = "../rig" }
 image = { workspace = true }
-nalgebra = { workspace = true }
-quaternion-core = { workspace = true }
-cam-geom = "0.14"
-fast_image_resize = { workspace = true }
 bytemuck = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 realsense-rust = { version = "1.2", features = ["buildtime-bindgen"] }
+cam-geom = "0.14"
+fast_image_resize = { workspace = true }
+localization = { path = "../localization" }
+nalgebra = { workspace = true }
+rig = { path = "../rig" }
+quaternion-core = { workspace = true }

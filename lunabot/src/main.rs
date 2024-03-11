@@ -1,13 +1,10 @@
 use std::{
-    io::Write,
-    net::SocketAddrV4,
-    str::FromStr,
-    time::{Duration, Instant},
+    io::Write, net::SocketAddrV4, str::FromStr, sync::Arc, time::{Duration, Instant}
 };
 
 use apriltag::{AprilTagDetector, PoseObservation};
 use camera::{discover_all_cameras, Camera};
-use costmap::Costmap;
+use costmap::local::LocalCostmap;
 use fxhash::FxBuildHasher;
 use localization::{
     frames::{IMUFrame, OrientationFrame, PositionFrame},
@@ -20,11 +17,7 @@ use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use telemetry::Telemetry;
 use unros::{
-    anyhow,
-    log::info,
-    logging::dump::{DataDump, ScalingFilter, VideoDataDump},
-    pubsub::Subscriber,
-    tokio, Application, Node,
+    anyhow, log::info, logging::dump::{DataDump, VideoDataDump}, pubsub::Subscriber, rayon, Application, Node
 };
 
 #[unros::main]
@@ -34,7 +27,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let camera_element = elements.remove("camera").unwrap();
     let robot_base_ref = robot_base.get_ref();
 
-    let costmap = Costmap::new(80, 80, 0.05, 2.0, 3.9, 0.01);
+    let costmap = LocalCostmap::new(80, 0.05, 0.01, robot_base.get_ref());
 
     #[cfg(unix)]
     let costmap = costmap;
@@ -62,6 +55,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         camera
     };
 
+    let costmap = Arc::new(costmap);
+    
     let telemetry = Telemetry::new(
         SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
         1920,
@@ -71,24 +66,23 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     .await?;
     camera.accept_image_received_sub(telemetry.create_image_subscription());
 
-    let costmap_ref = costmap.get_ref();
+    let costmap_ref = costmap.clone();
 
     let mut costmap_writer =
-        VideoDataDump::new_file(80, 80, 720, 720, ScalingFilter::Neighbor, "costmap.mkv", 24)?;
+        VideoDataDump::new_display(80, 80, 24)?;
     // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
-    app.add_task(
-        |_| async move {
+    rayon::spawn(
+        move || {
             loop {
-                tokio::time::sleep(Duration::from_millis(42)).await;
-                let costmap = costmap_ref.get_costmap();
+                std::thread::sleep(Duration::from_millis(42));
+                let costmap = costmap_ref.lock().get_costmap();
                 let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
                 let img = costmap_ref.obstacles_to_img(&obstacles);
 
-                costmap_writer.write_frame(img.into())?;
+                costmap_writer.write_frame(img.into()).unwrap();
             }
-        },
-        "costmap_video",
+        }
     );
 
     let mut apriltag = AprilTagDetector::new(640.0, 1280, 720, camera_element.get_ref());
@@ -146,7 +140,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         // camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
     }
 
-    let mut navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.get_ref(), 0.5, 0.15);
+    let mut navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.clone(), 0.5, 0.15);
     let driver = DifferentialDriver::new(robot_base_ref.clone());
 
     navigator.accept_path_sub(driver.create_path_sub());
@@ -194,7 +188,6 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(apriltag);
     app.add_node(localizer);
     app.add_node(driver);
-    app.add_node(costmap);
     app.add_node(navigator);
     app.add_node(telemetry);
     app.add_node(camera);

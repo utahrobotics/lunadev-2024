@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::DerefMut, sync::Arc};
 
 use costmap::{local::LocalCostmap, Points};
 use fxhash::FxBuildHasher;
@@ -8,11 +8,13 @@ use localization::{
 };
 use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
+use rand_distr::{Distribution, Normal};
 use rig::Robot;
 use unros::{
     anyhow, log,
     pubsub::{Publisher, Subscriber},
     rayon,
+    rng::quick_rng,
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt, BufStream},
@@ -53,15 +55,15 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 break;
             }
             let costmap = costmap_ref.lock().get_costmap();
-            // let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.2, 0.0, 0.3);
-            // let img = costmap_ref.obstacles_to_img(&obstacles);
-            let img = costmap_ref.costmap_to_img(&costmap).0;
+            let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.1, 0.0, 0.65);
+            let img = costmap_ref.obstacles_to_img(&obstacles);
+            // let img = costmap_ref.costmap_to_img(&costmap).0;
 
             costmap_display.write_frame(img.into()).unwrap();
         }
     });
 
-    let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.05);
+    let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.1);
     let mut path_sub = Subscriber::new(1);
     pathfinder.accept_path_sub(path_sub.create_subscription());
 
@@ -196,6 +198,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
                 camera_joint.set_angle(x_rot);
                 points.reserve(n.saturating_sub(points.capacity()));
+                let distr = Normal::new(0.0, 0.05).unwrap();
+                let mut rng = quick_rng();
                 // let mut first = true;
                 for _ in 0..n {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
@@ -205,7 +209,11 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                     //     println!("{point:?}");
                     //     first = false;
                     // }
-                    points.push(Point3::new(x, y, z));
+                    let mut vec = Vector3::new(x, y, z);
+
+                    vec.scale_mut(1.0 + distr.sample(rng.deref_mut()));
+
+                    points.push(vec.into());
                 }
 
                 let capacity = points.capacity();

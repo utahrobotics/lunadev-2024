@@ -13,7 +13,7 @@ tokio = { workspace = true }
 crossbeam = { workspace = true }
 rand = { workspace = true }
 async-trait = "0.1"
-static_assertions = { workspace = true }
+# static_assertions = { workspace = true }
 bytes = "1"
 console-subscriber = { version = "0.2", features = ["parking_lot"]}
 serde = { workspace = true }
