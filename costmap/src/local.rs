@@ -1,6 +1,6 @@
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc, Mutex, MutexGuard,
+    Arc, RwLock,
 };
 
 use nalgebra::{Dyn, Matrix, Point2, Point3, VecStorage};
@@ -30,7 +30,7 @@ pub struct LocalCostmap {
     pub min_frequency: f32,
     cell_width: f32,
     height_step: f32,
-    heightmap: Arc<Mutex<HeightMap>>,
+    heightmap: Arc<RwLock<Arc<HeightMap>>>,
     area_width: usize,
     robot_base: RobotBaseRef,
 }
@@ -46,10 +46,10 @@ impl LocalCostmap {
             min_frequency: 0.33,
             cell_width,
             height_step,
-            heightmap: Arc::new(Mutex::new(HeightMap {
+            heightmap: Arc::new(RwLock::new(Arc::new(HeightMap {
                 map: Quadtree::new((area_width as f32).log2().ceil() as usize),
                 max_count: 0,
-            })),
+            }))),
             area_width,
             robot_base,
         }
@@ -57,7 +57,10 @@ impl LocalCostmap {
 
     pub fn global_to_local(&self, global: Point2<f32>) -> Point2<isize> {
         let mut global = Point3::new(global.x, 0.0, global.y);
-        global = self.robot_base.get_isometry().inverse_transform_point(&global);
+        global = self
+            .robot_base
+            .get_isometry()
+            .inverse_transform_point(&global);
         let global = Point2::new(global.x, global.z);
 
         let offset = (self.area_width as f32) / 2.0;
@@ -101,8 +104,8 @@ impl LocalCostmap {
                     break;
                 };
                 let isometry = robot_element.get_isometry_from_base();
-                let mut heightmap = heightmap.lock().unwrap();
-                heightmap.map.reset();
+                let mut map: Quadtree<usize, HeightCell> =
+                    Quadtree::new((area_width as f32).log2().ceil() as usize);
                 let Some(max_count) = points
                     .into_iter()
                     .filter_map(|mut point| {
@@ -131,7 +134,7 @@ impl LocalCostmap {
                         let mut modified_count = AtomicUsize::default();
 
                         let anchor = Point { x, y };
-                        heightmap.map.modify(
+                        map.modify(
                             AreaBuilder::default()
                                 .anchor(anchor)
                                 .dimensions((1, 1))
@@ -145,7 +148,7 @@ impl LocalCostmap {
                         );
 
                         if *modified_count.get_mut() == 0 {
-                            heightmap.map.insert_pt(
+                            map.insert_pt(
                                 anchor,
                                 HeightCell {
                                     total_height: height,
@@ -162,7 +165,9 @@ impl LocalCostmap {
                     continue;
                 };
 
-                heightmap.max_count = max_count;
+                let map = HeightMap { map, max_count };
+
+                *heightmap.write().unwrap() = Arc::new(map);
             }
         });
 
@@ -172,7 +177,7 @@ impl LocalCostmap {
     pub fn lock(&self) -> LocalCostmapGuard {
         LocalCostmapGuard {
             costmap_ref: self,
-            guard: self.heightmap.lock().unwrap(),
+            guard: self.heightmap.read().unwrap().clone(),
         }
     }
 
@@ -283,7 +288,7 @@ impl LocalCostmap {
 
 pub struct LocalCostmapGuard<'a> {
     costmap_ref: &'a LocalCostmap,
-    guard: MutexGuard<'a, HeightMap>,
+    guard: Arc<HeightMap>,
 }
 
 impl<'a> LocalCostmapGuard<'a> {

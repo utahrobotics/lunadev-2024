@@ -33,7 +33,9 @@ impl CostmapReference for Arc<LocalCostmap> {
 
         loop {
             let real_pos = node.robot_base.get_isometry().translation.vector;
-            if (dest.coords.cast() - Vector2::new(real_pos.x, real_pos.z)).magnitude() <= node.completion_distance {
+            if (dest.coords.cast() - Vector2::new(real_pos.x, real_pos.z)).magnitude()
+                <= node.completion_distance
+            {
                 break;
             }
 
@@ -56,7 +58,10 @@ impl CostmapReference for Arc<LocalCostmap> {
 
             let (path, _distance) = astar(
                 // In local space, our start position is always (0, 0)
-                &Vector2::<usize>::new(node.costmap_ref.get_area_width() / 2, node.costmap_ref.get_area_width() / 2),
+                &Vector2::<usize>::new(
+                    node.costmap_ref.get_area_width() / 2,
+                    node.costmap_ref.get_area_width() / 2,
+                ),
                 |current| {
                     let current = current.cast::<isize>();
                     const ROOT_2: Float = std::f64::consts::SQRT_2 as Float;

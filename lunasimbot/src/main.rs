@@ -43,13 +43,12 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let costmap = Arc::new(costmap);
     let costmap_ref = costmap.clone();
 
-    let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(400, 400)?;
+    let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(400, 400, 24)?;
     let drop_check = app.get_main_thread_drop_check();
 
     rayon::spawn(move || {
-        // let mut i = 0;
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(16));
+            std::thread::sleep(std::time::Duration::from_millis(42));
             if drop_check.has_dropped() {
                 break;
             }
@@ -59,8 +58,6 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
             let img = costmap_ref.costmap_to_img(&costmap).0;
 
             costmap_display.write_frame(img.into()).unwrap();
-            // i += 1;
-            // let _ = img.save(format!("imgs/img{i}.png"));
         }
     });
 
