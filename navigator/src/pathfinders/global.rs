@@ -100,10 +100,10 @@ impl CostmapReference for GlobalCostmapRef {
                                 || next.y >= node.costmap_ref.get_area_length()
                             {
                                 None
-                            } else if !*obstacles.get((next.y, next.x))? {
-                                None
-                            } else {
+                            } else if *obstacles.get((next.y, next.x))? {
                                 Some((next, NotNan::new(cost).unwrap()))
+                            } else {
+                                None
                             }
                         }
                     })

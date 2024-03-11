@@ -57,8 +57,6 @@ impl PointCloud {
     }
 }
 
-
-
 /// A connection to a RealSense Camera.
 pub struct RealSenseCamera {
     device: Device,

@@ -186,7 +186,6 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     /// all received messages formatted using the `display` function.
     ///
     /// Logs are saved to `path` using a `DataDump`.
-    #[must_use]
     pub async fn into_logger(
         mut self,
         mut display: impl FnMut(T) -> String + Send + 'static,
@@ -361,7 +360,6 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     /// all received messages formatted using the `display` function.
     ///
     /// Logs are saved to `path` using a `DataDump`.
-    #[must_use]
     pub async fn into_logger(
         self,
         display: impl FnMut(T) -> String + Send + 'static,

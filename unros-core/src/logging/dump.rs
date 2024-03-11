@@ -303,7 +303,7 @@ a=fmtp:96 packetization-mode=1",
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| VideoDumpInitError::IOError(e))?;
+            .map_err(VideoDumpInitError::IOError)?;
 
         let queue_sender = Arc::new(ArrayQueue::<DynamicImage>::new(1));
         let queue_receiver = queue_sender.clone();

@@ -1,5 +1,9 @@
 use std::{
-    io::Write, net::SocketAddrV4, str::FromStr, sync::Arc, time::{Duration, Instant}
+    io::Write,
+    net::SocketAddrV4,
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 use apriltag::{AprilTagDetector, PoseObservation};
@@ -17,7 +21,11 @@ use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use telemetry::Telemetry;
 use unros::{
-    anyhow, log::info, logging::dump::{DataDump, VideoDataDump}, pubsub::Subscriber, rayon, Application, Node
+    anyhow,
+    log::info,
+    logging::dump::{DataDump, VideoDataDump},
+    pubsub::Subscriber,
+    rayon, Application, Node,
 };
 
 #[unros::main]
@@ -47,17 +55,18 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
         camera.set_robot_element_ref(camera_element.get_ref());
         let camera_element_ref = camera_element.get_ref();
-        camera.accept_cloud_received_sub(
-            costmap
-                .create_points_sub()
-                .map(move |x: PointCloud| Points { points: x.iter().map(|x| x.0), robot_element: camera_element_ref.clone() }),
-        );
+        camera.accept_cloud_received_sub(costmap.create_points_sub().map(move |x: PointCloud| {
+            Points {
+                points: x.iter().map(|x| x.0),
+                robot_element: camera_element_ref.clone(),
+            }
+        }));
 
         camera
     };
 
     let costmap = Arc::new(costmap);
-    
+
     let telemetry = Telemetry::new(
         SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
         1920,
@@ -69,22 +78,17 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let costmap_ref = costmap.clone();
 
-    let mut costmap_writer =
-        VideoDataDump::new_display(80, 80, 24)?;
+    let mut costmap_writer = VideoDataDump::new_display(80, 80, 24)?;
     // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
-    rayon::spawn(
-        move || {
-            loop {
-                std::thread::sleep(Duration::from_millis(42));
-                let costmap = costmap_ref.lock().get_costmap();
-                let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
-                let img = costmap_ref.obstacles_to_img(&obstacles);
+    rayon::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(42));
+        let costmap = costmap_ref.lock().get_costmap();
+        let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
+        let img = costmap_ref.obstacles_to_img(&obstacles);
 
-                costmap_writer.write_frame(img.into()).unwrap();
-            }
-        }
-    );
+        costmap_writer.write_frame(img.into()).unwrap();
+    });
 
     let mut apriltag = AprilTagDetector::new(640.0, 1280, 720, camera_element.get_ref());
     apriltag.add_tag(Default::default(), Default::default(), 0.134, 0);

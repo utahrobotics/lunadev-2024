@@ -147,7 +147,7 @@ impl<T> Clone for ArcIter<T> {
     fn clone(&self) -> Self {
         Self {
             slice: self.slice.clone(),
-            index: self.index
+            index: self.index,
         }
     }
 }
