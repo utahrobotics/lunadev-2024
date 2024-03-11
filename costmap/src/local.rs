@@ -288,28 +288,30 @@ impl<'a> LocalCostmapGuard<'a> {
         data
     }
 
-    pub fn is_cell_safe(&self, radius: f32, point: Point2<f32>, max_diff: f32) -> bool {
-        let point = self.costmap_ref.global_to_local(point);
-
-        if point.x < 0 || point.y < 0 {
-            return true;
-        }
-
-        let x = point.x as usize;
-        let y = point.y as usize;
-
+    pub fn is_cell_safe(&self, radius: f32, point: Point2<usize>, max_diff: f32) -> bool {
         let radius = (radius / self.costmap_ref.cell_width).round() as usize;
 
-        let cells = self.guard.map.query(AreaBuilder::default().anchor(Point { x: x - radius, y: y - radius }).dimensions((radius * 2 + 1, radius * 2 + 1)).build().unwrap());
+        let cells = self.guard.map.query(
+            AreaBuilder::default()
+                .anchor(Point {
+                    x: point.x - radius,
+                    y: point.y - radius,
+                })
+                .dimensions((radius * 2 + 1, radius * 2 + 1))
+                .build()
+                .unwrap(),
+        );
 
-        let threshold = (self.guard.max_count as f32 * self.costmap_ref.min_frequency).round() as usize;
+        let threshold =
+            (self.guard.max_count as f32 * self.costmap_ref.min_frequency).round() as usize;
 
         for cell in cells {
             let cell = cell.value_ref();
             if cell.count < threshold {
                 continue;
             }
-            let height = cell.total_height as f32 / cell.count as f32 * self.costmap_ref.height_step;
+            let height =
+                cell.total_height as f32 / cell.count as f32 * self.costmap_ref.height_step;
             if height.abs() > max_diff {
                 return false;
             }

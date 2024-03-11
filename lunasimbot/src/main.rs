@@ -1,4 +1,4 @@
-use costmap::Costmap;
+use costmap::global::GlobalCostmap;
 use fxhash::FxBuildHasher;
 use localization::{
     frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame},
@@ -27,7 +27,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let mut camera = elements.remove("camera").unwrap();
     let debug_element = elements.remove("debug").unwrap();
 
-    let costmap = Costmap::new(400, 400, 0.05, 10.0, 10.0, 0.01);
+    let costmap = GlobalCostmap::new(400, 400, 0.05, 10.0, 10.0, 0.01);
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
     points_signal.accept_subscription(costmap.create_points_sub());

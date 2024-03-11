@@ -3152,6 +3152,7 @@ dependencies = [
  "costmap",
  "fxhash",
  "global-msgs",
+ "indexmap 2.2.5",
  "nalgebra",
  "ordered-float",
  "pathfinding",
