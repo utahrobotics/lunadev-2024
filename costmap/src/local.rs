@@ -3,9 +3,10 @@ use std::sync::{
     Arc, Mutex, MutexGuard,
 };
 
-use nalgebra::{Dyn, Matrix, Point2, Point3, VecStorage};
+use nalgebra::{Dyn, Matrix, Point2, Point3, VecStorage, Vector3};
 use ordered_float::NotNan;
 use quadtree_rs::{area::AreaBuilder, point::Point, Quadtree};
+use rig::RobotBaseRef;
 use unros::{
     pubsub::{Subscriber, Subscription},
     tokio,
@@ -31,10 +32,16 @@ pub struct LocalCostmap {
     height_step: f32,
     heightmap: Arc<Mutex<HeightMap>>,
     area_width: usize,
+    robot_base: RobotBaseRef,
 }
 
 impl LocalCostmap {
-    pub fn new(area_width: usize, cell_width: f32, height_step: f32) -> Self {
+    pub fn new(
+        area_width: usize,
+        cell_width: f32,
+        height_step: f32,
+        robot_base: RobotBaseRef,
+    ) -> Self {
         Self {
             min_frequency: 0.33,
             cell_width,
@@ -44,10 +51,15 @@ impl LocalCostmap {
                 max_count: 0,
             })),
             area_width,
+            robot_base,
         }
     }
 
     pub fn global_to_local(&self, global: Point2<f32>) -> Point2<isize> {
+        let mut global = Vector3::new(global.x, 0.0, global.y);
+        global = self.robot_base.get_isometry().inverse() * global;
+        let global = Point2::new(global.x, global.z);
+
         let offset = (self.area_width as f32) / 2.0;
 
         Point2::new(
@@ -59,10 +71,14 @@ impl LocalCostmap {
     pub fn local_to_global(&self, local: Point2<isize>) -> Point2<f32> {
         let offset = (self.area_width as f32) / 2.0;
 
-        Point2::new(
+        let mut out = Point3::new(
             (local.x as f32 - offset) * self.cell_width,
+            0.0,
             (local.y as f32 - offset) * self.cell_width,
-        )
+        );
+        out = self.robot_base.get_isometry() * out;
+
+        Point2::new(out.x, out.z)
     }
 
     pub fn create_points_sub<T: Send + IntoIterator<Item = Point3<f32>> + Clone + 'static>(
@@ -278,9 +294,15 @@ impl<'a> LocalCostmapGuard<'a> {
             vec![0.0; self.costmap_ref.area_width.pow(2)],
         ));
 
+        let threshold =
+            (self.guard.max_count as f32 * self.costmap_ref.min_frequency).round() as usize;
+
         for entry in self.guard.map.iter() {
             let Point { x, y } = entry.anchor();
             let cell = entry.value_ref();
+            if cell.count < threshold {
+                continue;
+            }
             let mutref = data.get_mut((y, x)).unwrap();
             *mutref = cell.total_height as f32 / cell.count as f32 * self.costmap_ref.height_step;
         }
@@ -294,8 +316,8 @@ impl<'a> LocalCostmapGuard<'a> {
         let cells = self.guard.map.query(
             AreaBuilder::default()
                 .anchor(Point {
-                    x: point.x - radius,
-                    y: point.y - radius,
+                    x: point.x.saturating_sub(radius),
+                    y: point.y.saturating_sub(radius),
                 })
                 .dimensions((radius * 2 + 1, radius * 2 + 1))
                 .build()

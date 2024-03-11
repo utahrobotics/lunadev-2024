@@ -321,12 +321,10 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> StateResult<LocalizerBlac
             // Process system if max_delta time has passed and no observations were received
             () = tokio::time::sleep(bb.max_delta) => {}
             mut frame = bb.imu_sub.recv() => {
-                let Some(calibration) = bb.calibrations.get(&frame.robot_element) else {
-                    error!("Unrecognized IMU message");
-                    continue;
+                let calibration = bb.calibrations.get(&frame.robot_element);
+                if let Some(calibration) = &calibration {
+                    frame.angular_velocity = calibration.angular_velocity_bias.inverse() * frame.angular_velocity;
                 };
-
-                frame.angular_velocity = calibration.angular_velocity_bias.inverse() * frame.angular_velocity;
 
                 {
                     let std_dev = frame.acceleration_variance.sqrt();
@@ -336,7 +334,12 @@ async fn run_localizer(mut bb: LocalizerBlackboard) -> StateResult<LocalizerBlac
                     if max_normal.is_finite() {
                         particles.par_iter_mut().for_each(|p| {
                             let mut rng = quick_rng();
-                            let new_accel = p.isometry.rotation * frame.robot_element.get_isometry_from_base().rotation * calibration.accel_correction * frame.acceleration * calibration.accel_scale;
+
+                            let new_accel = if let Some(calibration) = &calibration {
+                                p.isometry.rotation * frame.robot_element.get_isometry_from_base().rotation * calibration.accel_correction * frame.acceleration * calibration.accel_scale
+                            } else {
+                                p.isometry.rotation * frame.robot_element.get_isometry_from_base().rotation * frame.acceleration
+                            };
                             if rng.gen_bool(((1.0 - normal(0.0, std_dev, (p.acceleration - new_accel).magnitude()) / max_normal) * bb.resistance_modifier) as f64) {
                                 p.acceleration = new_accel + random_unit_vector(&mut rng).scale(distr.sample(rng.deref_mut()));
                             }

@@ -151,6 +151,7 @@ pub struct Application {
                 ) + Send,
         >,
     >,
+    drop_check: DropCheck,
 }
 
 impl Application {
@@ -243,6 +244,11 @@ impl Application {
             }
         }
     }
+
+    #[must_use]
+    pub fn get_main_thread_drop_check(&self) -> ObservingDropCheck {
+        self.drop_check.get_observing()
+    }
 }
 
 /// A reference to the runtime that is currently running.
@@ -333,6 +339,23 @@ impl DropCheck {
 
     pub fn dont_update_on_drop(&mut self) {
         self.update_on_drop = true;
+    }
+
+    pub fn get_observing(&self) -> ObservingDropCheck {
+        ObservingDropCheck {
+            dropped: self.dropped.clone(),
+        }
+    }
+}
+
+pub struct ObservingDropCheck {
+    dropped: Arc<AtomicBool>,
+}
+
+impl ObservingDropCheck {
+    #[must_use]
+    pub fn has_dropped(&self) -> bool {
+        self.dropped.load(Ordering::SeqCst)
     }
 }
 
@@ -566,7 +589,10 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
 
     runtime.block_on(async {
         let fut = async {
-            let mut grp = Application { pending: vec![] };
+            let mut grp = Application {
+                pending: vec![],
+                drop_check: DropCheck::default(),
+            };
             grp = tokio::spawn(main(grp)).await??;
             grp.run().await
         };

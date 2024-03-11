@@ -12,6 +12,7 @@ use rig::Robot;
 use unros::{
     anyhow, log,
     pubsub::{Publisher, Subscriber},
+    rayon,
     tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt, BufStream},
@@ -30,35 +31,35 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let camera_ref = camera.get_ref();
     let debug_element = elements.remove("debug").unwrap();
 
-    let costmap = LocalCostmap::new(400, 0.05, 0.01);
+    let costmap = LocalCostmap::new(400, 0.05, 0.01, robot_base.get_ref());
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
-    points_signal.accept_subscription(costmap.create_points_sub().map(move |points| {
-        Points {
-            points,
-            robot_element: camera_ref.clone()
-        }
+    points_signal.accept_subscription(costmap.create_points_sub().map(move |points| Points {
+        points,
+        robot_element: camera_ref.clone(),
     }));
 
     let costmap = Arc::new(costmap);
-    // let costmap_ref = costmap.get_ref();
+    let costmap_ref = costmap.clone();
 
     // let mut costmap_writer = unros::logging::dump::VideoDataDump::new(720, 720, "costmap.mkv")?;
+    let drop_check = app.get_main_thread_drop_check();
 
-    // let video_maker = FnNode::new(|_| async move {
-    //     // let mut i = 0;
-    //     loop {
-    //         tokio::time::sleep(std::time::Duration::from_millis(42)).await;
-    //         let costmap = costmap_ref.get_costmap();
-    //         let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.2, 0.0, 0.3);
-    //         let img = costmap_ref.obstacles_to_img(&obstacles);
+    rayon::spawn(move || {
+        let mut i = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(42));
+            if drop_check.has_dropped() {
+                break;
+            }
+            let costmap = costmap_ref.lock().get_costmap();
+            let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.2, 0.0, 0.3);
+            let img = costmap_ref.obstacles_to_img(&obstacles);
 
-    //         i += 1;
-    //         let _ = img.save(format!("img{i}.png"));
-
-    //         // costmap_writer.write_frame(img.into()).unwrap();
-    //     }
-    // });
+            i += 1;
+            let _ = img.save(format!("imgs/img{i}.png"));
+        }
+    });
 
     let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.2);
 
@@ -202,7 +203,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                     //     println!("{point:?}");
                     //     first = false;
                     // }
-                    points.push(Point3::new(x, y, z));
+                    // points.push(Point3::new(x, y, z));
                 }
 
                 let capacity = points.capacity();

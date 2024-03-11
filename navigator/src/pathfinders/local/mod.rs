@@ -9,14 +9,9 @@ use std::{
 use costmap::local::{LocalCostmap, LocalCostmapGuard};
 use nalgebra::{Point2, Vector2};
 use ordered_float::NotNan;
-use unros::
-    service::Pending
-;
+use unros::service::Pending;
 
-use crate::{
-    pathfinders::NavigationError,
-    Float,
-};
+use crate::{pathfinders::NavigationError, Float};
 
 use self::pathfinding::astar;
 
@@ -51,41 +46,16 @@ impl CostmapReference for Arc<LocalCostmap> {
         let mut start_time = Instant::now();
 
         loop {
-            let isometry = node.robot_base.get_isometry();
-
-            // let obstacles = node.costmap_ref.costmap_to_obstacle(
-            //     &node.costmap_ref.get_costmap(),
-            //     node.max_height_diff,
-            //     isometry.translation.y,
-            //     node.agent_radius,
-            // );
-
-            let mut position = node
-                .costmap_ref
-                .global_to_local(Point2::new(isometry.translation.x, isometry.translation.z));
-            if position.x < 0 {
-                position.x = 0;
-            }
-            if position.y < 0 {
-                position.y = 0;
-            }
-            let mut position = Vector2::new(position.x as usize, position.y as usize);
-            if position.x >= node.costmap_ref.get_area_width() {
-                position.x = node.costmap_ref.get_area_width() - 1;
-            }
-            if position.y >= node.costmap_ref.get_area_width() {
-                position.y = node.costmap_ref.get_area_width() - 1;
-            }
-
-            if (position.cast::<Float>() - dest_grid.cast()).magnitude() <= node.completion_distance
-            {
+            let real_pos = node.robot_base.get_isometry().translation.vector;
+            if (dest.coords.cast() - Vector2::new(real_pos.x, real_pos.z)).magnitude() <= node.completion_distance {
                 break;
             }
 
             let guard = node.costmap_ref.lock();
 
             let (path, _distance) = astar(
-                &position,
+                // In local space, our start position is always (0, 0)
+                &Vector2::<usize>::default(),
                 |current| {
                     let current = current.cast::<isize>();
                     const ROOT_2: Float = std::f64::consts::SQRT_2 as Float;
@@ -110,7 +80,11 @@ impl CostmapReference for Arc<LocalCostmap> {
                                 || next.y >= node.costmap_ref.get_area_width()
                             {
                                 None
-                            } else if !guard.is_cell_safe(node.agent_radius, next.into(), node.max_height_diff) {
+                            } else if !guard.is_cell_safe(
+                                node.agent_radius,
+                                next.into(),
+                                node.max_height_diff,
+                            ) {
                                 None
                             } else {
                                 Some((next, NotNan::new(cost).unwrap()))
@@ -140,6 +114,7 @@ impl CostmapReference for Arc<LocalCostmap> {
                     last = next;
                 }
             }
+            drop(guard);
 
             new_path.push(last.cast::<isize>());
 
@@ -152,6 +127,7 @@ impl CostmapReference for Arc<LocalCostmap> {
                 })
                 .collect();
 
+            let isometry = node.robot_base.get_isometry();
             *path.first_mut().unwrap() =
                 Point2::new(isometry.translation.x, isometry.translation.z);
             *path.last_mut().unwrap() = dest;
@@ -169,7 +145,13 @@ impl CostmapReference for Arc<LocalCostmap> {
 }
 
 #[inline]
-fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, agent_radius: Float, max_height_diff: Float, costmap: &LocalCostmapGuard) -> bool {
+fn traverse_to(
+    from: Vector2<usize>,
+    to: Vector2<usize>,
+    agent_radius: Float,
+    max_height_diff: Float,
+    costmap: &LocalCostmapGuard,
+) -> bool {
     let mut travel = to.cast::<Float>() - from.cast();
     let distance = travel.magnitude();
     travel.unscale_mut(distance);
@@ -177,8 +159,14 @@ fn traverse_to(from: Vector2<usize>, to: Vector2<usize>, agent_radius: Float, ma
     for i in 0..distance.floor() as usize {
         let intermediate = from.cast() + travel * i as Float;
 
-        if !costmap.is_cell_safe(agent_radius, Point2::new(intermediate.x.round() as usize, intermediate.y.round() as usize), max_height_diff)
-        {
+        if !costmap.is_cell_safe(
+            agent_radius,
+            Point2::new(
+                intermediate.x.round() as usize,
+                intermediate.y.round() as usize,
+            ),
+            max_height_diff,
+        ) {
             return false;
         }
     }

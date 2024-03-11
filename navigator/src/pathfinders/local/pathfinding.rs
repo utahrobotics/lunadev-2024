@@ -3,8 +3,8 @@ use std::hash::BuildHasherDefault;
 use std::{collections::BinaryHeap, hash::Hash};
 
 use fxhash::FxHasher;
-use indexmap::IndexMap;
 use indexmap::map::Entry::*;
+use indexmap::IndexMap;
 use pathfinding::num_traits::Zero;
 
 type FxIndexMap<K, V> = IndexMap<K, V, BuildHasherDefault<FxHasher>>;
@@ -41,6 +41,7 @@ where
     FH: FnMut(&N) -> C,
     FS: FnMut(&N) -> bool,
 {
+    let mut best = None;
     let mut to_see = BinaryHeap::new();
     to_see.push(SmallestCostHolder {
         estimated_cost: Zero::zero(),
@@ -49,30 +50,25 @@ where
     });
     let mut parents: FxIndexMap<N, (usize, C)> = FxIndexMap::default();
     parents.insert(start.clone(), (usize::max_value(), Zero::zero()));
-    loop {
-        let SmallestCostHolder { cost, index, .. } = to_see.pop().unwrap();
-        macro_rules! check_continue {
-            () => {
-                if to_see.is_empty() {
-                    let path = reverse_path(&parents, |&(p, _)| p, index);
-                    return (path, cost);
-                } else {
-                    continue;
-                }
-            };
-        }
-
+    while let Some(SmallestCostHolder { cost, index, .. }) = to_see.pop() {
         let successors = {
             let (node, &(_, c)) = parents.get_index(index).unwrap(); // Cannot fail
+            let path = reverse_path(&parents, |&(p, _)| p, index);
             if success(node) {
-                let path = reverse_path(&parents, |&(p, _)| p, index);
                 return (path, cost);
+            }
+            if let Some((_, best_cost)) = &best {
+                if cost < *best_cost {
+                    best = Some((path, cost));
+                }
+            } else {
+                best = Some((path, cost));
             }
             // We may have inserted a node several time into the binary heap if we found
             // a better way to access it. Ensure that we are currently dealing with the
             // best path and discard the others.
             if cost > c {
-                check_continue!();
+                continue;
             }
             successors(node)
         };
@@ -92,7 +88,7 @@ where
                         n = e.index();
                         e.insert((index, new_cost));
                     } else {
-                        check_continue!();
+                        continue;
                     }
                 }
             }
@@ -103,7 +99,13 @@ where
                 index: n,
             });
         }
+        continue;
     }
+    let (mut path, cost) = best.unwrap();
+    if path.len() == 1 {
+        path.push(path[0].clone());
+    }
+    (path, cost)
 }
 
 struct SmallestCostHolder<K> {

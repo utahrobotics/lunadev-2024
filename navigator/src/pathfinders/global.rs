@@ -10,14 +10,9 @@ use costmap::global::GlobalCostmapRef;
 use nalgebra::{DMatrix, Point2, Vector2};
 use ordered_float::NotNan;
 use pathfinding::directed::astar::astar;
-use unros::
-    service::Pending
-;
+use unros::service::Pending;
 
-use crate::{
-    pathfinders::NavigationError,
-    Float,
-};
+use crate::{pathfinders::NavigationError, Float};
 
 use super::{CostmapReference, DirectPathfinder};
 
