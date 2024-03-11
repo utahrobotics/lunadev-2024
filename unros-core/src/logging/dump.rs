@@ -7,12 +7,7 @@
 //! as the current program is not forcefully terminated.
 
 use std::{
-    error::Error,
-    fmt::Display,
-    io::{ErrorKind, Write},
-    net::{SocketAddr, SocketAddrV4},
-    path::{Path, PathBuf},
-    sync::Arc,
+    error::Error, fmt::Display, io::{ErrorKind, Write}, net::{SocketAddr, SocketAddrV4}, path::{Path, PathBuf}, process::{Command, Stdio}, sync::Arc
 };
 
 use crossbeam::{queue::ArrayQueue, utils::Backoff};
@@ -175,6 +170,7 @@ impl Error for VideoWriteError {}
 enum VideoDataDumpType {
     Rtp(SocketAddrV4),
     File(PathBuf),
+    Display
 }
 
 impl std::fmt::Display for VideoDataDumpType {
@@ -183,6 +179,9 @@ impl std::fmt::Display for VideoDataDumpType {
             VideoDataDumpType::Rtp(addr) => write!(f, "{addr}"),
             VideoDataDumpType::File(path) => {
                 write!(f, "{}", path.file_name().unwrap().to_string_lossy())
+            }
+            VideoDataDumpType::Display => {
+                write!(f, "Display")
             }
         }
     }
@@ -274,6 +273,61 @@ a=fmtp:96 packetization-mode=1",
             addr.ip(),
             addr.port()
         ))
+    }
+
+    pub fn new_display(
+        in_width: u32,
+        in_height: u32
+    ) -> Result<Self, VideoDumpInitError> {
+        let cmd = Command::new("ffplay")
+            .args(["-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", &format!("{in_width}x{in_height}"), "-i", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| VideoDumpInitError::IOError(e))?;
+
+        let queue_sender = Arc::new(ArrayQueue::<DynamicImage>::new(1));
+        let queue_receiver = queue_sender.clone();
+        let writer_drop = DropCheck::default();
+        let reader_drop = writer_drop.clone();
+
+        let mut video_out = cmd.stdin.unwrap();
+
+            let backoff = Backoff::new();
+
+            spawn_persistent_thread(move || loop {
+                if reader_drop.has_dropped() {
+                    if let Err(e) = video_out.flush() {
+                        error!("Failed to flush Display: {e}");
+                    }
+                    break;
+                }
+                let Some(frame) = queue_receiver.pop() else {
+                    backoff.snooze();
+                    continue;
+                };
+                backoff.reset();
+    
+                if let Err(e) = video_out.write_all(frame.into_rgb8().as_bytes()) {
+                    if e.kind() == ErrorKind::BrokenPipe {
+                        error!("Display has closed!");
+                        break;
+                    } else {
+                        error!(
+                            "Faced the following error while writing video frame to Display: {e}"
+                        );
+                    }
+                }
+            });
+    
+            Ok(Self {
+                video_writer: queue_sender,
+                writer_drop,
+                width: in_width,
+                height: in_height,
+                dump_type: VideoDataDumpType::Display,
+            })
     }
 
     pub fn new_file(

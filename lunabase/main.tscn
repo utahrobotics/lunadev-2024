@@ -795,92 +795,93 @@ editable = false
 visible = false
 layout_mode = 2
 
-[node name="AspectRatioContainer" type="AspectRatioContainer" parent="Sim"]
+[node name="SubViewportContainer" type="SubViewportContainer" parent="Sim"]
 layout_mode = 2
 size_flags_vertical = 3
-ratio = 1.8
-
-[node name="SubViewportContainer" type="SubViewportContainer" parent="Sim/AspectRatioContainer"]
-layout_mode = 2
 stretch = true
 
-[node name="SubViewport" type="SubViewport" parent="Sim/AspectRatioContainer/SubViewportContainer"]
+[node name="SubViewport" type="SubViewport" parent="Sim/SubViewportContainer"]
 handle_input_locally = false
 msaa_3d = 1
 size = Vector2i(2, 2)
 render_target_update_mode = 0
 
-[node name="Node3D" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport"]
+[node name="Node3D" type="Node3D" parent="Sim/SubViewportContainer/SubViewport"]
 
-[node name="CharacterBody3D" type="CharacterBody3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+[node name="CharacterBody3D" type="CharacterBody3D" parent="Sim/SubViewportContainer/SubViewport/Node3D"]
 script = SubResource("GDScript_0y6bh")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 shape = SubResource("CapsuleShape3D_u861d")
 
-[node name="RayScanner" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D" instance=ExtResource("2_jsa7e")]
+[node name="RayScanner" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D" instance=ExtResource("2_jsa7e")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+current = true
+fov = 90.0
 
-[node name="Center" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
+[node name="Center" type="Node3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
 
-[node name="Waypoint" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Center"]
+[node name="Waypoint" type="MeshInstance3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Center"]
 transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0, 0, 0)
 mesh = SubResource("PrismMesh_6d518")
 
-[node name="Waypoint2" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Center"]
+[node name="Waypoint2" type="MeshInstance3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Center"]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
 mesh = SubResource("PrismMesh_cfju8")
 
-[node name="Node" type="Node" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
+[node name="Node" type="Node" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
 
-[node name="Waypoint" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node" instance=ExtResource("3_b4xjj")]
+[node name="Waypoint" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node" instance=ExtResource("3_b4xjj")]
 visible = false
 
-[node name="Estimated" type="Node3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node"]
+[node name="Estimated" type="Node3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node"]
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 mesh = SubResource("CapsuleMesh_jrghj")
 
-[node name="MeshInstance3D2" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
 mesh = SubResource("SphereMesh_g5hor")
 
-[node name="MeshInstance3D3" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
+[node name="MeshInstance3D3" type="MeshInstance3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
 transform = Transform3D(1, 0, 0, 0, 1.31134e-07, 1, 0, -1, 1.31134e-07, 0, 0, -0.0902355)
 mesh = SubResource("CylinderMesh_hn2h0")
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+[node name="Camera3D" type="Camera3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 6.69827, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Sim/SubViewportContainer/SubViewport/Node3D"]
 layers = 2
 mesh = SubResource("PlaneMesh_hrbaw")
 
-[node name="Decal" type="Decal" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D"]
+[node name="Decal" type="Decal" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D"]
 size = Vector3(15, 1, 15)
 texture_albedo = ExtResource("1_1xyvq")
 cull_mask = 1048574
 
-[node name="StaticBody3D" type="StaticBody3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D"]
+[node name="StaticBody3D" type="StaticBody3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D"]
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D/StaticBody3D"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D/StaticBody3D"]
 shape = SubResource("WorldBoundaryShape3D_yqe5l")
 
-[node name="Boulder" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
+[node name="Boulder" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
 
-[node name="Boulder2" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
+[node name="Boulder2" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.13333, -0.296974, -0.871875)
 
-[node name="Boulder3" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
+[node name="Boulder3" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.42865, -0.424198, 2.11976)
 
-[node name="Boulder4" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
+[node name="Boulder4" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.30077, -0.203136, 2.17333)
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="Sim/SubViewportContainer/SubViewport/Node3D"]
 transform = Transform3D(0.243107, -0.860673, 0.44737, 3.6215e-11, 0.461207, 0.887293, -0.969999, -0.215707, 0.112123, 0, 1.80059, 0)
 shadow_enabled = true
 directional_shadow_mode = 1
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="Sim/AspectRatioContainer/SubViewportContainer/SubViewport/Node3D"]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="Sim/SubViewportContainer/SubViewport/Node3D"]
 environment = SubResource("Environment_bvywr")
 
 [node name="HBoxContainer" type="HBoxContainer" parent="Sim"]

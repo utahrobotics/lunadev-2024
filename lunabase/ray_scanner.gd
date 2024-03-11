@@ -10,11 +10,14 @@ var raycasts: Array[RayCast3D] = []
 
 
 func _ready() -> void:
+	#await get_viewport().ready
 	for y in range(height):
 		for x in range(width):
 			var raycast := RayCast3D.new()
+			#print(get_viewport().name)
 			var end := project_position(Vector2(x as float / width, y as float / height) * Vector2(get_viewport().size), distance)
 			raycast.target_position = to_local(end)
+			raycast.debug_shape_thickness = 2
 			add_child(raycast)
 			raycasts.append(raycast)
 

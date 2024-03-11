@@ -53,15 +53,17 @@ where
     while let Some(SmallestCostHolder { cost, index, .. }) = to_see.pop() {
         let successors = {
             let (node, &(_, c)) = parents.get_index(index).unwrap(); // Cannot fail
-            let path = reverse_path(&parents, |&(p, _)| p, index);
             if success(node) {
+                let path = reverse_path(&parents, |&(p, _)| p, index);
                 return (path, cost);
             }
             if let Some((_, best_cost)) = &best {
                 if cost < *best_cost {
+                    let path = reverse_path(&parents, |&(p, _)| p, index);
                     best = Some((path, cost));
                 }
             } else {
+                let path = reverse_path(&parents, |&(p, _)| p, index);
                 best = Some((path, cost));
             }
             // We may have inserted a node several time into the binary heap if we found

@@ -3,7 +3,7 @@ use std::sync::{
     Arc, Mutex, MutexGuard,
 };
 
-use nalgebra::{Dyn, Matrix, Point2, Point3, VecStorage, Vector3};
+use nalgebra::{Dyn, Matrix, Point2, Point3, VecStorage};
 use ordered_float::NotNan;
 use quadtree_rs::{area::AreaBuilder, point::Point, Quadtree};
 use rig::RobotBaseRef;
@@ -56,8 +56,8 @@ impl LocalCostmap {
     }
 
     pub fn global_to_local(&self, global: Point2<f32>) -> Point2<isize> {
-        let mut global = Vector3::new(global.x, 0.0, global.y);
-        global = self.robot_base.get_isometry().inverse() * global;
+        let mut global = Point3::new(global.x, 0.0, global.y);
+        global = self.robot_base.get_isometry().inverse_transform_point(&global);
         let global = Point2::new(global.x, global.z);
 
         let offset = (self.area_width as f32) / 2.0;

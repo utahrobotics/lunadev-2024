@@ -28,20 +28,6 @@ impl CostmapReference for Arc<LocalCostmap> {
     ) {
         let sleeper = spin_sleep::SpinSleeper::default();
         let dest = Point2::new(dest.x, dest.z);
-        let mut dest_grid = node.costmap_ref.global_to_local(dest);
-        if dest_grid.x < 0 {
-            dest_grid.x = 0;
-        }
-        if dest_grid.y < 0 {
-            dest_grid.y = 0;
-        }
-        let mut dest_grid = Vector2::new(dest_grid.x as usize, dest_grid.y as usize);
-        if dest_grid.x >= node.costmap_ref.get_area_width() {
-            dest_grid.x = node.costmap_ref.get_area_width() - 1;
-        }
-        if dest_grid.y >= node.costmap_ref.get_area_width() {
-            dest_grid.y = node.costmap_ref.get_area_width() - 1;
-        }
 
         let mut start_time = Instant::now();
 
@@ -51,11 +37,26 @@ impl CostmapReference for Arc<LocalCostmap> {
                 break;
             }
 
+            let mut dest_grid = node.costmap_ref.global_to_local(dest);
+            if dest_grid.x < 0 {
+                dest_grid.x = 0;
+            }
+            if dest_grid.y < 0 {
+                dest_grid.y = 0;
+            }
+            let mut dest_grid = Vector2::new(dest_grid.x as usize, dest_grid.y as usize);
+            if dest_grid.x >= node.costmap_ref.get_area_width() {
+                dest_grid.x = node.costmap_ref.get_area_width() - 1;
+            }
+            if dest_grid.y >= node.costmap_ref.get_area_width() {
+                dest_grid.y = node.costmap_ref.get_area_width() - 1;
+            }
+
             let guard = node.costmap_ref.lock();
 
             let (path, _distance) = astar(
                 // In local space, our start position is always (0, 0)
-                &Vector2::<usize>::default(),
+                &Vector2::<usize>::new(node.costmap_ref.get_area_width() / 2, node.costmap_ref.get_area_width() / 2),
                 |current| {
                     let current = current.cast::<isize>();
                     const ROOT_2: Float = std::f64::consts::SQRT_2 as Float;
@@ -80,14 +81,14 @@ impl CostmapReference for Arc<LocalCostmap> {
                                 || next.y >= node.costmap_ref.get_area_width()
                             {
                                 None
-                            } else if !guard.is_cell_safe(
+                            } else if guard.is_cell_safe(
                                 node.agent_radius,
                                 next.into(),
                                 node.max_height_diff,
                             ) {
-                                None
-                            } else {
                                 Some((next, NotNan::new(cost).unwrap()))
+                            } else {
+                                None
                             }
                         }
                     })
