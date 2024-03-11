@@ -13,5 +13,5 @@ struct PointMeasurement {
 #[derive(Clone)]
 pub struct Points<T> {
     pub points: T,
-    robot_element: RobotElementRef,
+    pub robot_element: RobotElementRef,
 }

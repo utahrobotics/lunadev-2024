@@ -1,4 +1,6 @@
-use costmap::global::GlobalCostmap;
+use std::sync::Arc;
+
+use costmap::{local::LocalCostmap, Points};
 use fxhash::FxBuildHasher;
 use localization::{
     frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame},
@@ -25,12 +27,20 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "debug"])?;
     let mut camera = elements.remove("camera").unwrap();
+    let camera_ref = camera.get_ref();
     let debug_element = elements.remove("debug").unwrap();
 
-    let costmap = GlobalCostmap::new(400, 400, 0.05, 10.0, 10.0, 0.01);
+    let costmap = LocalCostmap::new(400, 0.05, 0.01);
     let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
-    points_signal.accept_subscription(costmap.create_points_sub());
+    points_signal.accept_subscription(costmap.create_points_sub().map(move |points| {
+        Points {
+            points,
+            robot_element: camera_ref.clone()
+        }
+    }));
+
+    let costmap = Arc::new(costmap);
     // let costmap_ref = costmap.get_ref();
 
     // let mut costmap_writer = unros::logging::dump::VideoDataDump::new(720, 720, "costmap.mkv")?;
@@ -50,7 +60,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     //     }
     // });
 
-    let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap.get_ref(), 0.65, 0.2);
+    let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.2);
 
     let mut driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
@@ -182,19 +192,17 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 };
 
                 camera_joint.set_angle(x_rot);
-                let camera_isometry = camera.get_global_isometry();
                 points.reserve(n.saturating_sub(points.capacity()));
                 // let mut first = true;
                 for _ in 0..n {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
                     let z = stream.read_f32_le().await.expect("Failed to receive point");
-                    let point = camera_isometry * Point3::new(x, y, z);
                     // if first {
                     //     println!("{point:?}");
                     //     first = false;
                     // }
-                    points.push(point);
+                    points.push(Point3::new(x, y, z));
                 }
 
                 let capacity = points.capacity();
@@ -282,7 +290,6 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         "telemetry",
     );
 
-    app.add_node(costmap);
     app.add_node(driver);
     app.add_node(pathfinder);
     app.add_node(localizer);
