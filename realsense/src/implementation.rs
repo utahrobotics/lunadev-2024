@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::iter::ArcIter;
+use crate::iter::{ArcIter, ArcParIter};
 use bytemuck::cast_slice;
 use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
 use image::{DynamicImage, ImageBuffer, Luma, Rgb};
@@ -49,10 +49,15 @@ pub struct PointCloud {
 }
 
 impl PointCloud {
-    pub fn par_iter(&self) -> ArcIter<(Point3<f32>, image::Rgb<u8>)> {
+    pub fn par_iter(&self) -> ArcParIter<(Point3<f32>, image::Rgb<u8>)> {
+        ArcParIter::new(self.points.clone())
+    }
+    pub fn iter(&self) -> ArcIter<(Point3<f32>, image::Rgb<u8>)> {
         ArcIter::new(self.points.clone())
     }
 }
+
+
 
 /// A connection to a RealSense Camera.
 pub struct RealSenseCamera {

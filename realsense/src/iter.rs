@@ -6,25 +6,25 @@ use unros::rayon::iter::{
 };
 
 #[derive(Debug)]
-pub struct ArcIter<T> {
+pub struct ArcParIter<T> {
     slice: Arc<[T]>,
 }
 
-impl<T> ArcIter<T> {
+impl<T> ArcParIter<T> {
     pub fn new(slice: Arc<[T]>) -> Self {
-        ArcIter { slice }
+        ArcParIter { slice }
     }
 }
 
-impl<T> Clone for ArcIter<T> {
+impl<T> Clone for ArcParIter<T> {
     fn clone(&self) -> Self {
-        ArcIter {
+        ArcParIter {
             slice: self.slice.clone(),
         }
     }
 }
 
-impl<T: Sync + Send + Copy> ParallelIterator for ArcIter<T> {
+impl<T: Sync + Send + Copy> ParallelIterator for ArcParIter<T> {
     type Item = T;
 
     fn drive_unindexed<C>(self, consumer: C) -> C::Result
@@ -39,7 +39,7 @@ impl<T: Sync + Send + Copy> ParallelIterator for ArcIter<T> {
     }
 }
 
-impl<T: Sync + Send + Copy> IndexedParallelIterator for ArcIter<T> {
+impl<T: Sync + Send + Copy> IndexedParallelIterator for ArcParIter<T> {
     fn drive<C>(self, consumer: C) -> C::Result
     where
         C: Consumer<Self::Item>,
@@ -137,20 +137,53 @@ impl<T: Sync + Send + Copy> Producer for IterProducer<T> {
     }
 }
 
+#[derive(Debug)]
+pub struct ArcIter<T> {
+    slice: Arc<[T]>,
+    index: usize,
+}
+
+impl<T> Clone for ArcIter<T> {
+    fn clone(&self) -> Self {
+        Self {
+            slice: self.slice.clone(),
+            index: self.index
+        }
+    }
+}
+
+impl<T> ArcIter<T> {
+    pub fn new(slice: Arc<[T]>) -> Self {
+        ArcIter { slice, index: 0 }
+    }
+}
+
+impl<T: Copy> Iterator for ArcIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.slice.get(self.index).copied();
+        if item.is_some() {
+            self.index += 1;
+        }
+        item
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, sync::Arc};
 
     use unros::rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-    use super::ArcIter;
+    use super::ArcParIter;
 
     #[test]
     fn test01() {
         let src: Box<[usize]> = (0..50000usize).into_iter().collect();
         let src: Arc<[usize]> = Arc::from(src);
 
-        let dst: HashSet<usize> = ArcIter::new(src.clone()).into_par_iter().collect();
+        let dst: HashSet<usize> = ArcParIter::new(src.clone()).into_par_iter().collect();
         let src: HashSet<usize> = src.iter().copied().collect();
 
         assert_eq!(src, dst);

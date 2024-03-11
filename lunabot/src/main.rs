@@ -40,16 +40,17 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     #[cfg(unix)]
     let mut realsense_camera = {
-        use unros::rayon::iter::ParallelIterator;
+        use costmap::Points;
         let mut camera = discover_all_realsense()?
             .next()
             .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
 
         camera.set_robot_element_ref(camera_element.get_ref());
+        let camera_element_ref = camera_element.get_ref();
         camera.accept_cloud_received_sub(
             costmap
                 .create_points_sub()
-                .map(|x: PointCloud| x.par_iter().map(|x| x.0)),
+                .map(move |x: PointCloud| Points { points: x.iter().map(|x| x.0), robot_element: camera_element_ref.clone() }),
         );
 
         camera
