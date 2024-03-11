@@ -113,7 +113,7 @@ impl CostmapReference for GlobalCostmapRef {
                 },
                 |current| *current == dest_grid,
             ) else {
-                node.path_signal.set(vec![]);
+                node.path_signal.set(std::iter::empty().collect());
                 pending_task.finish(Err(NavigationError::NoPath));
                 return;
             };
@@ -150,7 +150,7 @@ impl CostmapReference for GlobalCostmapRef {
                 Point2::new(isometry.translation.x, isometry.translation.z);
             *path.last_mut().unwrap() = dest;
 
-            node.path_signal.set(path);
+            node.path_signal.set(path.into_boxed_slice().into());
 
             let elapsed = start_time.elapsed();
             sleeper.sleep(node.refresh_rate.saturating_sub(elapsed));

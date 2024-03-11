@@ -348,12 +348,7 @@ func _gui_input(event: InputEvent) -> void:
 		pressed = event.pressed
 "
 
-[sub_resource type="Environment" id="Environment_bvywr"]
-background_mode = 1
-background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
-
 [sub_resource type="World3D" id="World3D_pep74"]
-environment = SubResource("Environment_bvywr")
 
 [sub_resource type="BoxMesh" id="BoxMesh_0laka"]
 size = Vector3(0.15, 0.15, 0.15)
@@ -367,6 +362,10 @@ albedo_color = Color(0.027451, 0.0235294, 0.0627451, 1)
 [sub_resource type="PlaneMesh" id="PlaneMesh_hrbaw"]
 material = SubResource("StandardMaterial3D_7fexe")
 size = Vector2(20, 20)
+
+[sub_resource type="Environment" id="Environment_bvywr"]
+background_mode = 1
+background_color = Color(0.00784314, 0.00784314, 0.00784314, 1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_51jn0"]
 shading_mode = 0
@@ -422,6 +421,7 @@ var ang_vel: Quaternion
 @onready var estimated_mesh: Node3D = $Node/Estimated
 @onready var sim_tab: Control = $\"../../../../..\"
 @onready var last_quat := quaternion
+@onready var path_parent: Node = $Node/Path
 
 
 func _input(event: InputEvent) -> void:
@@ -534,6 +534,27 @@ func _physics_process(delta: float) -> void:
 			estimated_mesh.global_position = Vector3(conn.get_float(), conn.get_float(), conn.get_float())
 			var w := conn.get_float()
 			estimated_mesh.quaternion = Quaternion(conn.get_float(), conn.get_float(), conn.get_float(), w)
+			
+			var path_len := conn.get_u16()
+			if path_len > 0:
+				if path_parent.get_child_count() < path_len:
+					for _i in range(path_len - path_parent.get_child_count()):
+						path_parent.add_child(preload(\"res://arrow.tscn\").instantiate())
+				else:
+					for i in range(path_len, path_parent.get_child_count()):
+						path_parent.get_child(i).queue_free()
+				for i in range(path_len):
+					var child: Node3D = path_parent.get_child(i)
+					child.scale = Vector3.ONE
+					child.rotation = Vector3.ONE
+					child.global_position = Vector3(conn.get_float(), 0, conn.get_float())
+					if i > 0:
+						var last_child: Node3D = path_parent.get_child(i - 1)
+						last_child.look_at(child.global_position)
+						var distance := child.global_position.distance_to(last_child.global_position)
+						last_child.global_position -= last_child.global_transform.basis.z * distance / 2
+						last_child.scale.z = distance * 40
+				
 	
 	velocity += - global_transform.basis.z.slide(Vector3.UP).normalized() * SPEED * (left_steering + right_steering) / 2
 	var angle := (left_steering - right_steering) * SPEED / WHEEL_SEPARATION
@@ -847,6 +868,8 @@ mesh = SubResource("SphereMesh_g5hor")
 [node name="MeshInstance3D3" type="MeshInstance3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node/Estimated"]
 transform = Transform3D(1, 0, 0, 0, 1.31134e-07, 1, 0, -1, 1.31134e-07, 0, 0, -0.0902355)
 mesh = SubResource("CylinderMesh_hn2h0")
+
+[node name="Path" type="Node" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node"]
 
 [node name="Camera3D" type="Camera3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
 transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 6.69827, 0)

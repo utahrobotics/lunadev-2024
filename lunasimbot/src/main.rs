@@ -62,6 +62,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     });
 
     let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.05);
+    let mut path_sub = Subscriber::new(1);
+    pathfinder.accept_path_sub(path_sub.create_subscription());
 
     let mut driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
@@ -286,6 +288,30 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                     .expect("Failed to write orientation");
 
                 stream.flush().await.expect("Failed to write steering");
+
+                if let Some(path) = path_sub.try_recv() {
+                    stream
+                        .write_u16_le(path.len() as u16)
+                        .await
+                        .expect("Failed to write path length");
+                    for point in path.iter() {
+                        stream
+                            .write_f32_le(point.x)
+                            .await
+                            .expect("Failed to write point.x");
+                        stream
+                            .write_f32_le(point.y)
+                            .await
+                            .expect("Failed to write point.y");
+                    }
+                } else {
+                    stream
+                        .write_u16_le(0)
+                        .await
+                        .expect("Failed to write path length");
+                }
+
+                stream.flush().await.expect("Failed to write path");
             }
         },
         "telemetry",

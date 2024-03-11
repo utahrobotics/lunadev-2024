@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use global_msgs::Steering;
 use nalgebra::{Point2, UnitVector2, Vector2};
@@ -17,7 +17,7 @@ type Float = f32;
 const PI: Float = std::f64::consts::PI as Float;
 
 pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
-    path_sub: Subscriber<Vec<Point2<Float>>>,
+    path_sub: Subscriber<Arc<[Point2<Float>]>>,
     steering_signal: Publisher<Steering>,
     robot_base: RobotBaseRef,
     pub refresh_rate: Duration,
@@ -46,7 +46,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
         self.steering_signal.accept_subscription(sub);
     }
 
-    pub fn create_path_sub(&self) -> Subscription<Vec<Point2<Float>>> {
+    pub fn create_path_sub(&self) -> Subscription<Arc<[Point2<Float>]>> {
         self.path_sub.create_subscription()
     }
 }

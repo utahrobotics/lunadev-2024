@@ -138,7 +138,7 @@ impl CostmapReference for Arc<LocalCostmap> {
                 Point2::new(isometry.translation.x, isometry.translation.z);
             *path.last_mut().unwrap() = dest;
 
-            node.path_signal.set(path);
+            node.path_signal.set(path.into_boxed_slice().into());
 
             let elapsed = start_time.elapsed();
             sleeper.sleep(node.refresh_rate.saturating_sub(elapsed));

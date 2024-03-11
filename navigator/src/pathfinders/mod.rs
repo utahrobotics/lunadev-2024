@@ -50,7 +50,7 @@ pub type NavigationServiceHandle =
 
 pub struct DirectPathfinder<T: CostmapReference> {
     service_handle: NavigationServiceHandle,
-    path_signal: Publisher<Vec<Point2<Float>>>,
+    path_signal: Publisher<Arc<[Point2<Float>]>>,
     robot_base: RobotBaseRef,
     service:
         Service<Point3<Float>, NavigationError, NavigationProgress, Result<(), NavigationError>>,
@@ -86,7 +86,7 @@ impl<T: CostmapReference> DirectPathfinder<T> {
         }
     }
 
-    pub fn accept_path_sub(&mut self, sub: Subscription<Vec<Point2<Float>>>) {
+    pub fn accept_path_sub(&mut self, sub: Subscription<Arc<[Point2<Float>]>>) {
         self.path_signal.accept_subscription(sub);
     }
 
