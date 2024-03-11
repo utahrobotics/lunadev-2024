@@ -9,7 +9,10 @@ use apriltag::{AprilTagDetector, PoseObservation};
 use camera::{discover_all_cameras, Camera};
 use costmap::Costmap;
 use fxhash::FxBuildHasher;
-use localization::{frames::{IMUFrame, OrientationFrame, PositionFrame}, Localizer};
+use localization::{
+    frames::{IMUFrame, OrientationFrame, PositionFrame},
+    Localizer,
+};
 use nalgebra::{Isometry, Point3};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 #[cfg(unix)]

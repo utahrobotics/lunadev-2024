@@ -1246,6 +1246,7 @@ dependencies = [
  "nalgebra",
  "ordered-float",
  "quadtree_rs",
+ "rig",
  "spin_sleep",
  "unros",
 ]

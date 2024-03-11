@@ -25,8 +25,7 @@ use unros::{
     setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
 
-use crate::PointMeasurement;
-
+use crate::{PointMeasurement, Points};
 
 pub struct GlobalCostmap {
     pub window_duration: Duration,
@@ -74,7 +73,7 @@ impl GlobalCostmap {
 
     pub fn create_points_sub<T: Send + IntoParallelIterator<Item = Point3<f32>> + 'static>(
         &self,
-    ) -> Subscription<T> {
+    ) -> Subscription<Points<T>> {
         let cell_width = self.cell_width;
         let area_width = self.area_width;
         let area_length = self.area_length;
@@ -82,36 +81,44 @@ impl GlobalCostmap {
         let y_offset = self.y_offset;
         let height_step = self.height_step;
 
-        self.points_sub.create_subscription().map(move |x: T| {
-            x.into_par_iter()
-                .filter_map(|mut point| {
-                    let height = (point.y / height_step).round() as isize;
+        self.points_sub.create_subscription().map(
+            move |Points {
+                      points,
+                      robot_element,
+                  }: Points<T>| {
+                let isometry = robot_element.get_global_isometry();
+                points
+                    .into_par_iter()
+                    .filter_map(|mut point| {
+                        point = isometry * point;
+                        let height = (point.y / height_step).round() as isize;
 
-                    point.x += x_offset;
-                    point.z += y_offset;
-                    point /= cell_width;
+                        point.x += x_offset;
+                        point.z += y_offset;
+                        point /= cell_width;
 
-                    let x = point.x.round();
-                    let y = point.z.round();
+                        let x = point.x.round();
+                        let y = point.z.round();
 
-                    if x < 0.0 || y < 0.0 {
-                        return None;
-                    }
+                        if x < 0.0 || y < 0.0 {
+                            return None;
+                        }
 
-                    let x = x as usize;
-                    let y = y as usize;
+                        let x = x as usize;
+                        let y = y as usize;
 
-                    if x >= area_width || y >= area_length {
-                        return None;
-                    }
+                        if x >= area_width || y >= area_length {
+                            return None;
+                        }
 
-                    Some(PointMeasurement {
-                        index: x * area_length + y,
-                        height,
+                        Some(PointMeasurement {
+                            index: x * area_length + y,
+                            height,
+                        })
                     })
-                })
-                .collect()
-        })
+                    .collect()
+            },
+        )
     }
 
     pub fn get_ref(&self) -> GlobalCostmapRef {

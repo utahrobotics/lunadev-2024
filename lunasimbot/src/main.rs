@@ -58,10 +58,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let nav_task = pathfinder.get_navigation_handle();
 
     // let robot_base_ref = robot_base.get_ref();
-    let localizer = Localizer::new(
-        robot_base,
-        0.0
-    );
+    let localizer = Localizer::new(robot_base, 0.0);
 
     let mut position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));

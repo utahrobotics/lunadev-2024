@@ -3,7 +3,10 @@
 //! robot) is in global space.
 
 use std::{
-    collections::hash_map::Entry, num::NonZeroUsize, ops::DerefMut, time::{Duration, Instant}
+    collections::hash_map::Entry,
+    num::NonZeroUsize,
+    ops::DerefMut,
+    time::{Duration, Instant},
 };
 
 use eigenvalues::{
@@ -20,10 +23,14 @@ use rand_distr::{Distribution, Normal};
 use rig::{RobotBase, RobotElementRef};
 use smach::{State, StateResult};
 use unros::{
-    anyhow, async_trait, pubsub::{Subscriber, Subscription}, rayon::{
+    anyhow, async_trait,
+    pubsub::{Subscriber, Subscription},
+    rayon::{
         iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
         join,
-    }, rng::quick_rng, setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext
+    },
+    rng::quick_rng,
+    setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
 };
 
 pub mod frames;

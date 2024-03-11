@@ -14,7 +14,9 @@ use bytemuck::cast_slice;
 use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
 use image::{DynamicImage, ImageBuffer, Luma, Rgb};
 use localization::frames::IMUFrame;
-use nalgebra::{Dyn, Matrix, Point3, Quaternion, UnitQuaternion, VecStorage, Vector3, U2};
+use nalgebra::{
+    Dyn, Isometry3, Matrix, Point3, Quaternion, UnitQuaternion, VecStorage, Vector3, U2,
+};
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -288,7 +290,7 @@ impl Node for RealSenseCamera {
                             dst_image.into_vec()
                         },
                         || {
-                            let mut isometry = global_isometry;
+                            let mut isometry = Isometry3::default();
                             isometry.rotation = UnitQuaternion::from_scaled_axis(
                                 isometry.rotation * Vector3::y_axis().into_inner() * PI,
                             ) * isometry.rotation;
@@ -300,7 +302,7 @@ impl Node for RealSenseCamera {
                                     cx: frame_width as f32 / 8.0,
                                     cy: frame_height as f32 / 8.0,
                                 }),
-                                ExtrinsicParameters::from_pose(&nalgebra::convert(isometry)),
+                                ExtrinsicParameters::from_pose(&isometry),
                             );
                             let pixel_coords = (0..frame_height / 4).rev().flat_map(|y| {
                                 (0..frame_width / 4).flat_map(move |x| [x as f32, y as f32])
