@@ -76,19 +76,19 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     .await?;
     camera.accept_image_received_sub(telemetry.create_image_subscription());
 
-    let costmap_ref = costmap.clone();
+    // let costmap_ref = costmap.clone();
 
-    let mut costmap_writer = VideoDataDump::new_display(80, 80, 24)?;
-    // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
+    // let mut costmap_writer = VideoDataDump::new_display(80, 80, 24)?;
+    // // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
-    rayon::spawn(move || loop {
-        std::thread::sleep(Duration::from_millis(42));
-        let costmap = costmap_ref.lock().get_costmap();
-        let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
-        let img = costmap_ref.obstacles_to_img(&obstacles);
+    // rayon::spawn(move || loop {
+    //     std::thread::sleep(Duration::from_millis(42));
+    //     let costmap = costmap_ref.lock().get_costmap();
+    //     let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.5, 0.0, 0.0);
+    //     let img = costmap_ref.obstacles_to_img(&obstacles);
 
-        costmap_writer.write_frame(img.into()).unwrap();
-    });
+    //     costmap_writer.write_frame(img.into()).unwrap();
+    // });
 
     let mut apriltag = AprilTagDetector::new(640.0, 1280, 720, camera_element.get_ref());
     apriltag.add_tag(Default::default(), Default::default(), 0.134, 0);

@@ -93,6 +93,7 @@ impl<T> Drop for Publisher<T> {
 
 trait Queue<T>: Send + Sync {
     fn push(&self, value: T) -> EnqueueResult;
+    fn clone(&self) -> Box<dyn Queue<T>>;
 }
 
 #[derive(PartialEq, Eq)]
@@ -102,7 +103,7 @@ enum EnqueueResult {
     Closed,
 }
 
-impl<T: Send> Queue<T> for Weak<ArrayQueue<T>> {
+impl<T: Send + 'static> Queue<T> for Weak<ArrayQueue<T>> {
     fn push(&self, value: T) -> EnqueueResult {
         if let Some(queue) = self.upgrade() {
             if queue.force_push(value).is_some() {
@@ -114,11 +115,23 @@ impl<T: Send> Queue<T> for Weak<ArrayQueue<T>> {
             EnqueueResult::Closed
         }
     }
+    fn clone(&self) -> Box<dyn Queue<T>> {
+        Box::new(Clone::clone(self))
+    }
 }
 
-impl<T, F: Fn(T) -> EnqueueResult + Send + Sync> Queue<T> for F {
+impl<T, F: Fn(T) -> EnqueueResult + Send + Sync + Clone + 'static> Queue<T> for F {
     fn push(&self, value: T) -> EnqueueResult {
         self(value)
+    }
+    fn clone(&self) -> Box<dyn Queue<T>> {
+        Box::new(Clone::clone(self))
+    }
+}
+
+impl<T> Clone for Box<dyn Queue<T>> {
+    fn clone(&self) -> Self {
+        Queue::clone(self.deref())
     }
 }
 
@@ -142,6 +155,12 @@ pub struct Subscription<T> {
     notify: Weak<Notify>,
     name: Option<Box<str>>,
     lag: usize,
+}
+
+impl<T> Clone for Subscription<T> {
+    fn clone(&self) -> Self {
+        Self { queue: self.queue.clone(), notify: self.notify.clone(), name: self.name.clone(), lag: self.lag.clone() }
+    }
 }
 
 impl<T: Clone + Send + 'static> Subscriber<T> {
@@ -257,7 +276,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
 
 impl<T: 'static> Subscription<T> {
     /// Changes the generic type of this `Subscription` using the given `map` function.
-    pub fn map<V>(self, map: impl Fn(V) -> T + Send + Sync + 'static) -> Subscription<V> {
+    pub fn map<V:>(self, map: impl Fn(V) -> T + Send + Sync + Clone + 'static) -> Subscription<V> {
         Subscription {
             queue: Box::new(move |x| self.queue.push(map(x))),
             notify: self.notify,
