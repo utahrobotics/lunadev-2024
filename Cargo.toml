@@ -13,7 +13,7 @@ members = [
     "navigator",
     "rig", "tools", "smach", "costmap",
     # "smooth-diff-drive",
-    "lunasimbot", "unros-macros", "unros",
+    "lunasimbot", "unros-macros", "unros", "lunabase-lib",
 ]
 resolver = "2"
 
@@ -39,6 +39,7 @@ serde-big-array = "0.5"
 rand_distr = "0.4"
 bytemuck = "1"
 eigenvalues = { git = "https://github.com/Masterchef365/eigenvalues.git" }
+ffmpeg-sidecar = "1.0"
 
 # The following crates need to run at full power
 # in most contexts to be effective.
