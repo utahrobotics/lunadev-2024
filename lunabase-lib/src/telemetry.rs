@@ -6,7 +6,7 @@ use std::{
         Arc,
     },
     thread::JoinHandle,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
@@ -34,6 +34,7 @@ struct LunabotShared {
     controls_data: Box<[AtomicU8]>,
     echo_controls: AtomicBool,
     camera_frame: AtomicCell<Option<Arc<Box<[u8]>>>>,
+    connected: AtomicBool,
 }
 
 #[derive(GodotClass)]
@@ -78,6 +79,7 @@ impl INode for LunabotConn {
             controls_data,
             echo_controls: AtomicBool::default(),
             camera_frame: AtomicCell::default(),
+            connected: AtomicBool::default(),
         };
         let shared = Arc::new(shared);
 
@@ -165,6 +167,9 @@ impl INode for LunabotConn {
                     base.emit_signal("connected".into(), &[]);
                 }));
                 shared.echo_controls.store(false, Ordering::Relaxed);
+                shared.connected.store(true, Ordering::Relaxed);
+                let mut last_receive_time = Instant::now();
+                let mut pinged = false;
 
                 loop {
                     let result = server.service_ex().timeout(200).done();
@@ -196,6 +201,16 @@ impl INode for LunabotConn {
                         return;
                     }
 
+                    let receive_elapsed = last_receive_time.elapsed();
+                    if !pinged && receive_elapsed.as_secs() >= 3 {
+                        pinged = true;
+                        peer.send(
+                            Channels::Important.into_godot() as i32 - 1,
+                            std::iter::once(ImportantMessage::Ping.into_godot() - 1).collect(),
+                            ENetPacketPeer::FLAG_RELIABLE,
+                        );
+                    }
+
                     let controls_data: Box<[u8]> = shared
                         .controls_data
                         .iter()
@@ -211,6 +226,10 @@ impl INode for LunabotConn {
                         EventType::ERROR => {
                             server.destroy();
                             godot_error!("Server faced an error");
+                            shared.connected.store(false, Ordering::Relaxed);
+                            shared.base_mut_queue.push(Box::new(|mut base| {
+                                base.emit_signal("disconnected".into(), &[]);
+                            }));
                             continue 'main;
                         }
                         EventType::DISCONNECT => break,
@@ -221,6 +240,8 @@ impl INode for LunabotConn {
                             );
                         }
                         EventType::RECEIVE => {
+                            pinged = false;
+                            last_receive_time += receive_elapsed;
                             shared.base_mut_queue.push(Box::new(|mut base| {
                                 base.emit_signal("something_received".into(), &[]);
                             }));
@@ -240,17 +261,18 @@ impl INode for LunabotConn {
                                         .hwaccel("auto")
                                         .args(["-protocol_whitelist", "file,rtp,udp"])
                                         .input("camera.sdp")
-                                        // .args([
-                                        // "-flags",
-                                        // "low_delay",
-                                        // "-avioflags",
-                                        // "direct",
-                                        // "-rtsp_transport",
-                                        // "udp",
-                                        // ])
+                                        .args([
+                                            "-flags",
+                                            "low_delay",
+                                            "-avioflags",
+                                            "direct",
+                                            "-rtsp_transport",
+                                            "udp",
+                                        ])
                                         .format("rawvideo")
                                         .pix_fmt("rgb24")
                                         .output("-")
+                                        .create_no_window()
                                         .spawn()
                                         .expect("Failed to init ffmpeg process");
 
@@ -351,7 +373,7 @@ impl INode for LunabotConn {
 
                     if shared.echo_controls.load(Ordering::Relaxed) {
                         peer.send(
-                            Channels::Controls.into_godot() as i32,
+                            Channels::Controls.into_godot() as i32 - 1,
                             controls_data.into_iter().copied().collect(),
                             ENetPacketPeer::FLAG_UNRELIABLE_FRAGMENT
                                 | ENetPacketPeer::FLAG_UNSEQUENCED,
@@ -360,13 +382,14 @@ impl INode for LunabotConn {
 
                     while let Some(packet) = shared.packet_queue.pop() {
                         peer.send(
-                            packet.channel as i32,
+                            packet.channel.into_godot() as i32 - 1,
                             packet.data.into_iter().collect(),
                             packet.flags,
                         );
                     }
                 }
 
+                shared.connected.store(false, Ordering::Relaxed);
                 shared.base_mut_queue.push(Box::new(|mut base| {
                     base.emit_signal("disconnected".into(), &[]);
                 }));
@@ -415,15 +438,16 @@ impl LunabotConn {
         packet_throttle: f32,
     );
 
-    // #[signal]
-    // fn camera_sdp_received(&self, sdp: String);
-
     #[signal]
     fn camera_frame_received(&self, image: Gd<Image>);
 
     #[func]
     fn is_lunabot_connected(&mut self) -> bool {
-        false
+        self.shared
+            .as_ref()
+            .unwrap()
+            .connected
+            .load(Ordering::Relaxed)
     }
 
     #[func]

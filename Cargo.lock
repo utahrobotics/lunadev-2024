@@ -1727,6 +1727,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "interprocess"
+version = "2.0.0"
+source = "git+https://github.com/kotauskas/interprocess?branch=main#349508c75c28af218233e45388277c5dd75a6277"
+dependencies = [
+ "libc",
+ "recvmsg",
+ "tokio",
+ "widestring",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "io-kit-sys"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1908,6 +1920,7 @@ dependencies = [
  "crossbeam",
  "ffmpeg-sidecar",
  "godot",
+ "interprocess",
 ]
 
 [[package]]
@@ -1934,6 +1947,7 @@ version = "0.1.0"
 dependencies = [
  "costmap",
  "fxhash",
+ "interprocess",
  "localization",
  "nalgebra",
  "navigator",
@@ -2889,6 +2903,12 @@ dependencies = [
  "bindgen 0.69.4",
  "pkg-config",
 ]
+
+[[package]]
+name = "recvmsg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
 
 [[package]]
 name = "redox_syscall"
@@ -3895,6 +3915,12 @@ dependencies = [
  "bytemuck",
  "safe_arch",
 ]
+
+[[package]]
+name = "widestring"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "653f141f39ec16bba3c5abe400a0c60da7468261cc2cbf36805022876bc721a8"
 
 [[package]]
 name = "winapi"
