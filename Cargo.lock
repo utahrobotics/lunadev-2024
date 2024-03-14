@@ -1336,6 +1336,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gensym"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913dce4c5f06c2ea40fc178c06f777ac89fc6b1383e90c254fafb1abe4ba3c82"
+dependencies = [
+ "proc-macro2 1.0.78",
+ "quote 1.0.35",
+ "syn 2.0.52",
+ "uuid",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1365,6 +1377,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4271d37baee1b8c7e4b708028c57d816cf9d2434acb33a549475f78c181f6253"
 
 [[package]]
+name = "glam"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e4afd9ad95555081e109fe1d21f2a30c691b5f0919c67dfa690a2e1eb6bd51c"
+
+[[package]]
 name = "glob"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1376,6 +1394,89 @@ version = "0.1.0"
 dependencies = [
  "ordered-float",
 ]
+
+[[package]]
+name = "godot"
+version = "0.1.0"
+source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
+dependencies = [
+ "godot-core",
+ "godot-macros",
+]
+
+[[package]]
+name = "godot-bindings"
+version = "0.1.0"
+source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
+dependencies = [
+ "godot4-prebuilt",
+]
+
+[[package]]
+name = "godot-cell"
+version = "0.1.0"
+source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
+
+[[package]]
+name = "godot-codegen"
+version = "0.1.0"
+source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
+dependencies = [
+ "godot-bindings",
+ "godot-fmt",
+ "heck",
+ "nanoserde",
+ "proc-macro2 1.0.78",
+ "quote 1.0.35",
+ "regex",
+]
+
+[[package]]
+name = "godot-core"
+version = "0.1.0"
+source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
+dependencies = [
+ "glam",
+ "godot-bindings",
+ "godot-cell",
+ "godot-codegen",
+ "godot-ffi",
+]
+
+[[package]]
+name = "godot-ffi"
+version = "0.1.0"
+source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
+dependencies = [
+ "gensym",
+ "godot-bindings",
+ "godot-codegen",
+ "paste",
+]
+
+[[package]]
+name = "godot-fmt"
+version = "0.1.0"
+source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
+dependencies = [
+ "proc-macro2 1.0.78",
+]
+
+[[package]]
+name = "godot-macros"
+version = "0.1.0"
+source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
+dependencies = [
+ "godot-bindings",
+ "proc-macro2 1.0.78",
+ "quote 1.0.35",
+ "venial",
+]
+
+[[package]]
+name = "godot4-prebuilt"
+version = "0.0.0"
+source = "git+https://github.com/godot-rust/godot4-prebuilt?branch=4.2#3328a4cded2da9c9a3e2c4f7e42f649f677648ce"
 
 [[package]]
 name = "h2"
@@ -1626,6 +1727,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "interprocess"
+version = "2.0.0"
+source = "git+https://github.com/kotauskas/interprocess?branch=main#349508c75c28af218233e45388277c5dd75a6277"
+dependencies = [
+ "libc",
+ "recvmsg",
+ "tokio",
+ "widestring",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "io-kit-sys"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1801,6 +1914,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
+name = "lunabase-lib"
+version = "0.1.0"
+dependencies = [
+ "crossbeam",
+ "ffmpeg-sidecar",
+ "godot",
+ "interprocess",
+]
+
+[[package]]
 name = "lunabot"
 version = "0.1.0"
 dependencies = [
@@ -1824,6 +1947,7 @@ version = "0.1.0"
 dependencies = [
  "costmap",
  "fxhash",
+ "interprocess",
  "localization",
  "nalgebra",
  "navigator",
@@ -2024,6 +2148,21 @@ checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
 dependencies = [
  "getrandom",
 ]
+
+[[package]]
+name = "nanoserde"
+version = "0.1.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5de9cf844ab1e25a0353525bd74cb889843a6215fa4a0d156fd446f4857a1b99"
+dependencies = [
+ "nanoserde-derive",
+]
+
+[[package]]
+name = "nanoserde-derive"
+version = "0.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e943b2c21337b7e3ec6678500687cdc741b7639ad457f234693352075c082204"
 
 [[package]]
 name = "nasm-rs"
@@ -2764,6 +2903,12 @@ dependencies = [
  "bindgen 0.69.4",
  "pkg-config",
 ]
+
+[[package]]
+name = "recvmsg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
 
 [[package]]
 name = "redox_syscall"
@@ -3600,6 +3745,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
+name = "uuid"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f00cc9702ca12d3c81455259621e676d0f7251cec66a21e98fe2e9a37db93b2a"
+dependencies = [
+ "getrandom",
+]
+
+[[package]]
 name = "v4l"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3630,6 +3784,15 @@ name = "vec_map"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
+
+[[package]]
+name = "venial"
+version = "0.5.0"
+source = "git+https://github.com/PoignardAzur/venial?rev=32ade31408eb0ffba4ce7b02d3cdb2e78b496644#32ade31408eb0ffba4ce7b02d3cdb2e78b496644"
+dependencies = [
+ "proc-macro2 1.0.78",
+ "quote 1.0.35",
+]
 
 [[package]]
 name = "version_check"
@@ -3752,6 +3915,12 @@ dependencies = [
  "bytemuck",
  "safe_arch",
 ]
+
+[[package]]
+name = "widestring"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "653f141f39ec16bba3c5abe400a0c60da7468261cc2cbf36805022876bc721a8"
 
 [[package]]
 name = "winapi"

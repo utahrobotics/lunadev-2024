@@ -15,3 +15,4 @@ toml = { workspace = true }
 navigator = { path = "../navigator" }
 localization = { path = "../localization" }
 rand_distr = { workspace = true }
+interprocess = { workspace = true }
