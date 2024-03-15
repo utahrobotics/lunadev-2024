@@ -248,7 +248,7 @@ impl Node for Telemetry {
         });
 
         info!("Connecting to lunabase...");
-        let enet_fut = tokio_rayon::spawn(move || 'main: loop {
+        let enet_fut = tokio_rayon::spawn(move || loop {
             let tmp_host = enet.create_host::<()>(
                 None,
                 1,
@@ -267,21 +267,16 @@ impl Node for Telemetry {
                 };
                 match event {
                     Event::Connect(_) => break,
-                    Event::Disconnect(ref peer, _) => {
-                        warn!(
-                            "Somehow disconnected from a peer ({:?}:{})! ignoring...",
-                            peer.address().ip(),
-                            peer.address().port()
-                        );
-                        continue 'main;
-                    }
+                    Event::Disconnect(_, _) => 
+                        continue,
+                    
                     Event::Receive { ref sender, .. } => {
                         warn!(
                             "Somehow received from a peer ({:?}:{})! ignoring...",
                             sender.address().ip(),
                             sender.address().port()
                         );
-                        continue 'main;
+                        continue;
                     }
                 }
             }

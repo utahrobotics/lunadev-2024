@@ -114,6 +114,9 @@ impl INode for LunabotConn {
     }
 
     fn ready(&mut self) {
+        ffmpeg_sidecar::download::auto_download()
+            .expect("Failed to check for ffmpeg");
+
         let shared = self.shared.clone().unwrap();
         let task = move || 'main: loop {
             let mut server = ENetConnection::new_gd();
@@ -253,9 +256,6 @@ impl INode for LunabotConn {
                                     // let data = data.to_vec();
                                     std::fs::write("camera.sdp", data)
                                         .expect("camera.sdp should be writable");
-
-                                    ffmpeg_sidecar::download::auto_download()
-                                        .expect("Failed to check for ffmpeg");
 
                                     let mut output = FfmpegCommand::new()
                                         .hwaccel("auto")
