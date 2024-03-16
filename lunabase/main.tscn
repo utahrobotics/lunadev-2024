@@ -106,10 +106,10 @@ var udp_thr := Thread.new()
 func _ready() -> void:
 	texture = ImageTexture.create_from_image(Image.create(IMAGE_WIDTH, IMAGE_HEIGHT, false, Image.FORMAT_RGB8))
 	#texture.update()
-	Lunabot.camera_frame_received.connect(
-		func(img: Image):
-			texture.update(img)
-	)
+	#Lunabot.camera_frame_received.connect(
+		#func(img: Image):
+			#texture.update(img)
+	#)
 	#Lunabot.camera_sdp_received.connect(
 		#func(sdp: String):
 			#if ffmpeg_thr != null:

@@ -1,16 +1,11 @@
 use std::{
-    io::Read,
-    ops::Deref,
-    sync::{
+    ops::Deref, process::Stdio, sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         Arc,
-    },
-    thread::JoinHandle,
-    time::{Duration, Instant},
+    }, thread::JoinHandle, time::{Duration, Instant}
 };
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
-use ffmpeg_sidecar::command::FfmpegCommand;
 use godot::{
     engine::{
         enet_connection::EventType, global::Error, image::Format, ENetConnection, ENetPacketPeer,
@@ -114,7 +109,7 @@ impl INode for LunabotConn {
     }
 
     fn ready(&mut self) {
-        ffmpeg_sidecar::download::auto_download().expect("Failed to check for ffmpeg");
+        std::fs::File::create("camera-ffmpeg.log").expect("camera-ffmpeg.log should be writable");
 
         let shared = self.shared.clone().unwrap();
         let task = move || 'main: loop {
@@ -172,12 +167,16 @@ impl INode for LunabotConn {
                 shared.connected.store(true, Ordering::Relaxed);
                 let mut last_receive_time = Instant::now();
                 let mut pinged = false;
+                let mut ffplay: Option<std::process::Child> = None;
 
                 loop {
                     let result = server.service_ex().timeout(200).done();
 
                     if Arc::strong_count(&shared) == 1 {
                         peer.peer_disconnect();
+                        if let Some(mut ffplay) = ffplay {
+                            let _ = ffplay.kill();
+                        }
                         loop {
                             let result = server.service();
                             let event_type: EventType = result.get(0).to();
@@ -256,86 +255,33 @@ impl INode for LunabotConn {
                                     std::fs::write("camera.sdp", data)
                                         .expect("camera.sdp should be writable");
 
-                                    let mut output = FfmpegCommand::new()
-                                        .hwaccel("auto")
-                                        .args(["-protocol_whitelist", "file,rtp,udp"])
-                                        .input("camera.sdp")
-                                        .args([
+                                    let mut child = std::process::Command::new("ffplay")
+                                        .args(["-protocol_whitelist", "file,rtp,udp", "-i", "camera.sdp",
                                             "-flags",
                                             "low_delay",
                                             "-avioflags",
                                             "direct",
-                                            "-rtsp_transport",
-                                            "udp",
+                                            "-probesize",
+                                            "32",
+                                            "-analyzeduration",
+                                            "0",
+                                            "-sync",
+                                            "ext",
+                                            "-framedrop"
                                         ])
-                                        .format("rawvideo")
-                                        .pix_fmt("rgb24")
-                                        .output("-")
-                                        .create_no_window()
+                                        .stderr(Stdio::piped())
                                         .spawn()
-                                        .expect("Failed to init ffmpeg process");
+                                        .expect("Failed to init ffplay process");
 
-                                    let mut stderr = output.take_stderr().unwrap();
+                                    let mut stderr = child.stderr.take().unwrap();
+                                    ffplay = Some(child);
 
                                     std::thread::spawn(move || {
                                         let _ = std::io::copy(
                                             &mut stderr,
-                                            &mut std::fs::File::create("camera-ffmpeg.log")
+                                            &mut std::fs::OpenOptions::new().append(true).create(true).open("camera-ffmpeg.log")
                                                 .expect("camera-ffmpeg.log should be writable"),
                                         );
-                                    });
-
-                                    let mut video_in = output.take_stdout().unwrap();
-
-                                    let shared = Arc::downgrade(&shared);
-                                    let img_buffer =
-                                        vec![0u8; Self::IMAGE_WIDTH * Self::IMAGE_HEIGHT * 3]
-                                            .into_boxed_slice();
-                                    let mut img_buffer = Arc::new(img_buffer);
-                                    let mut read_so_far = 0usize;
-
-                                    std::thread::spawn(move || loop {
-                                        if shared.strong_count() == 1 {
-                                            break;
-                                        }
-                                        let img_buffer_mut: &mut Box<[u8]> =
-                                            Arc::make_mut(&mut img_buffer);
-                                        match video_in
-                                            .read(img_buffer_mut.split_at_mut(read_so_far).1)
-                                        {
-                                            Ok(0) => {
-                                                godot_error!("FFMPEG closed!");
-                                                let Some(shared) = shared.upgrade() else {
-                                                    break;
-                                                };
-                                                shared.packet_queue.push(Packet {
-                                                    channel: Channels::Camera,
-                                                    data: vec![1],
-                                                    flags: ENetPacketPeer::FLAG_RELIABLE,
-                                                });
-                                                break;
-                                            }
-                                            Ok(n) => read_so_far += n,
-                                            Err(e) => {
-                                                godot_error!("{e}");
-                                                let Some(shared) = shared.upgrade() else {
-                                                    break;
-                                                };
-                                                shared.packet_queue.push(Packet {
-                                                    channel: Channels::Camera,
-                                                    data: vec![1],
-                                                    flags: ENetPacketPeer::FLAG_RELIABLE,
-                                                });
-                                                break;
-                                            }
-                                        }
-                                        if read_so_far == img_buffer.len() {
-                                            read_so_far = 0;
-                                            let Some(shared) = shared.upgrade() else {
-                                                break;
-                                            };
-                                            shared.camera_frame.store(Some(img_buffer.clone()));
-                                        }
                                     });
                                 }
                                 Channels::Odometry => {
@@ -388,6 +334,9 @@ impl INode for LunabotConn {
                     }
                 }
 
+                if let Some(mut ffplay) = ffplay {
+                    let _ = ffplay.kill();
+                }
                 shared.connected.store(false, Ordering::Relaxed);
                 shared.base_mut_queue.push(Box::new(|mut base| {
                     base.emit_signal("disconnected".into(), &[]);
@@ -436,9 +385,6 @@ impl LunabotConn {
         packet_loss: f32,
         packet_throttle: f32,
     );
-
-    #[signal]
-    fn camera_frame_received(&self, image: Gd<Image>);
 
     #[func]
     fn is_lunabot_connected(&mut self) -> bool {
