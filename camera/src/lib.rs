@@ -27,6 +27,7 @@ pub struct Camera {
     pub camera_index: u32,
     pub res_x: u32,
     pub res_y: u32,
+    camera_name: String,
     image_received: Publisher<Arc<DynamicImage>>,
     intrinsics: NodeIntrinsics<Self>,
 }
@@ -39,19 +40,21 @@ impl Camera {
             RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
         )
         .context("Failed to initialize camera")?;
-        log::info!(
-            "Pinged {} with index {}",
-            tmp_camera.info().human_name(),
-            camera_index
-        );
+        let camera_name = tmp_camera.info().human_name();
+        log::info!("Pinged {} with index {}", camera_name, camera_index);
         Ok(Self {
             fps: 0,
             res_x: 0,
             res_y: 0,
             camera_index,
+            camera_name,
             image_received: Default::default(),
             intrinsics: Default::default(),
         })
+    }
+
+    pub fn get_camera_name(&self) -> &str {
+        &self.camera_name
     }
 
     /// Gets a reference to the `Signal` that represents received images.

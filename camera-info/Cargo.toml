@@ -1,0 +1,17 @@
+[package]
+name = "camera-info"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { workspace = true }
+# nalgebra = { workspace = true }
+opencv = { version = "0.88", features = ["clang-runtime"] }
+serde_json = "1"
+unros = { path = "../unros" }
+image = { workspace = true }
+
+[dev-dependencies]
+camera = { path = "../camera" }

@@ -1,8 +1,12 @@
 use std::{
-    ops::Deref, process::Stdio, sync::{
+    ops::Deref,
+    process::Stdio,
+    sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         Arc,
-    }, thread::JoinHandle, time::{Duration, Instant}
+    },
+    thread::JoinHandle,
+    time::{Duration, Instant},
 };
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
@@ -256,7 +260,11 @@ impl INode for LunabotConn {
                                         .expect("camera.sdp should be writable");
 
                                     let mut child = std::process::Command::new("ffplay")
-                                        .args(["-protocol_whitelist", "file,rtp,udp", "-i", "camera.sdp",
+                                        .args([
+                                            "-protocol_whitelist",
+                                            "file,rtp,udp",
+                                            "-i",
+                                            "camera.sdp",
                                             "-flags",
                                             "low_delay",
                                             "-avioflags",
@@ -267,7 +275,7 @@ impl INode for LunabotConn {
                                             "0",
                                             "-sync",
                                             "ext",
-                                            "-framedrop"
+                                            "-framedrop",
                                         ])
                                         .stderr(Stdio::piped())
                                         .spawn()
@@ -279,7 +287,10 @@ impl INode for LunabotConn {
                                     std::thread::spawn(move || {
                                         let _ = std::io::copy(
                                             &mut stderr,
-                                            &mut std::fs::OpenOptions::new().append(true).create(true).open("camera-ffmpeg.log")
+                                            &mut std::fs::OpenOptions::new()
+                                                .append(true)
+                                                .create(true)
+                                                .open("camera-ffmpeg.log")
                                                 .expect("camera-ffmpeg.log should be writable"),
                                         );
                                     });
