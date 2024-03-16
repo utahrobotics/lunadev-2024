@@ -20,13 +20,7 @@ use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use telemetry::Telemetry;
-use unros::{
-    anyhow,
-    log::info,
-    logging::dump::{DataDump, VideoDataDump},
-    pubsub::Subscriber,
-    rayon, Application, Node,
-};
+use unros::{anyhow, log::info, logging::dump::DataDump, pubsub::Subscriber, Application, Node};
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
@@ -44,7 +38,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .map(|mut x| x.get_intrinsics().ignore_drop())
         .count();
     info!("Discovered {camera_count} cameras");
-    let mut camera = Camera::new(0)?;
+    let mut camera = Camera::new(2)?;
 
     #[cfg(unix)]
     let mut realsense_camera = {
@@ -69,8 +63,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let telemetry = Telemetry::new(
         SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
-        1920,
-        1200,
+        3840,
+        2160,
         20,
     )
     .await?;
@@ -78,7 +72,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     // let costmap_ref = costmap.clone();
 
-    // let mut costmap_writer = VideoDataDump::new_display(80, 80, 24)?;
+    // let mut costmap_writer = VideoDataDump::new_file(80, 80, 24)?;
     // // let mut subtitle_writer = costmap_writer.init_subtitles().await?;
 
     // rayon::spawn(move || loop {

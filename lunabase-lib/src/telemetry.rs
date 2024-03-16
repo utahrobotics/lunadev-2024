@@ -114,8 +114,7 @@ impl INode for LunabotConn {
     }
 
     fn ready(&mut self) {
-        ffmpeg_sidecar::download::auto_download()
-            .expect("Failed to check for ffmpeg");
+        ffmpeg_sidecar::download::auto_download().expect("Failed to check for ffmpeg");
 
         let shared = self.shared.clone().unwrap();
         let task = move || 'main: loop {

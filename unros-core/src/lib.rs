@@ -599,12 +599,15 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
         info!("Runtime started with pid: {pid}");
         tokio::select! {
             res = fut => res,
-            _ = end_recv.recv() => Ok(()),
+            _ = end_recv.recv() => {
+                info!("Ctrl-C received");
+                Ok(())
+            },
 
         }
     })?;
 
-    info!("Ctrl-C received. Exiting...");
+    info!("Exiting...");
 
     let dropper = std::thread::spawn(move || {
         drop(runtime);

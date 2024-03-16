@@ -267,9 +267,8 @@ impl Node for Telemetry {
                 };
                 match event {
                     Event::Connect(_) => break,
-                    Event::Disconnect(_, _) => 
-                        continue,
-                    
+                    Event::Disconnect(_, _) => continue,
+
                     Event::Receive { ref sender, .. } => {
                         warn!(
                             "Somehow received from a peer ({:?}:{})! ignoring...",
