@@ -1,4 +1,4 @@
-[gd_scene load_steps=41 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=40 format=3 uid="uid://b8qgudi6vkflb"]
 
 [ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_1xyvq"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="1_hl7kb"]
@@ -84,53 +84,6 @@ func _process(delta: float) -> void:
 	var strength := minf(timer, TOO_LONG) / TOO_LONG
 	modulate.g = 1.0 - strength
 	modulate.r = strength
-"
-
-[sub_resource type="GDScript" id="GDScript_67ds2"]
-script/source = "extends TextureRect
-
-
-signal ffmpeg_thr_finished
-
-
-const IMAGE_WIDTH := 1280
-const IMAGE_HEIGHT := 720
-const IMAGE_SIZE := IMAGE_WIDTH * IMAGE_HEIGHT * 3
-
-var texture_rects: Array = []
-
-var ffmpeg_thr: Thread
-var udp_thr := Thread.new()
-
-
-func _ready() -> void:
-	texture = ImageTexture.create_from_image(Image.create(IMAGE_WIDTH, IMAGE_HEIGHT, false, Image.FORMAT_RGB8))
-	#texture.update()
-	#Lunabot.camera_frame_received.connect(
-		#func(img: Image):
-			#texture.update(img)
-	#)
-	#Lunabot.camera_sdp_received.connect(
-		#func(sdp: String):
-			#if ffmpeg_thr != null:
-				#return
-			#ffmpeg_thr = Thread.new()
-			#var sdp_file := FileAccess.open(\"camera.sdp\", FileAccess.WRITE)
-			#sdp_file.store_string(sdp)
-			#sdp_file.close()
-			#
-			#ffmpeg_thr.start(
-				#func():
-					##OS.execute(\"ffmpeg\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-flags\", \"low_delay\", \"-avioflags\", \"direct\", \"-rtsp_transport\", \"udp\", \"-f\", \"rawvideo\", \"-pix_fmt\", \"rgb24\", \"tcp://127.0.0.1:%s\" % (Lunabot.RECV_FROM + 3)]),
-					#OS.execute(\"ffplay\", [\"-protocol_whitelist\", '\"file,rtp,udp\"', \"-i\", \"camera.sdp\", \"-flags\", \"low_delay\"]),
-				#Thread.PRIORITY_HIGH
-			#)
-			#
-			#await ffmpeg_thr_finished
-			#ffmpeg_thr.wait_to_finish()
-			#ffmpeg_thr = null
-			#Lunabot.raw_send_reliable(Lunabot.Channels.CAMERA, [1])
-	#)
 "
 
 [sub_resource type="GDScript" id="GDScript_amk46"]
@@ -661,16 +614,6 @@ theme_override_constants/margin_bottom = 10
 
 [node name="VBoxContainer" type="VBoxContainer" parent="Controller/MarginContainer"]
 layout_mode = 2
-
-[node name="VBoxContainer2" type="VBoxContainer" parent="Controller/MarginContainer/VBoxContainer"]
-layout_mode = 2
-size_flags_vertical = 3
-alignment = 1
-
-[node name="Camera" type="TextureRect" parent="Controller/MarginContainer/VBoxContainer/VBoxContainer2"]
-layout_mode = 2
-expand_mode = 5
-script = SubResource("GDScript_67ds2")
 
 [node name="HBoxContainer" type="HBoxContainer" parent="Controller/MarginContainer/VBoxContainer"]
 layout_mode = 2
