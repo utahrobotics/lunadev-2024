@@ -452,11 +452,14 @@ dependencies = [
 name = "camera-info"
 version = "0.1.0"
 dependencies = [
+ "apriltag 0.1.0",
  "camera",
  "image",
  "opencv",
+ "rig",
  "serde",
  "serde_json",
+ "toml",
  "unros",
 ]
 
