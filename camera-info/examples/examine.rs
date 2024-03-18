@@ -6,13 +6,14 @@ use unros::{
     anyhow::{self, Context},
     tokio::{self, task::JoinHandle},
     Application,
+    Node
 };
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
     discover_all_cameras()
         .context("Failed to discover cameras")?
-        .for_each(|_| {});
+        .for_each(|mut x| x.get_intrinsics().ignore_drop());
 
     let join: JoinHandle<Result<_, anyhow::Error>> = tokio::task::spawn_blocking(|| {
         let stdin = stdin();
