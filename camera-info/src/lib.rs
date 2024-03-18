@@ -10,7 +10,7 @@ use std::{
 };
 
 use apriltag::AprilTagDetector;
-use image::{DynamicImage, ImageBuffer, Rgb};
+use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgb};
 use opencv::{
     calib3d::{
         calibrate_camera, find_chessboard_corners, get_optimal_new_camera_matrix, undistort,
@@ -18,7 +18,7 @@ use opencv::{
     },
     core::{
         Mat, MatTraitConst, MatTraitConstManual, MatTraitManual, Point3f, Rect, Size, TermCriteria,
-        Vector, CV_8UC1,
+        Vector, CV_8UC3,
     },
     imgproc::corner_sub_pix,
     types::{VectorOfMat, VectorOfPoint2f, VectorOfPoint3f, VectorOfVec3d},
@@ -123,25 +123,20 @@ impl CameraInfo {
         sub: Subscription<Arc<DynamicImage>>,
     ) -> Subscription<Arc<DynamicImage>> {
         if let Some(distortion_data) = self.distortion_data.clone() {
-            let roi = Rect {
-                x: distortion_data.roi_x as i32,
-                y: distortion_data.roi_y as i32,
-                width: distortion_data.roi_width as i32,
-                height: distortion_data.roi_height as i32,
-            };
             sub.map(move |dyn_img: Arc<DynamicImage>| {
-                let img = dyn_img.to_rgb8();
-                let mut src = Mat::new_nd_with_default(
-                    &[img.height() as i32, img.width() as i32, 3],
-                    CV_8UC1,
-                    0.into(),
+                let mut src = Mat::new_rows_cols_with_default(
+                    dyn_img.height() as i32,
+                    dyn_img.width() as i32,
+                    CV_8UC3,
+                    1.into(),
                 )
                 .unwrap();
-                src.data_bytes_mut().unwrap().copy_from_slice(&img);
-                let mut dst = Mat::new_nd_with_default(
-                    &[img.height() as i32, img.width() as i32, 3],
-                    CV_8UC1,
-                    0.into(),
+                src.data_bytes_mut().unwrap().copy_from_slice(&dyn_img.to_rgb8());
+                let mut dst = Mat::new_rows_cols_with_default(
+                    dyn_img.height() as i32,
+                    dyn_img.width() as i32,
+                    CV_8UC3,
+                    1.into(),
                 )
                 .unwrap();
                 let camera_matrix =
@@ -168,15 +163,16 @@ impl CameraInfo {
                     }
                 }
 
-                dst = Mat::roi(&dst, roi).unwrap();
                 let img = ImageBuffer::<Rgb<u8>, _>::from_vec(
                     dyn_img.width(),
                     dyn_img.height(),
                     dst.data_bytes().unwrap().to_vec(),
                 )
                 .unwrap();
+                let mut img: DynamicImage = img.into();
+                img = img.crop_imm(distortion_data.roi_x as u32, distortion_data.roi_y as u32, distortion_data.roi_width as u32, distortion_data.roi_height as u32).resize_to_fill(dyn_img.width(), dyn_img.height(), FilterType::Triangle);
 
-                Arc::new(img.into())
+                Arc::new(img)
             })
         } else {
             sub
