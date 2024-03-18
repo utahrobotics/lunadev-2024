@@ -113,7 +113,7 @@ impl Default for RotationType {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Default)]
 pub struct PendingRobotElement {
     #[serde(default)]
     pub position: Point3<Float>,
@@ -129,12 +129,17 @@ pub struct PendingRobotElement {
     pub children: FxHashMap<Box<str>, Self>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Default)]
 pub struct Robot {
     children: FxHashMap<Box<str>, PendingRobotElement>,
 }
 
 impl Robot {
+    pub fn add_center_element(&mut self) {
+        self.children
+            .insert("center".into(), PendingRobotElement::default());
+    }
+
     pub fn destructure<'a, S: BuildHasher + Default>(
         mut self,
         element_paths: impl IntoIterator<Item = &'a str>,

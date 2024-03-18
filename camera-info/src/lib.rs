@@ -10,13 +10,16 @@ use std::{
 };
 
 use apriltag::AprilTagDetector;
-use image::DynamicImage;
+use image::{DynamicImage, ImageBuffer, Rgb};
 use opencv::{
     calib3d::{
-        calibrate_camera, find_chessboard_corners, get_optimal_new_camera_matrix,
+        calibrate_camera, find_chessboard_corners, get_optimal_new_camera_matrix, undistort,
         CALIB_CB_ADAPTIVE_THRESH, CALIB_CB_NORMALIZE_IMAGE,
     },
-    core::{Mat, MatTraitConst, Point3f, Rect, Size, TermCriteria, Vector},
+    core::{
+        Mat, MatTraitConst, MatTraitConstManual, MatTraitManual, Point3f, Rect, Size, TermCriteria,
+        Vector, CV_8UC1,
+    },
     imgproc::corner_sub_pix,
     types::{VectorOfMat, VectorOfPoint2f, VectorOfPoint3f, VectorOfVec3d},
 };
@@ -70,6 +73,13 @@ fn get_camera_db() -> &'static HashMap<String, Arc<CameraInfo>> {
                     continue;
                 }
             };
+
+            for key in submap.keys() {
+                if map.contains_key(key) {
+                    log::warn!("Found duplicate entry for {key}. Replacing...");
+                }
+            }
+
             map.extend(submap.into_iter().map(|(a, b)| (a, Arc::new(b))));
         }
 
@@ -77,7 +87,7 @@ fn get_camera_db() -> &'static HashMap<String, Arc<CameraInfo>> {
     })
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct DistortionData {
     distortion_coefficients: Vec<f64>,
     camera_matrix: [f64; 9],
@@ -88,7 +98,7 @@ struct DistortionData {
     roi_height: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct CameraInfo {
     pub width: u32,
     pub height: u32,
@@ -112,7 +122,65 @@ impl CameraInfo {
         &self,
         sub: Subscription<Arc<DynamicImage>>,
     ) -> Subscription<Arc<DynamicImage>> {
-        sub.map(|x| x)
+        if let Some(distortion_data) = self.distortion_data.clone() {
+            let roi = Rect {
+                x: distortion_data.roi_x as i32,
+                y: distortion_data.roi_y as i32,
+                width: distortion_data.roi_width as i32,
+                height: distortion_data.roi_height as i32,
+            };
+            sub.map(move |dyn_img: Arc<DynamicImage>| {
+                let img = dyn_img.to_rgb8();
+                let mut src = Mat::new_nd_with_default(
+                    &[img.height() as i32, img.width() as i32, 3],
+                    CV_8UC1,
+                    0.into(),
+                )
+                .unwrap();
+                src.data_bytes_mut().unwrap().copy_from_slice(&img);
+                let mut dst = Mat::new_nd_with_default(
+                    &[img.height() as i32, img.width() as i32, 3],
+                    CV_8UC1,
+                    0.into(),
+                )
+                .unwrap();
+                let camera_matrix =
+                    Mat::from_slice_rows_cols(&distortion_data.camera_matrix, 3, 3).unwrap();
+                let new_camera_matrix =
+                    Mat::from_slice_rows_cols(&distortion_data.new_camera_matrix, 3, 3).unwrap();
+                let dist_coeffs: Vector<f64> = distortion_data
+                    .distortion_coefficients
+                    .iter()
+                    .copied()
+                    .collect();
+
+                match undistort(
+                    &src,
+                    &mut dst,
+                    &camera_matrix,
+                    &dist_coeffs,
+                    &new_camera_matrix,
+                ) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        log::error!("Failed to undistort image: {e}");
+                        return dyn_img;
+                    }
+                }
+
+                dst = Mat::roi(&dst, roi).unwrap();
+                let img = ImageBuffer::<Rgb<u8>, _>::from_vec(
+                    dyn_img.width(),
+                    dyn_img.height(),
+                    dst.data_bytes().unwrap().to_vec(),
+                )
+                .unwrap();
+
+                Arc::new(img.into())
+            })
+        } else {
+            sub
+        }
     }
 }
 
@@ -129,6 +197,7 @@ struct FocalLengthEstimate {
     id: usize,
 }
 
+/// https://raw.githubusercontent.com/opencv/opencv/4.x/doc/pattern.png
 pub async fn interactive_examine(
     app: &mut Application,
     accept_sub: impl FnOnce(Subscription<Arc<DynamicImage>>),
@@ -226,11 +295,12 @@ pub async fn interactive_examine(
 
     let (chessboard, estimate_fps, focal_length_estimate) = join.await.unwrap().unwrap();
 
-    let rig: Robot = toml::from_str(include_str!("lunabot.toml")).unwrap();
+    let mut rig = Robot::default();
+    rig.add_center_element();
     let (mut elements, _) = rig
-        .destructure::<BuildHasherDefault<DefaultHasher>>(["camera"])
+        .destructure::<BuildHasherDefault<DefaultHasher>>(["center"])
         .unwrap();
-    let camera_element = elements.remove("camera").unwrap();
+    let camera_element = elements.remove("center").unwrap();
 
     let mut camera_sub = Subscriber::new(1);
     accept_sub(camera_sub.create_subscription());

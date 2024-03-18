@@ -459,7 +459,6 @@ dependencies = [
  "rig",
  "serde",
  "serde_json",
- "toml",
  "unros",
 ]
 
