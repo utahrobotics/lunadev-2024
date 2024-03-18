@@ -1965,6 +1965,7 @@ version = "0.1.0"
 dependencies = [
  "apriltag 0.1.0",
  "camera",
+ "camera-info",
  "costmap",
  "fxhash",
  "localization",
