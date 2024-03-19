@@ -38,7 +38,6 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .map(|mut x| x.get_intrinsics().ignore_drop())
         .count();
     info!("Discovered {camera_count} cameras");
-    let mut camera = Camera::new(2)?;
 
     #[cfg(unix)]
     let mut realsense_camera = {
@@ -63,12 +62,15 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let telemetry = Telemetry::new(
         SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
-        3840,
-        2160,
+        1280,
+        720,
         20,
     )
     .await?;
-    camera.accept_image_received_sub(telemetry.create_image_subscription());
+    let mut teleop_camera = Camera::new(2)?;
+    teleop_camera.res_x = 1280;
+    teleop_camera.res_y = 720;
+    teleop_camera.accept_image_received_sub(telemetry.create_image_subscription());
 
     // let costmap_ref = costmap.clone();
 
@@ -189,7 +191,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(driver);
     app.add_node(navigator);
     app.add_node(telemetry);
-    app.add_node(camera);
+    app.add_node(teleop_camera);
     #[cfg(unix)]
     app.add_node(realsense_camera);
 
