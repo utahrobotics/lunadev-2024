@@ -267,7 +267,11 @@ impl Node for Telemetry {
                 };
                 match event {
                     Event::Connect(_) => break,
-                    Event::Disconnect(_, _) => continue,
+                    Event::Disconnect(_, _) => {
+                        drop(event);
+                        host.connect(&self.server_addr.into(), Channels::Max as usize, 0)?;
+                        continue;
+                    }
 
                     Event::Receive { ref sender, .. } => {
                         warn!(
