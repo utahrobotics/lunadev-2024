@@ -5,8 +5,7 @@ use camera_info::interactive_examine;
 use unros::{
     anyhow::{self, Context},
     tokio::{self, task::JoinHandle},
-    Application,
-    Node
+    Application, Node,
 };
 
 #[unros::main]

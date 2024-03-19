@@ -8,7 +8,6 @@ use std::{
 
 use apriltag::{AprilTagDetector, PoseObservation};
 use camera::{discover_all_cameras, Camera};
-use camera_info::CameraInfo;
 use costmap::local::LocalCostmap;
 use fxhash::FxBuildHasher;
 use localization::{
@@ -69,10 +68,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         20,
     )
     .await?;
-    let camera_info = CameraInfo::from_name(camera.get_camera_name()).unwrap_or_default();
-    camera.accept_image_received_sub(
-        camera_info.undistort_subscription(telemetry.create_image_subscription()),
-    );
+    camera.accept_image_received_sub(telemetry.create_image_subscription());
 
     // let costmap_ref = costmap.clone();
 
