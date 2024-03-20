@@ -1,6 +1,6 @@
 use std::{
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::Instant,
 };
 
@@ -62,15 +62,15 @@ macro_rules! setup_logging {
 
 static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static START_TIME: OnceLock<Instant> = OnceLock::new();
-static LOG_SUBS: OnceLock<SegQueue<Subscription<String>>> = OnceLock::new();
+static LOG_SUBS: OnceLock<SegQueue<Subscription<Arc<str>>>> = OnceLock::new();
 
-pub fn log_accept_subscription(sub: Subscription<String>) {
+pub fn log_accept_subscription(sub: Subscription<Arc<str>>) {
     LOG_SUBS.get_or_init(Default::default).push(sub);
 }
 
 #[derive(Default)]
 struct LogPub {
-    publisher: Mutex<Publisher<String>>
+    publisher: Mutex<Publisher<Arc<str>>>
 }
 
 impl log::Log for LogPub {
@@ -88,7 +88,7 @@ impl log::Log for LogPub {
                 publisher.accept_subscription(sub);
             }
         }
-        publisher.set(format!("{}", record.args()));
+        publisher.set(format!("{}", record.args()).into_boxed_str().into());
     }
 
     fn flush(&self) {}
