@@ -51,6 +51,7 @@ enum Channels {
     Camera,
     Odometry,
     Controls,
+    Logs,
     Max,
 }
 
@@ -320,6 +321,13 @@ impl INode for LunabotConn {
                                         data.as_slice() != controls_data.deref(),
                                         Ordering::Relaxed,
                                     );
+                                }
+                                Channels::Logs => {
+                                    let Ok(log) = String::from_utf8(data) else {
+                                        godot_error!("Failed to parse incoming log");
+                                        continue;
+                                    };
+                                    godot_print!("{log}");
                                 }
                                 Channels::Max => {}
                             }

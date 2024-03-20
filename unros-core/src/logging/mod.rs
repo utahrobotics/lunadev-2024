@@ -1,15 +1,16 @@
 use std::{
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{Mutex, OnceLock},
     time::Instant,
 };
 
 use anyhow::Context;
 use chrono::{Datelike, Timelike};
+use crossbeam::queue::SegQueue;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
 
-use crate::{logging::eyre::UnrosEyreMessage, RunOptions};
+use crate::{logging::eyre::UnrosEyreMessage, pubsub::{Publisher, Subscription}, RunOptions};
 
 pub mod dump;
 mod eyre;
@@ -61,6 +62,34 @@ macro_rules! setup_logging {
 
 static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static START_TIME: OnceLock<Instant> = OnceLock::new();
+static LOG_SUBS: OnceLock<SegQueue<Subscription<String>>> = OnceLock::new();
+
+pub fn log_accept_subscription(sub: Subscription<String>) {
+    LOG_SUBS.get_or_init(Default::default).push(sub);
+}
+
+#[derive(Default)]
+struct LogPub {
+    publisher: Mutex<Publisher<String>>
+}
+
+impl log::Log for LogPub {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        let mut publisher = self.publisher.lock().unwrap();
+        if let Some(subs) = LOG_SUBS.get() {
+            while let Some(sub) = subs.pop() {
+                publisher.accept_subscription(sub);
+            }
+        }
+        publisher.set(format!("{}", record.args()));
+    }
+
+    fn flush(&self) {}
+}
 
 /// Initializes the default logging implementation.
 ///
@@ -116,6 +145,8 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
 
         let _ = START_TIME.set(Instant::now());
 
+        let log_pub: Box<dyn log::Log> = Box::new(LogPub::default());
+
         fern::Dispatch::new()
             // Add blanket level filter -
             .level(log::LevelFilter::Debug)
@@ -136,7 +167,8 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                     .chain(
                         fern::log_file(log_folder_name.join(".log"))
                             .context("Failed to create log file. Do we have permissions?")?,
-                    ),
+                    )
+                    .chain(log_pub),
             )
             .chain(
                 fern::Dispatch::new()

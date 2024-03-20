@@ -14,7 +14,7 @@ use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait, log,
-    logging::dump::{ScalingFilter, VideoDataDump},
+    logging::{dump::{ScalingFilter, VideoDataDump}, log_accept_subscription},
     pubsub::{Publisher, Subscriber, Subscription},
     setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
@@ -26,6 +26,7 @@ enum Channels {
     Camera,
     Odometry,
     Controls,
+    Logs,
     Max,
 }
 
@@ -101,6 +102,7 @@ impl Telemetry {
         packet: Box<[u8]>,
         context: &RuntimeContext,
         sdp: &String,
+        send_logs: &mut bool
     ) {
         setup_logging!(context);
         let Ok(channel) = Channels::try_from(channel) else {
@@ -153,6 +155,9 @@ impl Telemetry {
                 ));
             }
             Channels::Max => error!("Received invalid channel: {}", channel as u8),
+            Channels::Logs => {
+                *send_logs = !*send_logs;
+            }
         }
     }
 }
@@ -213,6 +218,9 @@ impl Node for Telemetry {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
+
+        let mut logs_sub = Subscriber::new(8);
+        log_accept_subscription(logs_sub.create_subscription());
 
         let enet = Enet::new()?;
         let outgoing_limit = if self.bandwidth_limit == 0 {
@@ -288,6 +296,7 @@ impl Node for Telemetry {
                 Packet::new(sdp.as_bytes(), PacketMode::ReliableSequenced)?,
                 Channels::Camera as u8,
             )?;
+            let mut send_logs = true;
 
             info!("Connected to lunabase!");
             loop {
@@ -310,7 +319,7 @@ impl Node for Telemetry {
                             ..
                         }) => {
                             let packet = packet.data().to_vec().into_boxed_slice();
-                            self.receive_packet(channel_id, packet, &context, &sdp);
+                            self.receive_packet(channel_id, packet, &context, &sdp, &mut send_logs);
                         }
                         None => {}
                     }
@@ -318,6 +327,11 @@ impl Node for Telemetry {
                 let mut peer = host.peers().next().unwrap();
                 while let Some((body, mode, channel)) = self.packet_queue.pop() {
                     peer.send_packet(Packet::new(&body, mode)?, channel as u8)?;
+                }
+                if send_logs {
+                    while let Some(log) = logs_sub.try_recv() {
+                        peer.send_packet(Packet::new(log.as_bytes(), PacketMode::ReliableSequenced)?, Channels::Logs as u8)?;
+                    }
                 }
             }
             info!("Connecting to lunabase...");
