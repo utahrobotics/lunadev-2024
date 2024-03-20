@@ -219,7 +219,7 @@ impl Node for Telemetry {
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
-        let mut logs_sub = Subscriber::new(8);
+        let mut logs_sub = Subscriber::new(32);
         log_accept_subscription(logs_sub.create_subscription());
 
         let enet = Enet::new()?;

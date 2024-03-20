@@ -74,11 +74,14 @@ struct LogPub {
 }
 
 impl log::Log for LogPub {
-    fn enabled(&self, _metadata: &log::Metadata) -> bool {
-        true
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        !(metadata.target() == "unros_core::logging::dump" && metadata.level() == Level::Info)
     }
 
     fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
         let mut publisher = self.publisher.lock().unwrap();
         if let Some(subs) = LOG_SUBS.get() {
             while let Some(sub) = subs.pop() {
