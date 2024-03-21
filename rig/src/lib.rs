@@ -14,6 +14,7 @@ use fxhash::FxHashMap;
 use joints::{Joint, JointMut};
 use nalgebra::{Isometry3, Point3, Quaternion, RealField, UnitQuaternion, Vector3};
 use portable_atomic::AtomicF32;
+use quaternion_core::from_euler_angles;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
@@ -111,6 +112,15 @@ impl Default for RotationType {
     fn default() -> Self {
         Self::Intrinsic
     }
+}
+
+pub fn euler_to_quat(
+    euler: [f32; 3],
+    rotation_type: impl Into<quaternion_core::RotationType>,
+    rotation_sequence: impl Into<quaternion_core::RotationSequence>,
+) -> UnitQuaternion<Float> {
+    let (w, [i, j, k]) = from_euler_angles(rotation_type.into(), rotation_sequence.into(), euler);
+    UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k))
 }
 
 #[derive(Deserialize, Serialize, Default)]

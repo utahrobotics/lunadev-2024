@@ -1,6 +1,7 @@
 use std::{
     io::Write,
     net::SocketAddrV4,
+    ops::Deref,
     str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
@@ -14,20 +15,28 @@ use localization::{
     frames::{IMUFrame, OrientationFrame, PositionFrame},
     Localizer,
 };
-use nalgebra::{Isometry, Point3};
+use nalgebra::{Isometry, Point3, Vector3};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 #[cfg(unix)]
 use realsense::{discover_all_realsense, PointCloud};
-use rig::Robot;
+use rig::{euler_to_quat, Robot, RotationSequence, RotationType};
 use telemetry::Telemetry;
-use unros::{anyhow, log::info, logging::dump::DataDump, pubsub::Subscriber, Application, Node};
+use unros::{
+    anyhow,
+    bytes::Bytes,
+    log::{self, info},
+    logging::dump::DataDump,
+    pubsub::Subscriber,
+    Application, Node,
+};
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
-    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera"])?;
+    let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;
     let camera_element = elements.remove("camera").unwrap();
     let robot_base_ref = robot_base.get_ref();
+    let imu01 = elements.remove("imu01").unwrap().get_ref();
 
     let costmap = LocalCostmap::new(80, 0.05, 0.01, robot_base.get_ref());
 
@@ -131,6 +140,69 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         },
     ));
 
+    let mut serial = serial::SerialConnection::new(
+        "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00".into(),
+        115200,
+        true,
+    )
+    .await;
+    let mut buf = vec![];
+    let imu_mapper = move |x: Bytes| {
+        buf.extend_from_slice(x.deref());
+        let Ok(msg) = std::str::from_utf8(&buf) else {
+            return None;
+        };
+
+        let Some(idx) = msg.find('\n') else {
+            return None;
+        };
+
+        if idx == 0 {
+            buf.remove(0);
+            return None;
+        }
+
+        let line = msg.split_at(idx - 1).0;
+        if line.is_empty() {
+            buf.drain(0..=idx);
+            return None;
+        }
+
+        let mut numbers = line.split(' ');
+        let ax: f32 = numbers.next().unwrap().parse().unwrap();
+        let az: f32 = numbers.next().unwrap().parse().unwrap();
+        let mut ay: f32 = numbers.next().unwrap().parse().unwrap();
+        let rx: f32 = numbers.next().unwrap().parse().unwrap();
+        let ry: f32 = numbers.next().unwrap().parse().unwrap();
+        let rz: f32 = numbers.next().unwrap().parse().unwrap();
+
+        ay -= 9.96 * 2.0;
+
+        if numbers.next().is_some() {
+            log::warn!("Extra number from IMU!")
+        }
+
+        buf.drain(0..idx);
+
+        Some(IMUFrame {
+            acceleration: Vector3::new(ax, ay, az),
+            acceleration_variance: 0.001,
+            angular_velocity: euler_to_quat(
+                [rx, ry, rz],
+                RotationType::Extrinsic,
+                RotationSequence::XYZ,
+            ),
+            angular_velocity_variance: 0.0001,
+            robot_element: imu01.clone(),
+        })
+    };
+    serial.accept_msg_received_sub(
+        localizer
+            .create_imu_sub()
+            .filter_map(imu_mapper.clone())
+            .set_name("imu01"),
+    );
+
     #[cfg(unix)]
     {
         realsense_camera.accept_image_received_sub(
@@ -138,7 +210,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 .create_image_subscription()
                 .set_name("RealSense Apriltag Image"),
         );
-        // camera.accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
+        realsense_camera
+            .accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
     }
 
     let mut navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.clone(), 0.5, 0.15);
@@ -192,6 +265,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(navigator);
     app.add_node(telemetry);
     app.add_node(teleop_camera);
+    app.add_node(serial);
     #[cfg(unix)]
     app.add_node(realsense_camera);
 

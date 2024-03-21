@@ -1973,6 +1973,7 @@ dependencies = [
  "navigator",
  "realsense",
  "rig",
+ "serial",
  "telemetry",
  "toml",
  "unros",

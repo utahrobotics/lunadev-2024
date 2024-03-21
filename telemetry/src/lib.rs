@@ -14,7 +14,10 @@ use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait, log,
-    logging::{dump::{ScalingFilter, VideoDataDump}, log_accept_subscription},
+    logging::{
+        dump::{ScalingFilter, VideoDataDump},
+        log_accept_subscription,
+    },
     pubsub::{Publisher, Subscriber, Subscription},
     setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
@@ -102,7 +105,7 @@ impl Telemetry {
         packet: Box<[u8]>,
         context: &RuntimeContext,
         sdp: &String,
-        send_logs: &mut bool
+        send_logs: &mut bool,
     ) {
         setup_logging!(context);
         let Ok(channel) = Channels::try_from(channel) else {
@@ -330,7 +333,10 @@ impl Node for Telemetry {
                 }
                 if send_logs {
                     while let Some(log) = logs_sub.try_recv() {
-                        peer.send_packet(Packet::new(log.as_bytes(), PacketMode::ReliableSequenced)?, Channels::Logs as u8)?;
+                        peer.send_packet(
+                            Packet::new(log.as_bytes(), PacketMode::ReliableSequenced)?,
+                            Channels::Logs as u8,
+                        )?;
                     }
                 }
             }

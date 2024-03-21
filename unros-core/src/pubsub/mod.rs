@@ -92,7 +92,7 @@ impl<T> Drop for Publisher<T> {
 }
 
 trait Queue<T>: Send + Sync {
-    fn push(&self, value: T) -> EnqueueResult;
+    fn push(&mut self, value: T) -> EnqueueResult;
     fn clone(&self) -> Box<dyn Queue<T>>;
 }
 
@@ -104,7 +104,7 @@ enum EnqueueResult {
 }
 
 impl<T: Send + 'static> Queue<T> for Weak<ArrayQueue<T>> {
-    fn push(&self, value: T) -> EnqueueResult {
+    fn push(&mut self, value: T) -> EnqueueResult {
         if let Some(queue) = self.upgrade() {
             if queue.force_push(value).is_some() {
                 EnqueueResult::Full
@@ -120,8 +120,8 @@ impl<T: Send + 'static> Queue<T> for Weak<ArrayQueue<T>> {
     }
 }
 
-impl<T, F: Fn(T) -> EnqueueResult + Send + Sync + Clone + 'static> Queue<T> for F {
-    fn push(&self, value: T) -> EnqueueResult {
+impl<T, F: FnMut(T) -> EnqueueResult + Send + Sync + Clone + 'static> Queue<T> for F {
+    fn push(&mut self, value: T) -> EnqueueResult {
         self(value)
     }
     fn clone(&self) -> Box<dyn Queue<T>> {
@@ -281,9 +281,56 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
 
 impl<T: 'static> Subscription<T> {
     /// Changes the generic type of this `Subscription` using the given `map` function.
-    pub fn map<V>(self, map: impl Fn(V) -> T + Send + Sync + Clone + 'static) -> Subscription<V> {
+    pub fn map<V>(
+        mut self,
+        mut map: impl FnMut(V) -> T + Send + Sync + Clone + 'static,
+    ) -> Subscription<V> {
         Subscription {
             queue: Box::new(move |x| self.queue.push(map(x))),
+            notify: self.notify,
+            lag: 0,
+            name: None,
+        }
+    }
+
+    /// Changes the generic type of this `Subscription` using the given `filter_map` function.
+    ///
+    /// If the function returns `None`, the value will not be published.
+    pub fn filter_map<V>(
+        mut self,
+        mut filter_map: impl FnMut(V) -> Option<T> + Send + Sync + Clone + 'static,
+    ) -> Subscription<V> {
+        Subscription {
+            queue: Box::new(move |x| {
+                if let Some(x) = filter_map(x) {
+                    self.queue.push(x)
+                } else {
+                    EnqueueResult::Ok
+                }
+            }),
+            notify: self.notify,
+            lag: 0,
+            name: None,
+        }
+    }
+
+    pub fn zip<V: 'static>(mut self, mut other: Subscription<V>) -> Subscription<(T, V)> {
+        Subscription {
+            queue: Box::new(move |(left, right)| {
+                let left_result = self.queue.push(left);
+                let right_result = other.queue.push(right);
+                match left_result {
+                    EnqueueResult::Ok => right_result,
+                    EnqueueResult::Full => {
+                        if right_result == EnqueueResult::Closed {
+                            EnqueueResult::Closed
+                        } else {
+                            EnqueueResult::Full
+                        }
+                    }
+                    EnqueueResult::Closed => EnqueueResult::Closed,
+                }
+            }),
             notify: self.notify,
             lag: 0,
             name: None,

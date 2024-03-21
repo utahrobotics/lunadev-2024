@@ -10,7 +10,9 @@ use image::{imageops::FilterType, DynamicImage};
 use nokhwa::{
     pixel_format::RgbFormat,
     query,
-    utils::{CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution},
+    utils::{
+        CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+    },
 };
 use unros::{
     anyhow::{self, Context},
@@ -78,12 +80,18 @@ impl Node for Camera {
 
         let requested = if self.fps > 0 {
             if self.res_x > 0 && self.res_y > 0 {
-                RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(CameraFormat::new(Resolution::new(self.res_x, self.res_y), FrameFormat::RAWRGB, self.fps)))
+                RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(CameraFormat::new(
+                    Resolution::new(self.res_x, self.res_y),
+                    FrameFormat::RAWRGB,
+                    self.fps,
+                )))
             } else {
                 RequestedFormat::new::<RgbFormat>(RequestedFormatType::HighestFrameRate(self.fps))
             }
         } else if self.res_x > 0 && self.res_y > 0 {
-            RequestedFormat::new::<RgbFormat>(RequestedFormatType::HighestResolution(Resolution::new(self.res_x, self.res_y)))
+            RequestedFormat::new::<RgbFormat>(RequestedFormatType::HighestResolution(
+                Resolution::new(self.res_x, self.res_y),
+            ))
         } else {
             RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate)
         };

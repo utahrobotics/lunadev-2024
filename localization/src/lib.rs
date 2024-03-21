@@ -10,7 +10,8 @@ use std::{
 };
 
 use eigenvalues::{
-    algorithms::davidson::DavidsonError, Davidson, DavidsonCorrection, SpectrumTarget,
+    lanczos::{HermitianLanczos, LanczosError},
+    SpectrumTarget,
 };
 use frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame};
 use fxhash::FxHashMap;
@@ -549,7 +550,7 @@ impl Node for Localizer {
     }
 }
 
-fn quat_mean<T, I>(quats: T) -> Option<Result<UnitQuaternion, DavidsonError>>
+fn quat_mean<T, I>(quats: T) -> Option<Result<UnitQuaternion, LanczosError>>
 where
     T: IntoIterator<Item = UnitQuaternion, IntoIter = I>,
     I: ExactSizeIterator<Item = UnitQuaternion>,
@@ -568,12 +569,10 @@ where
         .sum();
 
     // https://math.stackexchange.com/questions/61146/averaging-quaternions
-    match Davidson::new::<DMatrix<f64>>(
+    match HermitianLanczos::new::<DMatrix<f64>>(
         nalgebra::convert(rotation_matrix),
-        1,
-        DavidsonCorrection::DPR,
+        10,
         SpectrumTarget::Highest,
-        0.0001,
     ) {
         Ok(x) => {
             let ev = x.eigenvectors.column(0);

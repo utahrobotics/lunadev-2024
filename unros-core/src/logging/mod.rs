@@ -10,7 +10,11 @@ use crossbeam::queue::SegQueue;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
 
-use crate::{logging::eyre::UnrosEyreMessage, pubsub::{Publisher, Subscription}, RunOptions};
+use crate::{
+    logging::eyre::UnrosEyreMessage,
+    pubsub::{Publisher, Subscription},
+    RunOptions,
+};
 
 pub mod dump;
 mod eyre;
@@ -70,7 +74,7 @@ pub fn log_accept_subscription(sub: Subscription<Arc<str>>) {
 
 #[derive(Default)]
 struct LogPub {
-    publisher: Mutex<Publisher<Arc<str>>>
+    publisher: Mutex<Publisher<Arc<str>>>,
 }
 
 impl log::Log for LogPub {
