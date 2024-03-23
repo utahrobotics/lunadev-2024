@@ -11,7 +11,10 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use crossbeam::{queue::{ArrayQueue, SegQueue}, utils::Backoff};
+use crossbeam::{
+    queue::{ArrayQueue, SegQueue},
+    utils::Backoff,
+};
 use log::warn;
 use tokio::sync::Notify;
 
@@ -74,12 +77,14 @@ impl<T: Clone> Publisher<T> {
 impl<T> Publisher<T> {
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
-    pub fn accept_subscription(&mut self, sub: Subscription<T>) {
+    pub fn accept_subscription(&self, sub: Subscription<T>) {
         self.subs.push(sub);
     }
 
     pub fn get_ref(&self) -> PublisherRef<T> {
-        PublisherRef { subs: Arc::downgrade(&self.subs) }
+        PublisherRef {
+            subs: Arc::downgrade(&self.subs),
+        }
     }
 }
 
@@ -107,7 +112,6 @@ impl<T> Drop for Publisher<T> {
     }
 }
 
-
 pub struct PublisherRef<T> {
     subs: Weak<SegQueue<Subscription<T>>>,
 }
@@ -115,16 +119,18 @@ pub struct PublisherRef<T> {
 impl<T> PublisherRef<T> {
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
-    pub fn accept_subscription(&mut self, sub: Subscription<T>) {
+    pub fn accept_subscription(&self, sub: Subscription<T>) {
         self.accept_subscription_or_closed(sub);
     }
 
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
-    /// 
+    ///
     /// Returns true iff the original `Publisher` has not been dropped
-    pub fn accept_subscription_or_closed(&mut self, sub: Subscription<T>) -> bool {
-        let Some(subs) = self.subs.upgrade() else { return false; };
+    pub fn accept_subscription_or_closed(&self, sub: Subscription<T>) -> bool {
+        let Some(subs) = self.subs.upgrade() else {
+            return false;
+        };
         subs.push(sub);
         true
     }
@@ -132,10 +138,11 @@ impl<T> PublisherRef<T> {
 
 impl<T> Clone for PublisherRef<T> {
     fn clone(&self) -> Self {
-        Self { subs: self.subs.clone() }
+        Self {
+            subs: self.subs.clone(),
+        }
     }
 }
-
 
 trait Queue<T>: Send + Sync {
     fn push(&mut self, value: T) -> EnqueueResult;
