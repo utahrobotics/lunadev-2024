@@ -5,14 +5,13 @@
 //! to `Rust`'s channels in that they do not trigger code, unlike `ROS` subscriber callbacks.
 
 use std::{
-    collections::VecDeque,
     io::Write,
     ops::{Deref, DerefMut},
     path::Path,
     sync::{Arc, Weak},
 };
 
-use crossbeam::queue::ArrayQueue;
+use crossbeam::{queue::{ArrayQueue, SegQueue}, utils::Backoff};
 use log::warn;
 use tokio::sync::Notify;
 
@@ -30,13 +29,13 @@ use crate::logging::{dump::DataDump, START_TIME};
 /// `Arc`. Since Nodes will often be used from different threads, the type `T`
 /// should also be `Send`.
 pub struct Publisher<T> {
-    subs: VecDeque<Subscription<T>>,
+    subs: Arc<SegQueue<Subscription<T>>>,
 }
 
 impl<T> Default for Publisher<T> {
     fn default() -> Self {
         Self {
-            subs: VecDeque::default(),
+            subs: Arc::default(),
         }
     }
 }
@@ -46,15 +45,14 @@ impl<T: Clone> Publisher<T> {
     ///
     /// Only the node that owns this signal should call this method.
     pub fn set(&mut self, value: T) {
-        self.subs
-            .retain_mut(|sub| match sub.queue.push(value.clone()) {
+        for _ in 0..self.subs.len() {
+            let mut sub = self.subs.pop().unwrap();
+            match sub.queue.push(value.clone()) {
                 EnqueueResult::Ok => {
                     sub.lag = 0;
                     if let Some(notify) = sub.notify.upgrade() {
                         notify.notify_one();
-                        true
-                    } else {
-                        false
+                        self.subs.push(sub);
                     }
                 }
                 EnqueueResult::Full => {
@@ -64,25 +62,43 @@ impl<T: Clone> Publisher<T> {
                     }
                     if let Some(notify) = sub.notify.upgrade() {
                         notify.notify_one();
-                        true
-                    } else {
-                        false
+                        self.subs.push(sub);
                     }
                 }
-                EnqueueResult::Closed => false,
-            });
+                EnqueueResult::Closed => {}
+            }
+        }
     }
+}
 
+impl<T> Publisher<T> {
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
     pub fn accept_subscription(&mut self, sub: Subscription<T>) {
-        self.subs.push_back(sub);
+        self.subs.push(sub);
+    }
+
+    pub fn get_ref(&self) -> PublisherRef<T> {
+        PublisherRef { subs: Arc::downgrade(&self.subs) }
     }
 }
 
 impl<T> Drop for Publisher<T> {
     fn drop(&mut self) {
-        for sub in self.subs.drain(..) {
+        let mut subs = std::mem::take(&mut self.subs);
+
+        let backoff = Backoff::new();
+        let subs = loop {
+            match Arc::try_unwrap(subs) {
+                Ok(x) => break x,
+                Err(x) => {
+                    backoff.spin();
+                    subs = x;
+                }
+            }
+        };
+
+        for sub in subs.into_iter() {
             drop(sub.queue);
             if let Some(notify) = sub.notify.upgrade() {
                 notify.notify_one();
@@ -90,6 +106,36 @@ impl<T> Drop for Publisher<T> {
         }
     }
 }
+
+
+pub struct PublisherRef<T> {
+    subs: Weak<SegQueue<Subscription<T>>>,
+}
+
+impl<T> PublisherRef<T> {
+    /// Accepts a given subscription, allowing the corresponding `Subscriber` to
+    /// receive new messages.
+    pub fn accept_subscription(&mut self, sub: Subscription<T>) {
+        self.accept_subscription_or_closed(sub);
+    }
+
+    /// Accepts a given subscription, allowing the corresponding `Subscriber` to
+    /// receive new messages.
+    /// 
+    /// Returns true iff the original `Publisher` has not been dropped
+    pub fn accept_subscription_or_closed(&mut self, sub: Subscription<T>) -> bool {
+        let Some(subs) = self.subs.upgrade() else { return false; };
+        subs.push(sub);
+        true
+    }
+}
+
+impl<T> Clone for PublisherRef<T> {
+    fn clone(&self) -> Self {
+        Self { subs: self.subs.clone() }
+    }
+}
+
 
 trait Queue<T>: Send + Sync {
     fn push(&mut self, value: T) -> EnqueueResult;
