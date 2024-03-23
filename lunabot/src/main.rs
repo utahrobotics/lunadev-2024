@@ -30,6 +30,8 @@ use unros::{
     Application, Node,
 };
 
+mod telemetry;
+
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;

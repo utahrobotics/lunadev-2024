@@ -11,6 +11,7 @@ use std::{
 };
 
 use bitcode::{Decode, Encode};
+pub use bitcode;
 use enet::{
     Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, Peer, PeerState,
 };
