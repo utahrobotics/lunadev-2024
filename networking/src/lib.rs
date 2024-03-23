@@ -5,18 +5,20 @@ use std::{
     net::SocketAddrV4,
     ops::{Deref, DerefMut},
     sync::{
-        mpsc::{Receiver, Sender, SyncSender},
+        mpsc::{Receiver, Sender},
         Arc, Mutex,
     },
 };
 
 use bitcode::{Decode, Encode};
-use enet::{Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, Peer, PeerState};
+use enet::{
+    Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, Peer, PeerState,
+};
 use fxhash::{FxHashMap, FxHasher};
 use unros::{
     anyhow, async_trait, log,
     pubsub::{Publisher, PublisherRef, Subscriber, Subscription},
-    rayon, setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 #[derive(Debug)]
@@ -74,7 +76,7 @@ impl ChannelMap {
 pub struct NetworkPeer {
     remote_addr: SocketAddrV4,
     packets_to_send: Subscription<(Box<[u8]>, PacketMode)>,
-    packets_router: Arc<Mutex<FxHashMap<u8, SyncSender<Box<[u8]>>>>>,
+    packets_router: Arc<Mutex<FxHashMap<u8, Box<dyn FnMut(Box<[u8]>) + Send>>>>,
 }
 
 impl NetworkPeer {
@@ -82,21 +84,15 @@ impl NetworkPeer {
     where
         T: Decode + Clone + 'static,
     {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(0);
-        self.packets_router
-            .lock()
-            .unwrap()
-            .insert(channel_id.0, sender);
-
         let mut pub_received_packets = Publisher::default();
         let recv_packets_sub = pub_received_packets.get_ref();
 
-        rayon::spawn(move || loop {
-            let Ok(bytes) = receiver.recv() else {
-                break;
-            };
-            pub_received_packets.set(bitcode::decode(&bytes).map_err(Arc::new));
-        });
+        self.packets_router.lock().unwrap().insert(
+            channel_id.0,
+            Box::new(move |bytes| {
+                pub_received_packets.set(bitcode::decode(&bytes).map_err(Arc::new));
+            }),
+        );
 
         Channel {
             channel_id: channel_id.0,
@@ -297,7 +293,7 @@ impl Node for NetworkNode {
             SocketAddrV4,
             (
                 Subscriber<(Box<[u8]>, PacketMode)>,
-                Arc<Mutex<FxHashMap<u8, SyncSender<Box<[u8]>>>>>
+                Arc<Mutex<FxHashMap<u8, Box<dyn FnMut(Box<[u8]>) + Send>>>>,
             ),
         > = FxHashMap::default();
         let mut pending_conns: FxHashMap<SocketAddrV4, tokio::sync::oneshot::Sender<NetworkPeer>> =
@@ -306,7 +302,10 @@ impl Node for NetworkNode {
 
         tokio_rayon::spawn(move || {
             let tmp_host = enet.create_host::<()>(
-                self.binding.as_ref().map(|(x, _)| Address::from(*x)).as_ref(),
+                self.binding
+                    .as_ref()
+                    .map(|(x, _)| Address::from(*x))
+                    .as_ref(),
                 self.max_peer_count,
                 ChannelLimit::Limited(self.reliable_lanes as usize + 1),
                 BandwidthLimit::Unlimited,
@@ -328,7 +327,7 @@ impl Node for NetworkNode {
                                 let packet_sub = Subscriber::new(self.peer_buffer_size);
                                 let packets_to_send = packet_sub.create_subscription();
                                 let packets_router: Arc<
-                                    Mutex<FxHashMap<u8, SyncSender<Box<[u8]>>>>,
+                                    Mutex<FxHashMap<u8, Box<dyn FnMut(Box<[u8]>) + Send>>>,
                                 > = Arc::default();
                                 conns.insert(addr, (packet_sub, packets_router.clone()));
                                 let _ = sender.send(NetworkPeer {
@@ -340,7 +339,7 @@ impl Node for NetworkNode {
                                 let packet_sub = Subscriber::new(self.peer_buffer_size);
                                 let packets_to_send = packet_sub.create_subscription();
                                 let packets_router: Arc<
-                                    Mutex<FxHashMap<u8, SyncSender<Box<[u8]>>>>,
+                                    Mutex<FxHashMap<u8, Box<dyn FnMut(Box<[u8]>) + Send>>>,
                                 > = Arc::default();
                                 conns.insert(addr, (packet_sub, packets_router.clone()));
                                 let _ = sender.send(NetworkPeer {
@@ -361,24 +360,24 @@ impl Node for NetworkNode {
                             ref mut sender,
                             ..
                         }) => {
-                            let mut data = packet.data().to_vec();
-                            let channel = data.pop().unwrap();
-                            let data = data.into_boxed_slice();
+                            let channel = *packet.data().last().unwrap();
+                            let data = packet
+                                .data()
+                                .split_at(packet.data().len() - 1)
+                                .0
+                                .to_vec()
+                                .into_boxed_slice();
 
                             let addr =
                                 SocketAddrV4::new(*sender.address().ip(), sender.address().port());
-                            
-                            let mut drop = false;
+
                             if let Some((_, packets_router)) = conns.get(&addr) {
-                                if let Some(packet_sender) = packets_router.lock().unwrap().get(&channel) {
-                                    if packet_sender.send(data).is_err() {
-                                        drop = true;
-                                    }
+                                if let Some(packet_sender) =
+                                    packets_router.lock().unwrap().get_mut(&channel)
+                                {
+                                    packet_sender(data);
                                 }
                             } else {
-                                drop = true;
-                            }
-                            if drop {
                                 conns.remove(&addr);
                                 sender.disconnect(0);
                             }
@@ -392,11 +391,13 @@ impl Node for NetworkNode {
                     host.connect(&addr.into(), self.reliable_lanes as usize + 1, 0)?;
                 }
 
-                let mut peers: FxHashMap<SocketAddrV4, Peer<()>> = host.peers().map(|peer| {
-                    let addr =
-                        SocketAddrV4::new(*peer.address().ip(), peer.address().port());
-                    (addr, peer)
-                }).collect();
+                let mut peers: FxHashMap<SocketAddrV4, Peer<()>> = host
+                    .peers()
+                    .map(|peer| {
+                        let addr = SocketAddrV4::new(*peer.address().ip(), peer.address().port());
+                        (addr, peer)
+                    })
+                    .collect();
 
                 conns.retain(|addr, (packets_to_send, _)| {
                     let Some(peer) = peers.get_mut(addr) else {
@@ -404,11 +405,18 @@ impl Node for NetworkNode {
                     };
                     while let Some((data, mode)) = packets_to_send.try_recv() {
                         if mode == PacketMode::ReliableSequenced {
-                            peer.send_packet(Packet::new(&data, PacketMode::ReliableSequenced).unwrap(), reliable_round_robin).expect("Failed to send packet");
-                            reliable_round_robin =
-                                (reliable_round_robin + 1) % self.reliable_lanes;
+                            peer.send_packet(
+                                Packet::new(&data, PacketMode::ReliableSequenced).unwrap(),
+                                reliable_round_robin,
+                            )
+                            .expect("Failed to send packet");
+                            reliable_round_robin = (reliable_round_robin + 1) % self.reliable_lanes;
                         } else {
-                            peer.send_packet(Packet::new(&data, mode).unwrap(), self.reliable_lanes).expect("Failed to send packet");
+                            peer.send_packet(
+                                Packet::new(&data, mode).unwrap(),
+                                self.reliable_lanes,
+                            )
+                            .expect("Failed to send packet");
                         }
                     }
                     true
