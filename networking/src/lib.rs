@@ -3,6 +3,7 @@
 use std::{
     hash::Hasher,
     net::SocketAddrV4,
+    ops::{Deref, DerefMut},
     sync::{
         mpsc::{Receiver, Sender, SyncSender},
         Arc, Mutex,
@@ -10,10 +11,12 @@ use std::{
 };
 
 use bitcode::{Decode, Encode};
-use enet::{BandwidthLimit, Enet, PacketMode};
+use enet::{Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, Peer, PeerState};
 use fxhash::{FxHashMap, FxHasher};
 use unros::{
-    anyhow, async_trait, pubsub::{Publisher, PublisherRef, Subscription}, rayon, setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, log,
+    pubsub::{Publisher, PublisherRef, Subscriber, Subscription},
+    rayon, setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 #[derive(Debug)]
@@ -70,7 +73,7 @@ impl ChannelMap {
 
 pub struct NetworkPeer {
     remote_addr: SocketAddrV4,
-    packets_to_send: Subscription<(Box<[u8]>, PacketMode, u8)>,
+    packets_to_send: Subscription<(Box<[u8]>, PacketMode)>,
     packets_router: Arc<Mutex<FxHashMap<u8, SyncSender<Box<[u8]>>>>>,
 }
 
@@ -128,6 +131,11 @@ impl NetworkPeerReceiver {
 }
 
 pub struct NetworkNode {
+    pub bandwidth_limit: u32,
+    pub max_peer_count: usize,
+    pub service_millis: u32,
+    pub reliable_lanes: u8,
+    pub peer_buffer_size: usize,
     intrinsics: NodeIntrinsics<Self>,
     binding: Option<(
         SocketAddrV4,
@@ -141,6 +149,11 @@ impl NetworkNode {
         let (address_sender, address_receiver) = std::sync::mpsc::channel();
         (
             Self {
+                bandwidth_limit: 0,
+                service_millis: 50,
+                reliable_lanes: 3,
+                max_peer_count: usize::MAX,
+                peer_buffer_size: 8,
                 binding: None,
                 intrinsics: NodeIntrinsics::default(),
                 address_receiver,
@@ -154,6 +167,11 @@ impl NetworkNode {
         let (peer_sender, peer_receiver) = tokio::sync::mpsc::unbounded_channel();
         (
             Self {
+                bandwidth_limit: 0,
+                service_millis: 50,
+                reliable_lanes: 3,
+                peer_buffer_size: 8,
+                max_peer_count: usize::MAX,
                 binding: Some((bind_address, peer_sender)),
                 intrinsics: NodeIntrinsics::default(),
                 address_receiver,
@@ -167,7 +185,7 @@ impl NetworkNode {
 pub struct Channel<T> {
     channel_id: u8,
     received_packets: PublisherRef<Result<T, Arc<bitcode::Error>>>,
-    packets_to_send: Subscription<(Box<[u8]>, PacketMode, u8)>,
+    packets_to_send: Subscription<(Box<[u8]>, PacketMode)>,
 }
 
 impl<T> Clone for Channel<T> {
@@ -197,27 +215,65 @@ impl<T: Encode> Channel<T> {
     pub fn create_reliable_subscription(&self) -> Subscription<T> {
         let channel_id = self.channel_id;
         self.packets_to_send.clone().map(move |value| {
-            (
-                bitcode::encode(&value)
-                    .expect("Failed to serialize value")
-                    .into(),
-                PacketMode::ReliableSequenced,
-                channel_id,
-            )
+            let mut data = bitcode::encode(&value).expect("Failed to serialize value");
+            data.push(channel_id);
+            (data.into(), PacketMode::ReliableSequenced)
         })
     }
 
     pub fn create_unreliable_subscription(&self) -> Subscription<T> {
         let channel_id = self.channel_id;
         self.packets_to_send.clone().map(move |value| {
-            (
-                bitcode::encode(&value)
-                    .expect("Failed to serialize value")
-                    .into(),
-                PacketMode::UnreliableUnsequenced,
-                channel_id,
-            )
+            let mut data = bitcode::encode(&value).expect("Failed to serialize value");
+            data.push(channel_id);
+            (data.into(), PacketMode::UnreliableUnsequenced)
         })
+    }
+}
+
+struct HostWrapper(Host<()>);
+
+impl Deref for HostWrapper {
+    type Target = Host<()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for HostWrapper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for HostWrapper {
+    fn drop(&mut self) {
+        let mut peer_count = 0;
+        for mut peer in self.0.peers() {
+            if peer.state() == PeerState::Connected {
+                peer.disconnect(0);
+                peer_count += 1;
+            }
+        }
+        while peer_count > 0 {
+            let mut event = match self.0.service(1000) {
+                Ok(Some(event)) => event,
+                Ok(None) => continue,
+                Err(e) => {
+                    log::error!("Faced the following error while safely dropping ENet host: {e}");
+                    break;
+                }
+            };
+            match &mut event {
+                Event::Connect(peer) => {
+                    peer_count += 1;
+                    peer.disconnect(0);
+                }
+                Event::Disconnect(_, _) => peer_count -= 1,
+                _ => {}
+            }
+        }
     }
 }
 
@@ -235,14 +291,131 @@ impl Node for NetworkNode {
             BandwidthLimit::Limited(self.bandwidth_limit)
         };
 
-        let mut drop_check = DropCheck::default();
-        let drop_check2 = drop_check.clone();
+        let drop_check = DropCheck::default();
         let _drop_check = drop_check.clone();
-        let mut image_subscriptions = self.image_subscriptions.take().unwrap();
-        let mut video_dump = self.video_dump.take().unwrap();
-        let sdp = video_dump.generate_sdp().unwrap();
+        let mut conns: FxHashMap<
+            SocketAddrV4,
+            (
+                Subscriber<(Box<[u8]>, PacketMode)>,
+                Arc<Mutex<FxHashMap<u8, SyncSender<Box<[u8]>>>>>
+            ),
+        > = FxHashMap::default();
+        let mut pending_conns: FxHashMap<SocketAddrV4, tokio::sync::oneshot::Sender<NetworkPeer>> =
+            FxHashMap::default();
+        let mut reliable_round_robin = 0u8;
 
-        Ok(())
+        tokio_rayon::spawn(move || {
+            let tmp_host = enet.create_host::<()>(
+                self.binding.as_ref().map(|(x, _)| Address::from(*x)).as_ref(),
+                self.max_peer_count,
+                ChannelLimit::Limited(self.reliable_lanes as usize + 1),
+                BandwidthLimit::Unlimited,
+                outgoing_limit,
+            )?;
+            let mut host = HostWrapper(tmp_host);
+            loop {
+                {
+                    let mut option = host.service(self.service_millis)?;
+                    if drop_check.has_dropped() {
+                        break Ok(());
+                    }
+
+                    match option {
+                        Some(Event::Connect(ref peer)) => {
+                            let addr =
+                                SocketAddrV4::new(*peer.address().ip(), peer.address().port());
+                            if let Some(sender) = pending_conns.remove(&addr) {
+                                let packet_sub = Subscriber::new(self.peer_buffer_size);
+                                let packets_to_send = packet_sub.create_subscription();
+                                let packets_router: Arc<
+                                    Mutex<FxHashMap<u8, SyncSender<Box<[u8]>>>>,
+                                > = Arc::default();
+                                conns.insert(addr, (packet_sub, packets_router.clone()));
+                                let _ = sender.send(NetworkPeer {
+                                    remote_addr: addr,
+                                    packets_to_send,
+                                    packets_router,
+                                });
+                            } else if let Some((_, sender)) = &self.binding {
+                                let packet_sub = Subscriber::new(self.peer_buffer_size);
+                                let packets_to_send = packet_sub.create_subscription();
+                                let packets_router: Arc<
+                                    Mutex<FxHashMap<u8, SyncSender<Box<[u8]>>>>,
+                                > = Arc::default();
+                                conns.insert(addr, (packet_sub, packets_router.clone()));
+                                let _ = sender.send(NetworkPeer {
+                                    remote_addr: addr,
+                                    packets_to_send,
+                                    packets_router,
+                                });
+                            }
+                        }
+                        Some(Event::Disconnect(ref peer, _)) => {
+                            let addr =
+                                SocketAddrV4::new(*peer.address().ip(), peer.address().port());
+                            pending_conns.remove(&addr);
+                            conns.remove(&addr);
+                        }
+                        Some(Event::Receive {
+                            ref packet,
+                            ref mut sender,
+                            ..
+                        }) => {
+                            let mut data = packet.data().to_vec();
+                            let channel = data.pop().unwrap();
+                            let data = data.into_boxed_slice();
+
+                            let addr =
+                                SocketAddrV4::new(*sender.address().ip(), sender.address().port());
+                            
+                            let mut drop = false;
+                            if let Some((_, packets_router)) = conns.get(&addr) {
+                                if let Some(packet_sender) = packets_router.lock().unwrap().get(&channel) {
+                                    if packet_sender.send(data).is_err() {
+                                        drop = true;
+                                    }
+                                }
+                            } else {
+                                drop = true;
+                            }
+                            if drop {
+                                conns.remove(&addr);
+                                sender.disconnect(0);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+
+                while let Ok((addr, sender)) = self.address_receiver.try_recv() {
+                    pending_conns.insert(addr, sender);
+                    host.connect(&addr.into(), self.reliable_lanes as usize + 1, 0)?;
+                }
+
+                let mut peers: FxHashMap<SocketAddrV4, Peer<()>> = host.peers().map(|peer| {
+                    let addr =
+                        SocketAddrV4::new(*peer.address().ip(), peer.address().port());
+                    (addr, peer)
+                }).collect();
+
+                conns.retain(|addr, (packets_to_send, _)| {
+                    let Some(peer) = peers.get_mut(addr) else {
+                        return false;
+                    };
+                    while let Some((data, mode)) = packets_to_send.try_recv() {
+                        if mode == PacketMode::ReliableSequenced {
+                            peer.send_packet(Packet::new(&data, PacketMode::ReliableSequenced).unwrap(), reliable_round_robin).expect("Failed to send packet");
+                            reliable_round_robin =
+                                (reliable_round_robin + 1) % self.reliable_lanes;
+                        } else {
+                            peer.send_packet(Packet::new(&data, mode).unwrap(), self.reliable_lanes).expect("Failed to send packet");
+                        }
+                    }
+                    true
+                });
+            }
+        })
+        .await
     }
 
     fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
