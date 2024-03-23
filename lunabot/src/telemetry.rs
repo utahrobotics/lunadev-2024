@@ -1,8 +1,5 @@
 use std::{
-    net::SocketAddrV4,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-    time::{Duration, Instant},
+    net::SocketAddrV4, ops::Deref, sync::Arc, time::{Duration, Instant}
 };
 
 use global_msgs::Steering;
@@ -11,7 +8,7 @@ use networking::{bitcode::{self, Decode, Encode}, ChannelId, ChannelMap, Network
 use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros::{
-    anyhow, async_trait, log,
+    anyhow, async_trait,
     logging::{
         dump::{ScalingFilter, VideoDataDump},
         log_accept_subscription,
@@ -44,9 +41,8 @@ pub struct Telemetry {
     pub server_addr: SocketAddrV4,
     pub camera_delta: Duration,
     steering_signal: Publisher<Steering>,
-    image_subscriptions: Option<Subscriber<Arc<DynamicImage>>>,
-    // packet_queue: SegQueue<(Box<[u8]>, PacketMode, Channels)>,
-    video_dump: Option<VideoDataDump>,
+    image_subscriptions: Subscriber<Arc<DynamicImage>>,
+    video_dump: VideoDataDump,
     intrinsics: NodeIntrinsics<Self>,
 }
 
@@ -89,9 +85,9 @@ impl Telemetry {
             channels,
             server_addr,
             steering_signal: Default::default(),
-            image_subscriptions: Some(Subscriber::new(1)),
+            image_subscriptions: Subscriber::new(1),
             camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
-            video_dump: Some(video_dump),
+            video_dump,
             intrinsics: Default::default(),
         })
     }
@@ -102,8 +98,6 @@ impl Telemetry {
 
     pub fn create_image_subscription(&self) -> Subscription<Arc<DynamicImage>> {
         self.image_subscriptions
-            .as_ref()
-            .unwrap()
             .create_subscription()
     }
 }
@@ -119,22 +113,67 @@ impl Node for Telemetry {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         let context2 = context.clone();
-        let fut = async {
+        setup_logging!(context2);
+        let sdp: Arc<str> = Arc::from(self.video_dump.generate_sdp().unwrap().into_boxed_str());
+        
+        let drop_check = DropCheck::default();
+        let drop_observe = drop_check.get_observing();
+
+        let cam_fut = tokio_rayon::spawn(move || {
+            let mut start_service = Instant::now();
+            let sleeper = SpinSleeper::default();
+
+            loop {
+                if drop_observe.has_dropped() {
+                    return Ok(());
+                }
+                if let Some(img) = self.image_subscriptions.try_recv() {
+                    self.video_dump.write_frame(img.deref().clone())?;
+                }
+
+                let elapsed = start_service.elapsed();
+                start_service += elapsed;
+                sleeper.sleep(self.camera_delta.saturating_sub(elapsed));
+            }
+        });
+
+        let peer_fut = async {
             loop {
                 let peer = loop {
                     let Some(peer) = self.network_connector.connect_to(self.server_addr).await else { continue; };
                     break peer;
                 };
                 let important_channel = peer.create_channel::<ImportantMessage>(self.channels.important);
-                let camera_channel = peer.create_channel::<bool>(self.channels.camera);
-                // let odometry_channel = peer.create_channel::<u8>(self.channels.odometry);
+                let camera_channel = peer.create_channel::<Arc<str>>(self.channels.camera);
+                let _odometry_channel = peer.create_channel::<u8>(self.channels.odometry);
                 let controls_channel = peer.create_channel::<(f32, f32)>(self.channels.controls);
                 let logs_channel = peer.create_channel::<Arc<str>>(self.channels.logs);
                 log_accept_subscription(logs_channel.create_reliable_subscription());
 
-                let context3 = context2.clone();
+                let important_fut = async {
+                    let mut important_pub = Publisher::default();
+                    let mut important_sub = Subscriber::new(8);
+                    important_channel.accept_subscription(important_sub.create_subscription());
+                    important_pub.accept_subscription(important_channel.create_reliable_subscription());
+
+                    loop {
+                        let Some(result) = important_sub.recv_or_closed().await else { break; };
+                        let msg = match result {
+                            Ok(x) => x,
+                            Err(e) => {
+                                error!("Error receiving important msg: {e}");
+                                continue;
+                            }
+                        };
+                        match msg {
+                            ImportantMessage::EnableCamera => todo!(),
+                            ImportantMessage::DisableCamera => todo!(),
+                            ImportantMessage::Ping => important_pub.set(ImportantMessage::Ping),
+                        }
+                    }
+                };
+
                 let steering_fut = async {
-                    setup_logging!(context3);
                     let mut steering_sub = Subscriber::new(1);
                     controls_channel.accept_subscription(steering_sub.create_subscription());
                     loop {
@@ -158,13 +197,37 @@ impl Node for Telemetry {
                     }
                 };
 
+                let camera_fut = async {
+                    let mut camera_pub = Publisher::default();
+                    let mut camera_sub = Subscriber::new(1);
+                    camera_channel.accept_subscription(camera_sub.create_subscription());
+                    camera_pub.accept_subscription(camera_channel.create_reliable_subscription());
+                    loop {
+                        let Some(result) = camera_sub.recv_or_closed().await else { break; };
+                        let _ = match result {
+                            Ok(x) => x,
+                            Err(e) => {
+                                error!("Error receiving camera msg: {e}");
+                                continue;
+                            }
+                        };
+                        
+                        info!("Resending SDP");
+                        camera_pub.set(sdp.clone());
+                    }
+                };
+
                 tokio::select! {
-                    _ = steering_fut => 
+                    _ = steering_fut => {}
+                    _ = camera_fut => {}
+                    _ = important_fut => {}
                 }
             }
         };
+        
         tokio::select! {
-            res = fut => res,
+            res = cam_fut => res,
+            res = peer_fut => res,
             res = self.network_node.run(context) => res,
         }
     }

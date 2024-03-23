@@ -372,13 +372,19 @@ impl Node for NetworkNode {
                             let addr =
                                 SocketAddrV4::new(*sender.address().ip(), sender.address().port());
 
+                            let mut drop = false;
                             if let Some((_, packets_router)) = conns.get(&addr) {
-                                if let Some(packet_sender) =
+                                if Arc::strong_count(&packets_router) == 1 {
+                                    drop = true;
+                                } else if let Some(packet_sender) =
                                     packets_router.lock().unwrap().get_mut(&channel)
                                 {
                                     packet_sender(data);
                                 }
                             } else {
+                                drop = true;
+                            }
+                            if drop {
                                 conns.remove(&addr);
                                 sender.disconnect(0);
                             }
@@ -400,7 +406,10 @@ impl Node for NetworkNode {
                     })
                     .collect();
 
-                conns.retain(|addr, (packets_to_send, _)| {
+                conns.retain(|addr, (packets_to_send, packets_router)| {
+                    if Arc::strong_count(&packets_router) == 1 {
+                        return false;
+                    }
                     let Some(peer) = peers.get_mut(addr) else {
                         return false;
                     };
