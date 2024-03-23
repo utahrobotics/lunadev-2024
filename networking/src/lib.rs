@@ -142,14 +142,14 @@ pub struct NetworkNode {
 }
 
 impl NetworkNode {
-    pub fn new_client() -> (Self, NetworkConnector) {
+    pub fn new_client(max_peer_count: usize) -> (Self, NetworkConnector) {
         let (address_sender, address_receiver) = std::sync::mpsc::channel();
         (
             Self {
                 bandwidth_limit: 0,
                 service_millis: 50,
                 reliable_lanes: 3,
-                max_peer_count: usize::MAX,
+                max_peer_count,
                 peer_buffer_size: 8,
                 binding: None,
                 intrinsics: NodeIntrinsics::default(),
@@ -159,7 +159,7 @@ impl NetworkNode {
         )
     }
 
-    pub fn new_server(bind_address: SocketAddrV4) -> (Self, NetworkPeerReceiver, NetworkConnector) {
+    pub fn new_server(bind_address: SocketAddrV4, max_peer_count: usize) -> (Self, NetworkPeerReceiver, NetworkConnector) {
         let (address_sender, address_receiver) = std::sync::mpsc::channel();
         let (peer_sender, peer_receiver) = tokio::sync::mpsc::unbounded_channel();
         (
@@ -168,7 +168,7 @@ impl NetworkNode {
                 service_millis: 50,
                 reliable_lanes: 3,
                 peer_buffer_size: 8,
-                max_peer_count: usize::MAX,
+                max_peer_count,
                 binding: Some((bind_address, peer_sender)),
                 intrinsics: NodeIntrinsics::default(),
                 address_receiver,
@@ -282,11 +282,6 @@ impl Node for NetworkNode {
         setup_logging!(context);
 
         let enet = Enet::new()?;
-        let outgoing_limit = if self.bandwidth_limit == 0 {
-            BandwidthLimit::Unlimited
-        } else {
-            BandwidthLimit::Limited(self.bandwidth_limit)
-        };
 
         let drop_check = DropCheck::default();
         let _drop_check = drop_check.clone();
@@ -310,7 +305,11 @@ impl Node for NetworkNode {
                 self.max_peer_count,
                 ChannelLimit::Limited(self.reliable_lanes as usize + 1),
                 BandwidthLimit::Unlimited,
-                outgoing_limit,
+                if self.bandwidth_limit == 0 {
+                    BandwidthLimit::Unlimited
+                } else {
+                    BandwidthLimit::Limited(self.bandwidth_limit)
+                },
             )?;
             let mut host = HostWrapper(tmp_host);
             loop {

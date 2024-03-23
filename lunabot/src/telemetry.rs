@@ -77,7 +77,7 @@ impl Telemetry {
             logs: channel_map.add_channel("logs").unwrap(),
         };
         
-        let (network_node, network_connector) = NetworkNode::new_client();
+        let (network_node, network_connector) = NetworkNode::new_client(1);
 
         Ok(Self {
             network_node,
@@ -112,6 +112,8 @@ impl Node for Telemetry {
     }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+        self.network_node.get_intrinsics().manually_run(context.get_name().clone());
+
         let context2 = context.clone();
         setup_logging!(context2);
         let sdp: Arc<str> = Arc::from(self.video_dump.generate_sdp().unwrap().into_boxed_str());
@@ -139,10 +141,12 @@ impl Node for Telemetry {
 
         let peer_fut = async {
             loop {
+                info!("Connecting to lunabase...");
                 let peer = loop {
                     let Some(peer) = self.network_connector.connect_to(self.server_addr).await else { continue; };
                     break peer;
                 };
+                info!("Connected to lunabase!");
                 let important_channel = peer.create_channel::<ImportantMessage>(self.channels.important);
                 let camera_channel = peer.create_channel::<Arc<str>>(self.channels.camera);
                 let _odometry_channel = peer.create_channel::<u8>(self.channels.odometry);
@@ -202,6 +206,8 @@ impl Node for Telemetry {
                     let mut camera_sub = Subscriber::new(1);
                     camera_channel.accept_subscription(camera_sub.create_subscription());
                     camera_pub.accept_subscription(camera_channel.create_reliable_subscription());
+                    camera_pub.set(sdp.clone());
+
                     loop {
                         let Some(result) = camera_sub.recv_or_closed().await else { break; };
                         let _ = match result {
@@ -222,9 +228,10 @@ impl Node for Telemetry {
                     _ = camera_fut => {}
                     _ = important_fut => {}
                 }
+                error!("Disconnected from lunabase!");
             }
         };
-        
+
         tokio::select! {
             res = cam_fut => res,
             res = peer_fut => res,

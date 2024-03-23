@@ -77,6 +77,9 @@ impl<N: Node + ?Sized> NodeIntrinsics<N> {
     pub fn ignore_drop(&mut self) {
         self.running = Running::Ignored;
     }
+    pub fn manually_run(&mut self, name: Arc<str>) {
+        self.running = Running::Yes(name);
+    }
 }
 
 impl<N: Node + ?Sized> Default for NodeIntrinsics<N> {
