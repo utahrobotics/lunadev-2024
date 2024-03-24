@@ -378,7 +378,7 @@ impl Node for NetworkNode {
 
                             let mut drop = false;
                             if let Some((_, packets_router)) = conns.get(&addr) {
-                                if Arc::strong_count(&packets_router) == 1 {
+                                if Arc::weak_count(&packets_router) == 0 {
                                     drop = true;
                                 } else if let Some(packet_sender) =
                                     packets_router.lock().unwrap().get_mut(&channel)

@@ -8,7 +8,10 @@ use std::{
     io::Write,
     ops::{Deref, DerefMut},
     path::Path,
-    sync::{atomic::{AtomicUsize, Ordering}, Arc, Weak},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Weak,
+    },
 };
 
 use crossbeam::{
@@ -77,7 +80,7 @@ impl<T: Clone> Publisher<T> {
 impl<T> Publisher<T> {
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
-            
+
     pub fn accept_subscription(&self, sub: Subscription<T>) {
         for count in &sub.pub_count {
             count.fetch_add(1, Ordering::Release);
@@ -229,7 +232,7 @@ impl<T> Clone for Subscription<T> {
             notify: self.notify.clone(),
             name: self.name.clone(),
             lag: self.lag.clone(),
-            pub_count: self.pub_count.clone()
+            pub_count: self.pub_count.clone(),
         }
     }
 }
@@ -240,7 +243,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         Self {
             queue: Arc::new(ArrayQueue::new(size)),
             notify: Arc::new(Notify::new()),
-            pub_count: Arc::default()
+            pub_count: Arc::default(),
         }
     }
 
@@ -310,7 +313,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
             notify: Arc::downgrade(&self.notify),
             name: None,
             lag: 0,
-            pub_count: vec![self.pub_count.clone()]
+            pub_count: vec![self.pub_count.clone()],
         }
     }
 
@@ -347,7 +350,6 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 }
 
-
 impl<T: 'static> Subscription<T> {
     /// Changes the generic type of this `Subscription` using the given `map` function.
     pub fn map<V>(
@@ -359,7 +361,7 @@ impl<T: 'static> Subscription<T> {
             notify: self.notify,
             lag: 0,
             name: None,
-            pub_count: self.pub_count
+            pub_count: self.pub_count,
         }
     }
 
@@ -381,7 +383,7 @@ impl<T: 'static> Subscription<T> {
             notify: self.notify,
             lag: 0,
             name: None,
-            pub_count: self.pub_count
+            pub_count: self.pub_count,
         }
     }
 
@@ -406,7 +408,7 @@ impl<T: 'static> Subscription<T> {
             notify: self.notify,
             lag: 0,
             name: None,
-            pub_count: self.pub_count
+            pub_count: self.pub_count,
         }
     }
 
