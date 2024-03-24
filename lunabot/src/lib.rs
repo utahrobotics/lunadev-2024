@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
-use networking::{bitcode::{self, Decode, Encode}, Channel, ChannelMap, NetworkPeer};
-
+use networking::{
+    bitcode::{self, Decode, Encode},
+    Channel, ChannelMap, NetworkPeer,
+};
 
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Default)]
 pub struct ControlsPacket {
     pub drive: i8,
     pub steering: i8,
-    pub arm_vel: i8
+    pub arm_vel: i8,
 }
-
 
 #[derive(Clone)]
 pub struct Channels {
@@ -17,7 +18,7 @@ pub struct Channels {
     pub camera: Channel<Arc<str>>,
     pub odometry: Channel<u8>,
     pub controls: Channel<ControlsPacket>,
-    pub logs: Channel<Arc<str>>
+    pub logs: Channel<Arc<str>>,
 }
 
 #[derive(Debug, Eq, PartialEq, Encode, Decode, Clone, Copy)]

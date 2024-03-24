@@ -1,5 +1,8 @@
 use std::{
-    net::SocketAddrV4, ops::Deref, sync::Arc, time::{Duration, Instant}
+    net::SocketAddrV4,
+    ops::Deref,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 use global_msgs::Steering;
@@ -8,12 +11,14 @@ use lunabot::{Channels, ImportantMessage};
 use networking::{NetworkConnector, NetworkNode};
 use spin_sleep::SpinSleeper;
 use unros::{
-    anyhow, async_trait, asyncify_run, logging::{
+    anyhow, async_trait, asyncify_run,
+    logging::{
         dump::{ScalingFilter, VideoDataDump},
         log_accept_subscription,
-    }, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    },
+    pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
-
 
 /// A remote connection to `Lunabase`
 pub struct Telemetry {
@@ -67,11 +72,9 @@ impl Telemetry {
     }
 
     pub fn create_image_subscription(&self) -> Subscription<Arc<DynamicImage>> {
-        self.image_subscriptions
-            .create_subscription()
+        self.image_subscriptions.create_subscription()
     }
 }
-
 
 #[async_trait]
 impl Node for Telemetry {
@@ -82,12 +85,14 @@ impl Node for Telemetry {
     }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
-        self.network_node.get_intrinsics().manually_run(context.get_name().clone());
+        self.network_node
+            .get_intrinsics()
+            .manually_run(context.get_name().clone());
 
         let context2 = context.clone();
         setup_logging!(context2);
         let sdp: Arc<str> = Arc::from(self.video_dump.generate_sdp().unwrap().into_boxed_str());
-        
+
         let drop_check = DropCheck::default();
         let drop_observe = drop_check.get_observing();
 
@@ -113,7 +118,10 @@ impl Node for Telemetry {
             loop {
                 info!("Connecting to lunabase...");
                 let peer = loop {
-                    let Some(peer) = self.network_connector.connect_to(self.server_addr).await else { continue; };
+                    let Some(peer) = self.network_connector.connect_to(self.server_addr).await
+                    else {
+                        continue;
+                    };
                     break peer;
                 };
                 info!("Connected to lunabase!");
@@ -123,11 +131,16 @@ impl Node for Telemetry {
                 let important_fut = async {
                     let mut important_pub = Publisher::default();
                     let mut important_sub = Subscriber::new(8);
-                    channels.important.accept_subscription(important_sub.create_subscription());
-                    important_pub.accept_subscription(channels.important.create_reliable_subscription());
+                    channels
+                        .important
+                        .accept_subscription(important_sub.create_subscription());
+                    important_pub
+                        .accept_subscription(channels.important.create_reliable_subscription());
 
                     loop {
-                        let Some(result) = important_sub.recv_or_closed().await else { break; };
+                        let Some(result) = important_sub.recv_or_closed().await else {
+                            break;
+                        };
                         let msg = match result {
                             Ok(x) => x,
                             Err(e) => {
@@ -146,10 +159,15 @@ impl Node for Telemetry {
                 let steering_fut = async {
                     let mut controls_pub = Publisher::default();
                     let mut controls_sub = Subscriber::new(1);
-                    controls_pub.accept_subscription(channels.controls.create_unreliable_subscription());
-                    channels.controls.accept_subscription(controls_sub.create_subscription());
+                    controls_pub
+                        .accept_subscription(channels.controls.create_unreliable_subscription());
+                    channels
+                        .controls
+                        .accept_subscription(controls_sub.create_subscription());
                     loop {
-                        let Some(result) = controls_sub.recv_or_closed().await else { break; };
+                        let Some(result) = controls_sub.recv_or_closed().await else {
+                            break;
+                        };
                         let controls = match result {
                             Ok(x) => x,
                             Err(e) => {
@@ -158,19 +176,26 @@ impl Node for Telemetry {
                             }
                         };
                         controls_pub.set(controls);
-                        self.steering_signal.set(Steering::new(controls.drive as f32 / 127.0, controls.steering as f32 / 127.0));
+                        self.steering_signal.set(Steering::new(
+                            controls.drive as f32 / 127.0,
+                            controls.steering as f32 / 127.0,
+                        ));
                     }
                 };
 
                 let camera_fut = async {
                     let mut camera_pub = Publisher::default();
                     let mut camera_sub = Subscriber::new(1);
-                    channels.camera.accept_subscription(camera_sub.create_subscription());
+                    channels
+                        .camera
+                        .accept_subscription(camera_sub.create_subscription());
                     camera_pub.accept_subscription(channels.camera.create_reliable_subscription());
                     camera_pub.set(sdp.clone());
 
                     loop {
-                        let Some(result) = camera_sub.recv_or_closed().await else { break; };
+                        let Some(result) = camera_sub.recv_or_closed().await else {
+                            break;
+                        };
                         let _ = match result {
                             Ok(x) => x,
                             Err(e) => {
@@ -178,7 +203,7 @@ impl Node for Telemetry {
                                 continue;
                             }
                         };
-                        
+
                         info!("Resending SDP");
                         camera_pub.set(sdp.clone());
                     }

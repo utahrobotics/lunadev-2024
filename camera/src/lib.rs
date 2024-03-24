@@ -15,7 +15,10 @@ use nokhwa::{
     },
 };
 use unros::{
-    anyhow::{self, Context}, async_trait, asyncify_run, log, pubsub::{Publisher, Subscription}, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    anyhow::{self, Context},
+    async_trait, asyncify_run, log,
+    pubsub::{Publisher, Subscription},
+    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 /// A pending connection to a camera.

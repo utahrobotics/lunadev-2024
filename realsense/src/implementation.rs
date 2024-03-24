@@ -27,10 +27,13 @@ use realsense_rust::{
 };
 use rig::RobotElementRef;
 use unros::{
-    anyhow, async_trait, asyncify_run, pubsub::{Publisher, Subscription}, rayon::{
+    anyhow, async_trait, asyncify_run,
+    pubsub::{Publisher, Subscription},
+    rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
-    }, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    },
+    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 #[derive(Clone)]

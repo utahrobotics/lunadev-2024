@@ -39,7 +39,6 @@ pub mod rng;
 pub mod service;
 pub mod utils;
 
-pub use rayon;
 pub use anyhow;
 use anyhow::Context;
 pub use async_trait::async_trait;
@@ -48,6 +47,7 @@ use config::Config;
 use crossbeam::queue::SegQueue;
 pub use log;
 use log::{debug, error, info, warn};
+pub use rayon;
 use serde::Deserialize;
 use sysinfo::Pid;
 pub use tokio;
@@ -265,7 +265,7 @@ impl Application {
 pub struct RuntimeContext {
     name: Arc<str>,
     node_sender: mpsc::UnboundedSender<Box<dyn FnOnce(&mut JoinSet<anyhow::Result<()>>) + Send>>,
-    quit_on_drop: bool
+    quit_on_drop: bool,
 }
 
 impl RuntimeContext {
@@ -472,7 +472,7 @@ where
     THREADS.push(std::thread::spawn(f));
 }
 
-pub fn asyncify_run<F, T>(f: F) -> impl Future<Output=anyhow::Result<T>>
+pub fn asyncify_run<F, T>(f: F) -> impl Future<Output = anyhow::Result<T>>
 where
     F: FnOnce() -> anyhow::Result<T>,
     F: Send + 'static,
@@ -482,9 +482,7 @@ where
     THREADS.push(std::thread::spawn(move || {
         let _ = tx.send(f());
     }));
-    async {
-        rx.await.map_err(anyhow::Error::from).flatten()
-    }
+    async { rx.await.map_err(anyhow::Error::from).flatten() }
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();

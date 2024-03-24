@@ -15,8 +15,11 @@ use fxhash::FxHashMap;
 use nalgebra::{Isometry3, Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros::{
-    rayon,
-    anyhow, async_trait, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio::{self, sync::mpsc::channel}, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait,
+    pubsub::{Publisher, Subscriber, Subscription},
+    rayon, setup_logging,
+    tokio::{self, sync::mpsc::channel},
+    Node, NodeIntrinsics, RuntimeContext,
 };
 
 /// An observation of the global orientation and position

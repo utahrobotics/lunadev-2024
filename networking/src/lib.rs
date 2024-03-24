@@ -10,14 +10,16 @@ use std::{
     },
 };
 
-use bitcode::{Decode, Encode};
 pub use bitcode;
+use bitcode::{Decode, Encode};
 use enet::{
     Address, BandwidthLimit, ChannelLimit, Enet, Event, Host, Packet, PacketMode, Peer, PeerState,
 };
 use fxhash::{FxHashMap, FxHasher};
 use unros::{
-    anyhow, async_trait, asyncify_run, log, pubsub::{Publisher, PublisherRef, Subscriber, Subscription}, setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, asyncify_run, log,
+    pubsub::{Publisher, PublisherRef, Subscriber, Subscription},
+    setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 #[derive(Debug)]
@@ -157,7 +159,10 @@ impl NetworkNode {
         )
     }
 
-    pub fn new_server(bind_address: SocketAddrV4, max_peer_count: usize) -> (Self, NetworkPeerReceiver, NetworkConnector) {
+    pub fn new_server(
+        bind_address: SocketAddrV4,
+        max_peer_count: usize,
+    ) -> (Self, NetworkPeerReceiver, NetworkConnector) {
         let (address_sender, address_receiver) = std::sync::mpsc::channel();
         let (peer_sender, peer_receiver) = tokio::sync::mpsc::unbounded_channel();
         (

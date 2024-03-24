@@ -1,19 +1,23 @@
-
 use std::{
-    net::{Ipv4Addr, SocketAddrV4}, process::Stdio, sync::{
+    net::{Ipv4Addr, SocketAddrV4},
+    process::Stdio,
+    sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    }, thread::JoinHandle, time::{Duration, Instant}
+    },
+    thread::JoinHandle,
+    time::{Duration, Instant},
 };
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
-use godot::{
-    engine::notify::NodeNotification, obj::BaseMut, prelude::*
-};
+use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
 use lunabot::{Channels, ControlsPacket, ImportantMessage};
 use networking::NetworkNode;
-use unros::{default_run_options, pubsub::{Publisher, Subscriber}, setup_logging, start_unros_runtime, tokio, Application};
-
+use unros::{
+    default_run_options,
+    pubsub::{Publisher, Subscriber},
+    setup_logging, start_unros_runtime, tokio, Application,
+};
 
 struct LunabotShared {
     base_mut_queue: SegQueue<Box<dyn FnOnce(BaseMut<LunabotConn>) + Send>>,
@@ -29,7 +33,6 @@ struct LunabotConn {
     base: Base<Node>,
     thr: Option<JoinHandle<()>>,
 }
-
 
 #[godot_api]
 impl INode for LunabotConn {
@@ -61,9 +64,12 @@ impl INode for LunabotConn {
         self.base().get_tree().unwrap().set_auto_accept_quit(false);
         std::fs::File::create("camera-ffmpeg.log").expect("camera-ffmpeg.log should be writable");
         let shared = self.shared.clone().unwrap();
-        
+
         let main = |mut app: Application| async move {
-            let (network_node, mut peer_receiver, _) = NetworkNode::new_server(SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM), 1);
+            let (network_node, mut peer_receiver, _) = NetworkNode::new_server(
+                SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM),
+                1,
+            );
 
             app.add_task(|mut context| async move {
                 context.set_quit_on_drop(true);
@@ -271,7 +277,7 @@ impl INode for LunabotConn {
                     }
                 }
             }, "conn-receiver");
-        
+
             app.add_node(network_node);
             Ok(app)
         };
@@ -490,12 +496,14 @@ impl INode for LunabotConn {
             if let Some(thr) = self.thr.take() {
                 let _ = thr.join();
             }
-            
-            self.base().get_tree().unwrap().call_deferred("quit".into(), &[]);
+
+            self.base()
+                .get_tree()
+                .unwrap()
+                .call_deferred("quit".into(), &[]);
         }
     }
 }
-
 
 #[godot_api]
 impl LunabotConn {

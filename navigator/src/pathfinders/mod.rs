@@ -9,7 +9,10 @@ use std::{
 use nalgebra::{Point2, Point3};
 use rig::RobotBaseRef;
 use unros::{
-    anyhow, async_trait, asyncify_run, pubsub::{Publisher, Subscription}, service::{new_service, Pending, Service, ServiceHandle}, setup_logging, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, asyncify_run,
+    pubsub::{Publisher, Subscription},
+    service::{new_service, Pending, Service, ServiceHandle},
+    setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
 
 use crate::Float;
@@ -105,22 +108,23 @@ impl<T: CostmapReference> Node for DirectPathfinder<T> {
         asyncify_run(move || {
             self.service_handle = None;
             loop {
-            let Some(mut req) = self.service.blocking_wait_for_request() else {
-                break Ok(());
-            };
+                let Some(mut req) = self.service.blocking_wait_for_request() else {
+                    break Ok(());
+                };
 
-            let dest = req.take_input().unwrap();
-            let completion_percentage = Arc::new(AtomicU8::default());
+                let dest = req.take_input().unwrap();
+                let completion_percentage = Arc::new(AtomicU8::default());
 
-            let Some(pending_task) = req.accept(NavigationProgress {
-                completion_percentage: completion_percentage.clone(),
-            }) else {
-                error!("Scheduler of task dropped task init before we could respond");
-                continue;
-            };
+                let Some(pending_task) = req.accept(NavigationProgress {
+                    completion_percentage: completion_percentage.clone(),
+                }) else {
+                    error!("Scheduler of task dropped task init before we could respond");
+                    continue;
+                };
 
-            T::process(&mut self, dest, pending_task, completion_percentage);
-        }})
+                T::process(&mut self, dest, pending_task, completion_percentage);
+            }
+        })
         .await
     }
 }

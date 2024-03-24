@@ -5,7 +5,9 @@ use nalgebra::{Point2, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    anyhow, async_trait, asyncify_run, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, asyncify_run,
+    pubsub::{Publisher, Subscriber, Subscription},
+    setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
 
 pub mod pathfinders;
@@ -137,7 +139,8 @@ where
                     self.turn_fn,
                 ))
             })
-            .await.unwrap();
+            .await
+            .unwrap();
 
             self.path_sub = path_sub;
             self.steering_signal = steering_signal;
