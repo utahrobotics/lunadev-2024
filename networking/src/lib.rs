@@ -251,6 +251,7 @@ impl Drop for HostWrapper {
                 peer_count += 1;
             }
         }
+        unros::log::info!("{peer_count}");
         while peer_count > 0 {
             let mut event = match self.0.service(1000) {
                 Ok(Some(event)) => event,
@@ -269,6 +270,7 @@ impl Drop for HostWrapper {
                 _ => {}
             }
         }
+        unros::log::info!("fwwf");
     }
 }
 
