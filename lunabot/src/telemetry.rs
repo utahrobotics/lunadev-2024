@@ -4,7 +4,8 @@ use std::{
 
 use global_msgs::Steering;
 use image::DynamicImage;
-use networking::{bitcode::{self, Decode, Encode}, ChannelId, ChannelMap, NetworkConnector, NetworkNode};
+use lunabot::{Channels, ImportantMessage};
+use networking::{NetworkConnector, NetworkNode};
 use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros::{
@@ -18,26 +19,12 @@ use unros::{
 };
 
 
-struct Channels {
-    important: ChannelId,
-    camera: ChannelId,
-    odometry: ChannelId,
-    controls: ChannelId,
-    logs: ChannelId
-}
 
-#[derive(Debug, Eq, PartialEq, Encode, Decode, Clone, Copy)]
-enum ImportantMessage {
-    EnableCamera,
-    DisableCamera,
-    Ping,
-}
 
 /// A remote connection to `Lunabase`
 pub struct Telemetry {
     network_node: NetworkNode,
     network_connector: NetworkConnector,
-    channels: Channels,
     pub server_addr: SocketAddrV4,
     pub camera_delta: Duration,
     steering_signal: Publisher<Steering>,
@@ -67,24 +54,13 @@ impl Telemetry {
             cam_fps,
         )?;
 
-        let mut channel_map = ChannelMap::new(2342);
-
-        let channels = Channels {
-            important: channel_map.add_channel("important").unwrap(),
-            camera: channel_map.add_channel("camera").unwrap(),
-            odometry: channel_map.add_channel("odometry").unwrap(),
-            controls: channel_map.add_channel("controls").unwrap(),
-            logs: channel_map.add_channel("logs").unwrap(),
-        };
-        
         let (network_node, network_connector) = NetworkNode::new_client(1);
 
         Ok(Self {
             network_node,
             network_connector,
-            channels,
             server_addr,
-            steering_signal: Default::default(),
+            steering_signal: Publisher::default(),
             image_subscriptions: Subscriber::new(1),
             camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
             video_dump,
@@ -92,7 +68,7 @@ impl Telemetry {
         })
     }
 
-    pub fn accept_steering_sub(&mut self, sub: Subscription<Steering>) {
+    pub fn accept_steering_sub(&self, sub: Subscription<Steering>) {
         self.steering_signal.accept_subscription(sub);
     }
 
@@ -147,18 +123,14 @@ impl Node for Telemetry {
                     break peer;
                 };
                 info!("Connected to lunabase!");
-                let important_channel = peer.create_channel::<ImportantMessage>(self.channels.important);
-                let camera_channel = peer.create_channel::<Arc<str>>(self.channels.camera);
-                let _odometry_channel = peer.create_channel::<u8>(self.channels.odometry);
-                let controls_channel = peer.create_channel::<(f32, f32)>(self.channels.controls);
-                let logs_channel = peer.create_channel::<Arc<str>>(self.channels.logs);
-                log_accept_subscription(logs_channel.create_reliable_subscription());
+                let channels = Channels::new(&peer);
+                log_accept_subscription(channels.logs.create_reliable_subscription());
 
                 let important_fut = async {
                     let mut important_pub = Publisher::default();
                     let mut important_sub = Subscriber::new(8);
-                    important_channel.accept_subscription(important_sub.create_subscription());
-                    important_pub.accept_subscription(important_channel.create_reliable_subscription());
+                    channels.important.accept_subscription(important_sub.create_subscription());
+                    important_pub.accept_subscription(channels.important.create_reliable_subscription());
 
                     loop {
                         let Some(result) = important_sub.recv_or_closed().await else { break; };
@@ -179,7 +151,7 @@ impl Node for Telemetry {
 
                 let steering_fut = async {
                     let mut steering_sub = Subscriber::new(1);
-                    controls_channel.accept_subscription(steering_sub.create_subscription());
+                    channels.controls.accept_subscription(steering_sub.create_subscription());
                     loop {
                         let Some(result) = steering_sub.recv_or_closed().await else { break; };
                         let (drive, steering) = match result {
@@ -204,8 +176,8 @@ impl Node for Telemetry {
                 let camera_fut = async {
                     let mut camera_pub = Publisher::default();
                     let mut camera_sub = Subscriber::new(1);
-                    camera_channel.accept_subscription(camera_sub.create_subscription());
-                    camera_pub.accept_subscription(camera_channel.create_reliable_subscription());
+                    channels.camera.accept_subscription(camera_sub.create_subscription());
+                    camera_pub.accept_subscription(channels.camera.create_reliable_subscription());
                     camera_pub.set(sdp.clone());
 
                     loop {

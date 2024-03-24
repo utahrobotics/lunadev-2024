@@ -10,4 +10,7 @@ crate-type = ["cdylib"]  # Compile this crate to a dynamic C library.
 godot = { git = "https://github.com/godot-rust/gdext", branch = "master", features = ["experimental-threads"]}
 crossbeam = { workspace = true }
 # ffmpeg-sidecar = { workspace = true }
-interprocess = { workspace = true }
+# interprocess = { workspace = true }
+networking = { path = "../networking" }
+unros = { path = "../unros" }
+lunabot = { path = "../lunabot" }

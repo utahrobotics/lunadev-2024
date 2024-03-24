@@ -1,12 +1,9 @@
+
 use std::{
-    ops::Deref,
-    process::Stdio,
-    sync::{
+    net::{Ipv4Addr, SocketAddrV4}, ops::Deref, process::Stdio, sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
         Arc,
-    },
-    thread::JoinHandle,
-    time::{Duration, Instant},
+    }, thread::JoinHandle, time::{Duration, Instant}
 };
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
@@ -18,18 +15,15 @@ use godot::{
     obj::BaseMut,
     prelude::*,
 };
+use lunabot::{Channels, ImportantMessage};
+use networking::NetworkNode;
+use unros::{anyhow, default_run_options, pubsub::Subscriber, start_unros_runtime, tokio, Application};
 
 use crate::init_panic_hook;
 
-struct Packet {
-    channel: Channels,
-    data: Vec<u8>,
-    flags: i32,
-}
 
 struct LunabotShared {
     base_mut_queue: SegQueue<Box<dyn FnOnce(BaseMut<LunabotConn>) + Send>>,
-    packet_queue: SegQueue<Packet>,
     controls_data: Box<[AtomicU8]>,
     echo_controls: AtomicBool,
     camera_frame: AtomicCell<Option<Arc<Box<[u8]>>>>,
@@ -44,24 +38,6 @@ struct LunabotConn {
     thr: Option<JoinHandle<()>>,
 }
 
-#[derive(GodotConvert, Var, Export, Debug)]
-#[godot(via = u8)]
-enum Channels {
-    Important,
-    Camera,
-    Odometry,
-    Controls,
-    Logs,
-    Max,
-}
-
-#[derive(GodotConvert, Var, Export, Debug)]
-#[godot(via = u8)]
-enum ImportantMessage {
-    EnableCamera,
-    DisableCamera,
-    Ping,
-}
 
 #[godot_api]
 impl INode for LunabotConn {
@@ -75,7 +51,7 @@ impl INode for LunabotConn {
 
         let shared = LunabotShared {
             base_mut_queue: SegQueue::default(),
-            packet_queue: SegQueue::default(),
+            // packet_queue: SegQueue::default(),
             controls_data,
             echo_controls: AtomicBool::default(),
             camera_frame: AtomicCell::default(),
@@ -115,8 +91,141 @@ impl INode for LunabotConn {
 
     fn ready(&mut self) {
         std::fs::File::create("camera-ffmpeg.log").expect("camera-ffmpeg.log should be writable");
-
         let shared = self.shared.clone().unwrap();
+        
+        let main = |app: Application| async move {
+            let (network_node, peer_receiver, _) = NetworkNode::new_server(SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM), 1);
+
+            app.add_task(|context| async move {
+                loop {
+                    let Some(peer) = peer_receiver.recv().await else { break Ok(()); };
+                    shared.base_mut_queue.push(Box::new(|mut base| {
+                        base.emit_signal("connected".into(), &[]);
+                    }));
+                    shared.echo_controls.store(false, Ordering::Relaxed);
+                    shared.connected.store(true, Ordering::Relaxed);
+                    let mut last_receive_time = Instant::now();
+                    let mut pinged = false;
+                    let mut ffplay: Option<std::process::Child> = None;
+
+                    let channels = Channels::new(&peer);
+
+                    let mut logs_sub = Subscriber::new(32);
+                    channels.logs.accept_subscription(logs_sub.create_subscription());
+
+                    let logs_fut = async {
+                        loop {
+                            let Some(result) = logs_sub.recv_or_closed().await else { break; };
+
+                            let log = match result {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    godot_error!("Failed to parse incoming log: {e}");
+                                    continue;
+                                }
+                            };
+                            
+                            godot_print!("{log}");
+                        }
+                    };
+
+                    let mut camera_sub = Subscriber::new(1);
+                    channels.camera.accept_subscription(camera_sub.create_subscription());
+
+                    let cam_fut = async {
+                        loop {
+                            let Some(result) = camera_sub.recv_or_closed().await else { break; };
+
+                            let sdp = match result {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    godot_error!("Failed to parse incoming sdp: {e}");
+                                    continue;
+                                }
+                            };
+                            
+                            std::fs::write("camera.sdp", sdp.as_bytes())
+                                        .expect("camera.sdp should be writable");
+
+                            let mut child = std::process::Command::new("ffplay")
+                                .args([
+                                    "-protocol_whitelist",
+                                    "file,rtp,udp",
+                                    "-i",
+                                    "camera.sdp",
+                                    "-flags",
+                                    "low_delay",
+                                    "-avioflags",
+                                    "direct",
+                                    "-probesize",
+                                    "32",
+                                    "-analyzeduration",
+                                    "0",
+                                    "-sync",
+                                    "ext",
+                                    "-framedrop",
+                                ])
+                                .stderr(Stdio::piped())
+                                .spawn()
+                                .expect("Failed to init ffplay process");
+
+                            if let Some(mut ffplay) = ffplay {
+                                let _ = ffplay.kill();
+                            }
+
+                            let mut stderr = child.stderr.take().unwrap();
+                            ffplay = Some(child);
+
+                            std::thread::spawn(move || {
+                                let _ = std::io::copy(
+                                    &mut stderr,
+                                    &mut std::fs::OpenOptions::new()
+                                        .append(true)
+                                        .create(true)
+                                        .open("camera-ffmpeg.log")
+                                        .expect("camera-ffmpeg.log should be writable"),
+                                );
+                            });
+                        }
+                    };
+
+                    let mut controls_sub = Subscriber::new(1);
+                    channels.controls.accept_subscription(controls_sub.create_subscription());
+
+                    let controls_fut = async {
+                        loop {
+                            let Some(result) = controls_sub.recv_or_closed().await else { break; };
+
+                            let _ = match result {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    godot_error!("Failed to parse incoming controls: {e}");
+                                    continue;
+                                }
+                            };
+                        }
+                    };
+                    
+                    tokio::select!{
+                        _ = logs_fut => {}
+                        _ = cam_fut => {}
+                        _ = controls_fut => {}
+                    }
+                    
+                    if let Some(mut ffplay) = ffplay {
+                        let _ = ffplay.kill();
+                    }
+                }
+            }, "conn-receiver");
+        
+            app.add_node(network_node);
+            Ok(app)
+        };
+        std::thread::spawn(|| {
+            if let Err(e) = start_unros_runtime(main, default_run_options!()) {
+                godot_error!("{e}");
+            }
+        });
         let task = move || 'main: loop {
             let mut server = ENetConnection::new_gd();
             let err = server.create_host_bound("*".into(), Self::RECV_FROM as i32);
@@ -127,53 +236,6 @@ impl INode for LunabotConn {
             }
 
             loop {
-                let mut peer: Gd<ENetPacketPeer>;
-                loop {
-                    let result = server.service_ex().timeout(200).done();
-
-                    if Arc::strong_count(&shared) == 1 {
-                        server.destroy();
-                        return;
-                    }
-
-                    let event_type: EventType = result.get(0).to();
-                    let new_peer: Option<Gd<ENetPacketPeer>> = result.get(1).to();
-                    // let _data: i32 = result.get(2).to();
-                    // let channel: u8 = result.get(3).to();
-                    // let channel = Channels::from_godot(channel);
-
-                    match event_type {
-                        EventType::ERROR => {
-                            server.destroy();
-                            godot_error!("Server faced an error");
-                            continue 'main;
-                        }
-                        EventType::CONNECT => {
-                            peer = new_peer.unwrap();
-                            break;
-                        }
-                        EventType::DISCONNECT => {
-                            godot_error!(
-                                "Somehow disconnected from a peer: {}",
-                                new_peer.unwrap().get_remote_address()
-                            );
-                        }
-                        EventType::RECEIVE => {
-                            godot_error!("Somehow received message from a peer");
-                        }
-                        _ => {}
-                    }
-                }
-
-                shared.base_mut_queue.push(Box::new(|mut base| {
-                    base.emit_signal("connected".into(), &[]);
-                }));
-                shared.echo_controls.store(false, Ordering::Relaxed);
-                shared.connected.store(true, Ordering::Relaxed);
-                let mut last_receive_time = Instant::now();
-                let mut pinged = false;
-                let mut ffplay: Option<std::process::Child> = None;
-
                 loop {
                     let result = server.service_ex().timeout(200).done();
 

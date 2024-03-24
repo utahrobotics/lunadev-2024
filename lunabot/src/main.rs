@@ -78,6 +78,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         20,
     )
     .await?;
+    let steering_sub = Subscriber::new(8);
+    telemetry.accept_steering_sub(steering_sub.create_subscription());
+    steering_sub.into_logger(|x| format!("{x:?}"), "steering.logs").await?;
+    
     let mut teleop_camera = Camera::new(2)?;
     teleop_camera.res_x = 1280;
     teleop_camera.res_y = 720;

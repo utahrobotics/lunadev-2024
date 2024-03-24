@@ -1,4 +1,4 @@
-#![feature(backtrace_frames)]
+#![feature(backtrace_frames, ip_bits)]
 use std::sync::Once;
 
 use godot::prelude::*;

@@ -1993,7 +1993,9 @@ version = "0.1.0"
 dependencies = [
  "crossbeam",
  "godot",
- "interprocess",
+ "lunabot",
+ "networking",
+ "unros",
 ]
 
 [[package]]
