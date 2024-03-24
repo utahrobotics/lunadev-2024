@@ -6,7 +6,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{
         mpsc::{Receiver, Sender},
-        Arc, Mutex,
+        Arc, Mutex, Weak,
     },
 };
 
@@ -77,7 +77,7 @@ impl ChannelMap {
 pub struct NetworkPeer {
     remote_addr: SocketAddrV4,
     packets_to_send: Subscription<(Box<[u8]>, PacketMode)>,
-    packets_router: Arc<Mutex<FxHashMap<u8, Box<dyn FnMut(Box<[u8]>) + Send>>>>,
+    packets_router: Weak<Mutex<FxHashMap<u8, Box<dyn FnMut(Box<[u8]>) + Send>>>>,
 }
 
 impl NetworkPeer {
@@ -88,12 +88,14 @@ impl NetworkPeer {
         let mut pub_received_packets = Publisher::default();
         let recv_packets_sub = pub_received_packets.get_ref();
 
-        self.packets_router.lock().unwrap().insert(
-            channel_id.0,
-            Box::new(move |bytes| {
-                pub_received_packets.set(bitcode::decode(&bytes).map_err(Arc::new));
-            }),
-        );
+        if let Some(packets_router) = self.packets_router.upgrade() {
+            packets_router.lock().unwrap().insert(
+                channel_id.0,
+                Box::new(move |bytes| {
+                    pub_received_packets.set(bitcode::decode(&bytes).map_err(Arc::new));
+                }),
+            );
+        }
 
         Channel {
             channel_id: channel_id.0,
@@ -336,7 +338,7 @@ impl Node for NetworkNode {
                                 let _ = sender.send(NetworkPeer {
                                     remote_addr: addr,
                                     packets_to_send,
-                                    packets_router,
+                                    packets_router: Arc::downgrade(&packets_router),
                                 });
                             } else if let Some((_, sender)) = &self.binding {
                                 let packet_sub = Subscriber::new(self.peer_buffer_size);
@@ -348,7 +350,7 @@ impl Node for NetworkNode {
                                 let _ = sender.send(NetworkPeer {
                                     remote_addr: addr,
                                     packets_to_send,
-                                    packets_router,
+                                    packets_router: Arc::downgrade(&packets_router),
                                 });
                             }
                         }
@@ -412,8 +414,7 @@ impl Node for NetworkNode {
                     let Some(peer) = peers.get_mut(addr) else {
                         return false;
                     };
-                    if Arc::strong_count(packets_router) == 1 {
-                        println!("fwwf");
+                    if Arc::weak_count(packets_router) == 0 {
                         peer.disconnect(0);
                         return false;
                     }

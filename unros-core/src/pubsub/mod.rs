@@ -8,7 +8,7 @@ use std::{
     io::Write,
     ops::{Deref, DerefMut},
     path::Path,
-    sync::{Arc, Weak},
+    sync::{atomic::{AtomicUsize, Ordering}, Arc, Weak},
 };
 
 use crossbeam::{
@@ -77,7 +77,11 @@ impl<T: Clone> Publisher<T> {
 impl<T> Publisher<T> {
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
+            
     pub fn accept_subscription(&self, sub: Subscription<T>) {
+        for count in &sub.pub_count {
+            count.fetch_add(1, Ordering::Release);
+        }
         self.subs.push(sub);
     }
 
@@ -104,6 +108,9 @@ impl<T> Drop for Publisher<T> {
         };
 
         for sub in subs.into_iter() {
+            for count in &sub.pub_count {
+                count.fetch_sub(1, Ordering::Release);
+            }
             drop(sub.queue);
             if let Some(notify) = sub.notify.upgrade() {
                 notify.notify_one();
@@ -131,6 +138,9 @@ impl<T> PublisherRef<T> {
         let Some(subs) = self.subs.upgrade() else {
             return false;
         };
+        for count in &sub.pub_count {
+            count.fetch_add(1, Ordering::Release);
+        }
         subs.push(sub);
         true
     }
@@ -196,6 +206,7 @@ impl<T> Clone for Box<dyn Queue<T>> {
 pub struct Subscriber<T> {
     queue: Arc<ArrayQueue<T>>,
     notify: Arc<Notify>,
+    pub_count: Arc<AtomicUsize>,
 }
 
 /// An object that must be passed to a `Publisher`, enabling the `Subscriber`
@@ -207,6 +218,7 @@ pub struct Subscription<T> {
     queue: Box<dyn Queue<T>>,
     notify: Weak<Notify>,
     name: Option<Box<str>>,
+    pub_count: Vec<Arc<AtomicUsize>>,
     lag: usize,
 }
 
@@ -217,6 +229,7 @@ impl<T> Clone for Subscription<T> {
             notify: self.notify.clone(),
             name: self.name.clone(),
             lag: self.lag.clone(),
+            pub_count: self.pub_count.clone()
         }
     }
 }
@@ -227,6 +240,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         Self {
             queue: Arc::new(ArrayQueue::new(size)),
             notify: Arc::new(Notify::new()),
+            pub_count: Arc::default()
         }
     }
 
@@ -237,7 +251,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
                 return Some(value);
             }
 
-            if Arc::weak_count(&self.queue) == 0 {
+            if self.pub_count.load(Ordering::Acquire) == 0 {
                 return None;
             }
 
@@ -296,6 +310,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
             notify: Arc::downgrade(&self.notify),
             name: None,
             lag: 0,
+            pub_count: vec![self.pub_count.clone()]
         }
     }
 
@@ -332,6 +347,7 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
     }
 }
 
+
 impl<T: 'static> Subscription<T> {
     /// Changes the generic type of this `Subscription` using the given `map` function.
     pub fn map<V>(
@@ -343,6 +359,7 @@ impl<T: 'static> Subscription<T> {
             notify: self.notify,
             lag: 0,
             name: None,
+            pub_count: self.pub_count
         }
     }
 
@@ -364,10 +381,12 @@ impl<T: 'static> Subscription<T> {
             notify: self.notify,
             lag: 0,
             name: None,
+            pub_count: self.pub_count
         }
     }
 
     pub fn zip<V: 'static>(mut self, mut other: Subscription<V>) -> Subscription<(T, V)> {
+        self.pub_count.append(&mut other.pub_count);
         Subscription {
             queue: Box::new(move |(left, right)| {
                 let left_result = self.queue.push(left);
@@ -387,6 +406,7 @@ impl<T: 'static> Subscription<T> {
             notify: self.notify,
             lag: 0,
             name: None,
+            pub_count: self.pub_count
         }
     }
 
