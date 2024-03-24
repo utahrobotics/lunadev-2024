@@ -214,6 +214,7 @@ impl Application {
                 f(RuntimeContext {
                     name: name.clone(),
                     node_sender,
+                    quit_on_drop: false,
                 })
                 .await
                 .with_context(|| format!("{name} has faced an error"))
@@ -238,7 +239,8 @@ impl Application {
                         break Ok(());
                     };
                     match result {
-                        Ok(result) => break result,
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => break Err(e),
                         Err(e) => {
                             error!("Faced the following error while trying to join with node task: {e}");
                         }
@@ -263,6 +265,7 @@ impl Application {
 pub struct RuntimeContext {
     name: Arc<str>,
     node_sender: mpsc::UnboundedSender<Box<dyn FnOnce(&mut JoinSet<anyhow::Result<()>>) + Send>>,
+    quit_on_drop: bool
 }
 
 impl RuntimeContext {
@@ -270,6 +273,10 @@ impl RuntimeContext {
     #[must_use]
     pub fn get_name(&self) -> &Arc<str> {
         &self.name
+    }
+
+    pub fn set_quit_on_drop(&mut self, value: bool) {
+        self.quit_on_drop = value;
     }
 
     /// Spawn a new node into the runtime that the runtime will keep track of.
@@ -300,6 +307,18 @@ impl RuntimeContext {
                     .with_context(move || format!("{name} has faced an error"))
             });
         }));
+    }
+}
+
+impl Drop for RuntimeContext {
+    fn drop(&mut self) {
+        let name = self.name.clone();
+        if self.quit_on_drop {
+            let _ = self.node_sender.send(Box::new(move |join_set| {
+                warn!("Quitting runtime from {name}...");
+                join_set.abort_all();
+            }));
+        }
     }
 }
 

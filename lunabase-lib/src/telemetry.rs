@@ -8,14 +8,11 @@ use std::{
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{
-    obj::BaseMut,
-    prelude::*,
+    engine::notify::NodeNotification, obj::BaseMut, prelude::*
 };
 use lunabot::{Channels, ControlsPacket, ImportantMessage};
 use networking::NetworkNode;
 use unros::{default_run_options, pubsub::{Publisher, Subscriber}, setup_logging, start_unros_runtime, tokio, Application};
-
-use crate::init_panic_hook;
 
 
 struct LunabotShared {
@@ -37,8 +34,6 @@ struct LunabotConn {
 #[godot_api]
 impl INode for LunabotConn {
     fn init(base: Base<Node>) -> Self {
-        init_panic_hook();
-
         let shared = LunabotShared {
             base_mut_queue: SegQueue::default(),
             controls_data: AtomicCell::default(),
@@ -55,23 +50,44 @@ impl INode for LunabotConn {
     }
 
     fn process(&mut self, _delta: f64) {
-        while let Some(func) = self.shared.as_ref().unwrap().base_mut_queue.pop() {
-            func(self.base_mut());
+        if let Some(shared) = self.shared.as_ref().cloned() {
+            while let Some(func) = shared.base_mut_queue.pop() {
+                func(self.base_mut());
+            }
         }
     }
 
     fn ready(&mut self) {
+        self.base().get_tree().unwrap().set_auto_accept_quit(false);
         std::fs::File::create("camera-ffmpeg.log").expect("camera-ffmpeg.log should be writable");
         let shared = self.shared.clone().unwrap();
         
         let main = |mut app: Application| async move {
             let (network_node, mut peer_receiver, _) = NetworkNode::new_server(SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM), 1);
 
-            app.add_task(|context| async move {
+            app.add_task(|mut context| async move {
+                context.set_quit_on_drop(true);
                 setup_logging!(context);
 
                 loop {
-                    let Some(peer) = peer_receiver.recv().await else { break Ok(()); };
+                    let peer;
+                    tokio::select! {
+                        result = peer_receiver.recv() => {
+                            let Some(tmp) = result else { break Ok(()); };
+                            peer = tmp;
+                        }
+                        _ = async {
+                            loop {
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                if Arc::strong_count(&shared) == 1 {
+                                    // tokio::time::sleep(Duration::from_millis(3000)).await;
+                                    break;
+                                }
+                            }
+                        } => {
+                            break Ok(());
+                        }
+                    }
                     shared.base_mut_queue.push(Box::new(|mut base| {
                         base.emit_signal("connected".into(), &[]);
                     }));
@@ -219,7 +235,13 @@ impl INode for LunabotConn {
 
                         if Arc::strong_count(&shared) == 1 {
                             if let Some(mut ffplay) = ffplay {
-                                let _ = ffplay.kill();
+                                match ffplay.kill() {
+                                    Ok(()) => match ffplay.wait() {
+                                        Ok(x) => info!("ffplay exited with {x}"),
+                                        Err(e) => error!("ffplay failed to exit {e}")
+                                    }
+                                    Err(e) => error!("ffplay failed to be killed {e}")
+                                }
                             }
                             return Ok(());
                         }
@@ -234,24 +256,33 @@ impl INode for LunabotConn {
                         }
                     }
                     
-                    if let Some(mut ffplay) = ffplay {
-                        let _ = ffplay.kill();
-                    }
                     shared.connected.store(false, Ordering::Relaxed);
                     shared.base_mut_queue.push(Box::new(|mut base| {
                         base.emit_signal("disconnected".into(), &[]);
                     }));
+                    if let Some(mut ffplay) = ffplay {
+                        match ffplay.kill() {
+                            Ok(()) => match ffplay.wait() {
+                                Ok(x) => info!("ffplay exited with {x}"),
+                                Err(e) => error!("ffplay failed to exit {e}")
+                            }
+                            Err(e) => error!("ffplay failed to be killed {e}")
+                        }
+                    }
                 }
             }, "conn-receiver");
         
             app.add_node(network_node);
             Ok(app)
         };
-        std::thread::spawn(|| {
-            if let Err(e) = start_unros_runtime(main, default_run_options!()) {
+        self.thr = Some(std::thread::spawn(|| {
+            let mut run_options = default_run_options!();
+            run_options.enable_console_subscriber = false;
+            run_options.auxilliary_control = false;
+            if let Err(e) = start_unros_runtime(main, run_options) {
                 godot_error!("{e}");
             }
-        });
+        }));
         // let task = move || 'main: loop {
         //     let mut server = ENetConnection::new_gd();
         //     let err = server.create_host_bound("*".into(), Self::RECV_FROM as i32);
@@ -453,13 +484,18 @@ impl INode for LunabotConn {
         // self.thr = Some(std::thread::spawn(task));
     }
 
-    fn exit_tree(&mut self) {
-        self.shared = None;
-        if let Some(thr) = self.thr.take() {
-            let _ = thr.join();
+    fn on_notification(&mut self, notif: NodeNotification) {
+        if notif == NodeNotification::WmCloseRequest {
+            self.shared = None;
+            if let Some(thr) = self.thr.take() {
+                let _ = thr.join();
+            }
+            
+            self.base().get_tree().unwrap().call_deferred("quit".into(), &[]);
         }
     }
 }
+
 
 #[godot_api]
 impl LunabotConn {
