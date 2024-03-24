@@ -17,9 +17,7 @@ use enet::{
 };
 use fxhash::{FxHashMap, FxHasher};
 use unros::{
-    anyhow, async_trait, log,
-    pubsub::{Publisher, PublisherRef, Subscriber, Subscription},
-    setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, async_trait, asyncify_run, log, pubsub::{Publisher, PublisherRef, Subscriber, Subscription}, setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext
 };
 
 #[derive(Debug)]
@@ -296,7 +294,7 @@ impl Node for NetworkNode {
             FxHashMap::default();
         let mut reliable_round_robin = 0u8;
 
-        tokio_rayon::spawn(move || {
+        asyncify_run(move || {
             let tmp_host = enet.create_host::<()>(
                 self.binding
                     .as_ref()
@@ -406,12 +404,14 @@ impl Node for NetworkNode {
                     .collect();
 
                 conns.retain(|addr, (packets_to_send, packets_router)| {
-                    if Arc::strong_count(&packets_router) == 1 {
-                        return false;
-                    }
                     let Some(peer) = peers.get_mut(addr) else {
                         return false;
                     };
+                    if Arc::strong_count(packets_router) == 1 {
+                        println!("fwwf");
+                        peer.disconnect(0);
+                        return false;
+                    }
                     while let Some((data, mode)) = packets_to_send.try_recv() {
                         if mode == PacketMode::ReliableSequenced {
                             peer.send_packet(

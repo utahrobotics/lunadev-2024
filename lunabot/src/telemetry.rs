@@ -8,13 +8,10 @@ use lunabot::{Channels, ImportantMessage};
 use networking::{NetworkConnector, NetworkNode};
 use spin_sleep::SpinSleeper;
 use unros::{
-    anyhow, async_trait,
-    logging::{
+    anyhow, async_trait, asyncify_run, logging::{
         dump::{ScalingFilter, VideoDataDump},
         log_accept_subscription,
-    },
-    pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging, tokio, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    }, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext
 };
 
 
@@ -94,7 +91,7 @@ impl Node for Telemetry {
         let drop_check = DropCheck::default();
         let drop_observe = drop_check.get_observing();
 
-        let cam_fut = tokio_rayon::spawn(move || {
+        let cam_fut = asyncify_run(move || {
             let mut start_service = Instant::now();
             let sleeper = SpinSleeper::default();
 

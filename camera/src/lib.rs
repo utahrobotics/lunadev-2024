@@ -15,10 +15,7 @@ use nokhwa::{
     },
 };
 use unros::{
-    anyhow::{self, Context},
-    async_trait, log,
-    pubsub::{Publisher, Subscription},
-    setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext,
+    anyhow::{self, Context}, async_trait, asyncify_run, log, pubsub::{Publisher, Subscription}, setup_logging, Node, NodeIntrinsics, RuntimeContext
 };
 
 /// A pending connection to a camera.
@@ -99,7 +96,7 @@ impl Node for Camera {
         let res_x = self.res_x;
         let res_y = self.res_y;
 
-        tokio_rayon::spawn(move || {
+        asyncify_run(move || {
             let mut camera =
                 nokhwa::Camera::new(index, requested).context("Failed to initialize camera")?;
             camera.open_stream()?;

@@ -39,6 +39,7 @@ pub mod rng;
 pub mod service;
 pub mod utils;
 
+pub use rayon;
 pub use anyhow;
 use anyhow::Context;
 pub use async_trait::async_trait;
@@ -57,7 +58,6 @@ use tokio::{
     sync::mpsc,
     task::JoinSet,
 };
-pub use tokio_rayon::{self, rayon};
 
 use crate::logging::init_logger;
 
@@ -451,6 +451,21 @@ where
     F: Send + 'static,
 {
     THREADS.push(std::thread::spawn(f));
+}
+
+pub fn asyncify_run<F, T>(f: F) -> impl Future<Output=anyhow::Result<T>>
+where
+    F: FnOnce() -> anyhow::Result<T>,
+    F: Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    THREADS.push(std::thread::spawn(move || {
+        let _ = tx.send(f());
+    }));
+    async {
+        rx.await.map_err(anyhow::Error::from).flatten()
+    }
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();

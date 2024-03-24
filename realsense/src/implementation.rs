@@ -27,13 +27,10 @@ use realsense_rust::{
 };
 use rig::RobotElementRef;
 use unros::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscription},
-    rayon::{
+    anyhow, async_trait, asyncify_run, pubsub::{Publisher, Subscription}, rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
-    },
-    setup_logging, tokio_rayon, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    }, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
 };
 
 #[derive(Clone)]
@@ -175,7 +172,7 @@ impl Node for RealSenseCamera {
         let _outer_drop_check = drop_check.clone();
         let mut last_img = None;
 
-        tokio_rayon::spawn(move || {
+        asyncify_run(move || {
             let mut last_accel: Vector3<f32> = Default::default();
             let mut last_ang_vel: Vector3<f32> = Default::default();
 

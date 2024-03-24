@@ -5,9 +5,7 @@ use nalgebra::{Point2, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, async_trait, asyncify_run, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, Node, NodeIntrinsics, RuntimeContext
 };
 
 pub mod pathfinders;
@@ -69,7 +67,7 @@ where
         loop {
             let mut path = self.path_sub.recv().await;
 
-            let (path_sub, steering_signal, robot_base, turn_fn) = tokio_rayon::spawn(move || {
+            let (path_sub, steering_signal, robot_base, turn_fn) = asyncify_run(move || {
                 loop {
                     if let Some(new_path) = self.path_sub.try_recv() {
                         path = new_path;
@@ -132,14 +130,14 @@ where
                 }
                 self.steering_signal.set(Steering::new(0.0, 0.0));
 
-                (
+                Ok((
                     self.path_sub,
                     self.steering_signal,
                     self.robot_base,
                     self.turn_fn,
-                )
+                ))
             })
-            .await;
+            .await.unwrap();
 
             self.path_sub = path_sub;
             self.steering_signal = steering_signal;

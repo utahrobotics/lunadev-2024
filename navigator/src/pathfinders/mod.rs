@@ -9,10 +9,7 @@ use std::{
 use nalgebra::{Point2, Point3};
 use rig::RobotBaseRef;
 use unros::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscription},
-    service::{new_service, Pending, Service, ServiceHandle},
-    setup_logging, tokio_rayon, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, async_trait, asyncify_run, pubsub::{Publisher, Subscription}, service::{new_service, Pending, Service, ServiceHandle}, setup_logging, Node, NodeIntrinsics, RuntimeContext
 };
 
 use crate::Float;
@@ -105,7 +102,7 @@ impl<T: CostmapReference> Node for DirectPathfinder<T> {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
-        tokio_rayon::spawn(move || loop {
+        asyncify_run(move || loop {
             let Some(mut req) = self.service.blocking_wait_for_request() else {
                 break Ok(());
             };

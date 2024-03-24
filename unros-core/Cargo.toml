@@ -20,10 +20,10 @@ serde = { workspace = true }
 anyhow = { workspace = true }
 image = { workspace = true, optional = false }
 # spin_sleep = { workspace = true }
-tokio-rayon = { workspace = true }
 ffmpeg-sidecar = { workspace = true }
 # srtlib = "0.1"
 sysinfo = "0.30"
 config = "0.14"
 color-eyre = { version = "0.6", default-features = false }
 ctrlc = "3.4.2"
+rayon = "1.10.0"

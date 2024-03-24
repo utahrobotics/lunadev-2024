@@ -15,11 +15,8 @@ use fxhash::FxHashMap;
 use nalgebra::{Isometry3, Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros::{
-    anyhow, async_trait,
-    pubsub::{Publisher, Subscriber, Subscription},
-    setup_logging,
-    tokio::{self, sync::mpsc::channel},
-    tokio_rayon, Node, NodeIntrinsics, RuntimeContext,
+    rayon,
+    anyhow, async_trait, pubsub::{Publisher, Subscriber, Subscription}, setup_logging, tokio::{self, sync::mpsc::channel}, Node, NodeIntrinsics, RuntimeContext
 };
 
 /// An observation of the global orientation and position
@@ -149,7 +146,7 @@ impl Node for AprilTagDetector {
         let (err_sender, mut err_receiver) = channel(1);
         let (img_sender, img_receiver) = sync_channel::<Arc<DynamicImage>>(0);
 
-        std::mem::drop(tokio_rayon::spawn(move || {
+        rayon::spawn(move || {
             setup_logging!(context);
 
             macro_rules! unwrap {
@@ -236,7 +233,7 @@ impl Node for AprilTagDetector {
                     });
                 }
             }
-        }));
+        });
 
         loop {
             tokio::select! {
