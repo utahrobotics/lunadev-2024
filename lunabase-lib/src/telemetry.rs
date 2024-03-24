@@ -95,6 +95,8 @@ impl INode for LunabotConn {
                     controls_pub.accept_subscription(channels.controls.create_unreliable_subscription());
 
                     let mut important_pub = Publisher::default();
+                    let mut important_sub = Subscriber::new(8);
+                    channels.important.accept_subscription(important_sub.create_subscription());
                     important_pub.accept_subscription(channels.important.create_reliable_subscription());
 
                     loop {
@@ -104,13 +106,29 @@ impl INode for LunabotConn {
                                 let tmp = last_receive_time.elapsed();
                                 last_receive_time += tmp;
                                 elapsed = tmp;
-                                pinged = false;
                                 shared.base_mut_queue.push(Box::new(|mut base| {
                                     base.emit_signal("something_received".into(), &[]);
                                 }));
                             }};
                         }
                         tokio::select! {
+                            result = important_sub.recv_or_closed() => {
+                                let Some(result) = result else { break; };
+                                received!();
+
+                                let msg = match result {
+                                    Ok(x) => x,
+                                    Err(e) => {
+                                        godot_error!("Failed to parse incoming log: {e}");
+                                        continue;
+                                    }
+                                };
+                                
+                                match msg {
+                                    ImportantMessage::Ping => pinged = false,
+                                    _ => {}
+                                }
+                            }
                             result = logs_sub.recv_or_closed() => {
                                 let Some(result) = result else { break; };
                                 received!();
@@ -211,10 +229,8 @@ impl INode for LunabotConn {
                             important_pub.set(ImportantMessage::Ping);
                         }
 
-                        if elapsed.as_millis() >= 50 {
-                            if shared.echo_controls.load(Ordering::Relaxed) {
-                                controls_pub.set(shared.controls_data.load());
-                            }
+                        if shared.echo_controls.load(Ordering::Relaxed) {
+                            controls_pub.set(shared.controls_data.load());
                         }
                     }
                     

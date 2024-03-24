@@ -32,8 +32,7 @@ func _input(event: InputEvent) -> void:
 			Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")
 		)
 		Lunabot.send_arm_controls(
-			Input.get_action_strength(\"MoveArmUp\") - Input.get_action_strength(\"MoveArmDown\"),
-			Input.get_action_strength(\"SpinDrumClockwise\") - Input.get_action_strength(\"SpinDrumCounterClockwise\")
+			Input.get_action_strength(\"MoveArmUp\") - Input.get_action_strength(\"MoveArmDown\")
 		)
 	
 	elif event.is_action_pressed(\"Restart\"):

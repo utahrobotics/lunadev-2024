@@ -18,8 +18,6 @@ use unros::{
 };
 
 
-
-
 /// A remote connection to `Lunabase`
 pub struct Telemetry {
     network_node: NetworkNode,
@@ -149,10 +147,12 @@ impl Node for Telemetry {
                 };
 
                 let steering_fut = async {
-                    let mut steering_sub = Subscriber::new(1);
-                    channels.controls.accept_subscription(steering_sub.create_subscription());
+                    let mut controls_pub = Publisher::default();
+                    let mut controls_sub = Subscriber::new(1);
+                    controls_pub.accept_subscription(channels.controls.create_unreliable_subscription());
+                    channels.controls.accept_subscription(controls_sub.create_subscription());
                     loop {
-                        let Some(result) = steering_sub.recv_or_closed().await else { break; };
+                        let Some(result) = controls_sub.recv_or_closed().await else { break; };
                         let controls = match result {
                             Ok(x) => x,
                             Err(e) => {
@@ -160,6 +160,7 @@ impl Node for Telemetry {
                                 continue;
                             }
                         };
+                        controls_pub.set(controls);
                         self.steering_signal.set(Steering::new(controls.drive as f32 / 127.0, controls.steering as f32 / 127.0));
                     }
                 };
