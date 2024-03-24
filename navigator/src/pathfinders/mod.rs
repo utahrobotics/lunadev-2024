@@ -46,7 +46,7 @@ pub type NavigationServiceHandle =
     ServiceHandle<Point3<Float>, NavigationError, NavigationProgress, Result<(), NavigationError>>;
 
 pub struct DirectPathfinder<T: CostmapReference> {
-    service_handle: NavigationServiceHandle,
+    service_handle: Option<NavigationServiceHandle>,
     path_signal: Publisher<Arc<[Point2<Float>]>>,
     robot_base: RobotBaseRef,
     service:
@@ -79,7 +79,7 @@ impl<T: CostmapReference> DirectPathfinder<T> {
             agent_radius,
             max_height_diff,
             intrinsics: Default::default(),
-            service_handle,
+            service_handle: Some(service_handle),
         }
     }
 
@@ -88,7 +88,7 @@ impl<T: CostmapReference> DirectPathfinder<T> {
     }
 
     pub fn get_navigation_handle(&self) -> NavigationServiceHandle {
-        self.service_handle.clone()
+        self.service_handle.clone().unwrap()
     }
 }
 
@@ -102,7 +102,9 @@ impl<T: CostmapReference> Node for DirectPathfinder<T> {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
-        asyncify_run(move || loop {
+        asyncify_run(move || {
+            self.service_handle = None;
+            loop {
             let Some(mut req) = self.service.blocking_wait_for_request() else {
                 break Ok(());
             };
@@ -118,7 +120,7 @@ impl<T: CostmapReference> Node for DirectPathfinder<T> {
             };
 
             T::process(&mut self, dest, pending_task, completion_percentage);
-        })
+        }})
         .await
     }
 }

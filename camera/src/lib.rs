@@ -15,7 +15,7 @@ use nokhwa::{
     },
 };
 use unros::{
-    anyhow::{self, Context}, async_trait, asyncify_run, log, pubsub::{Publisher, Subscription}, setup_logging, Node, NodeIntrinsics, RuntimeContext
+    anyhow::{self, Context}, async_trait, asyncify_run, log, pubsub::{Publisher, Subscription}, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
 };
 
 /// A pending connection to a camera.
@@ -96,12 +96,18 @@ impl Node for Camera {
         let res_x = self.res_x;
         let res_y = self.res_y;
 
+        let drop_check = DropCheck::default();
+        let drop_obs = drop_check.get_observing();
+
         asyncify_run(move || {
             let mut camera =
                 nokhwa::Camera::new(index, requested).context("Failed to initialize camera")?;
             camera.open_stream()?;
             loop {
                 let frame = camera.frame()?;
+                if drop_obs.has_dropped() {
+                    break Ok(());
+                }
                 let decoded = frame.decode_image::<RgbFormat>().unwrap();
                 let mut img = DynamicImage::from(decoded);
                 if res_x != 0 && res_y != 0 {
