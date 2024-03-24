@@ -6,7 +6,6 @@ use global_msgs::Steering;
 use image::DynamicImage;
 use lunabot::{Channels, ImportantMessage};
 use networking::{NetworkConnector, NetworkNode};
-use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait,
@@ -154,22 +153,14 @@ impl Node for Telemetry {
                     channels.controls.accept_subscription(steering_sub.create_subscription());
                     loop {
                         let Some(result) = steering_sub.recv_or_closed().await else { break; };
-                        let (drive, steering) = match result {
+                        let controls = match result {
                             Ok(x) => x,
                             Err(e) => {
                                 error!("Error receiving steering: {e}");
                                 continue;
                             }
                         };
-                        let Ok(drive) = NotNan::new(drive) else {
-                            error!("drive is NaN");
-                            continue;
-                        };
-                        let Ok(steering) = NotNan::new(steering) else {
-                            error!("steering is NaN");
-                            continue;
-                        };
-                        self.steering_signal.set(Steering::from_drive_and_steering(drive, steering));
+                        self.steering_signal.set(Steering::new(controls.drive as f32 / 127.0, controls.steering as f32 / 127.0));
                     }
                 };
 

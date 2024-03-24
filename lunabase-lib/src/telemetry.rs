@@ -1,32 +1,27 @@
 
 use std::{
-    net::{Ipv4Addr, SocketAddrV4}, ops::Deref, process::Stdio, sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
+    net::{Ipv4Addr, SocketAddrV4}, process::Stdio, sync::{
+        atomic::{AtomicBool, Ordering},
         Arc,
     }, thread::JoinHandle, time::{Duration, Instant}
 };
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{
-    engine::{
-        enet_connection::EventType, global::Error, image::Format, ENetConnection, ENetPacketPeer,
-        Image,
-    },
     obj::BaseMut,
     prelude::*,
 };
-use lunabot::{Channels, ImportantMessage};
+use lunabot::{Channels, ControlsPacket, ImportantMessage};
 use networking::NetworkNode;
-use unros::{anyhow, default_run_options, pubsub::Subscriber, start_unros_runtime, tokio, Application};
+use unros::{default_run_options, pubsub::{Publisher, Subscriber}, setup_logging, start_unros_runtime, tokio, Application};
 
 use crate::init_panic_hook;
 
 
 struct LunabotShared {
     base_mut_queue: SegQueue<Box<dyn FnOnce(BaseMut<LunabotConn>) + Send>>,
-    controls_data: Box<[AtomicU8]>,
+    controls_data: AtomicCell<ControlsPacket>,
     echo_controls: AtomicBool,
-    camera_frame: AtomicCell<Option<Arc<Box<[u8]>>>>,
     connected: AtomicBool,
 }
 
@@ -43,18 +38,11 @@ struct LunabotConn {
 impl INode for LunabotConn {
     fn init(base: Base<Node>) -> Self {
         init_panic_hook();
-        let controls_data: Box<[AtomicU8]> = if Self::USE_ARCHIMEDES {
-            Box::new(std::array::from_fn::<_, 4, _>(|_| AtomicU8::default()))
-        } else {
-            Box::new(std::array::from_fn::<_, 3, _>(|_| AtomicU8::default()))
-        };
 
         let shared = LunabotShared {
             base_mut_queue: SegQueue::default(),
-            // packet_queue: SegQueue::default(),
-            controls_data,
+            controls_data: AtomicCell::default(),
             echo_controls: AtomicBool::default(),
-            camera_frame: AtomicCell::default(),
             connected: AtomicBool::default(),
         };
         let shared = Arc::new(shared);
@@ -70,33 +58,18 @@ impl INode for LunabotConn {
         while let Some(func) = self.shared.as_ref().unwrap().base_mut_queue.pop() {
             func(self.base_mut());
         }
-
-        let shared = self.shared.as_ref().unwrap();
-
-        if let Some(camera_frame) = shared.camera_frame.take() {
-            self.base_mut().emit_signal(
-                "camera_frame_received".into(),
-                &[Image::create_from_data(
-                    Self::IMAGE_WIDTH as i32,
-                    Self::IMAGE_HEIGHT as i32,
-                    false,
-                    Format::RGB8,
-                    camera_frame.iter().copied().collect(),
-                )
-                .unwrap()
-                .to_variant()],
-            );
-        }
     }
 
     fn ready(&mut self) {
         std::fs::File::create("camera-ffmpeg.log").expect("camera-ffmpeg.log should be writable");
         let shared = self.shared.clone().unwrap();
         
-        let main = |app: Application| async move {
-            let (network_node, peer_receiver, _) = NetworkNode::new_server(SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM), 1);
+        let main = |mut app: Application| async move {
+            let (network_node, mut peer_receiver, _) = NetworkNode::new_server(SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM), 1);
 
             app.add_task(|context| async move {
+                setup_logging!(context);
+
                 loop {
                     let Some(peer) = peer_receiver.recv().await else { break Ok(()); };
                     shared.base_mut_queue.push(Box::new(|mut base| {
@@ -113,108 +86,145 @@ impl INode for LunabotConn {
                     let mut logs_sub = Subscriber::new(32);
                     channels.logs.accept_subscription(logs_sub.create_subscription());
 
-                    let logs_fut = async {
-                        loop {
-                            let Some(result) = logs_sub.recv_or_closed().await else { break; };
-
-                            let log = match result {
-                                Ok(x) => x,
-                                Err(e) => {
-                                    godot_error!("Failed to parse incoming log: {e}");
-                                    continue;
-                                }
-                            };
-                            
-                            godot_print!("{log}");
-                        }
-                    };
-
                     let mut camera_sub = Subscriber::new(1);
                     channels.camera.accept_subscription(camera_sub.create_subscription());
 
-                    let cam_fut = async {
-                        loop {
-                            let Some(result) = camera_sub.recv_or_closed().await else { break; };
+                    let mut controls_pub = Publisher::default();
+                    let mut controls_sub = Subscriber::new(1);
+                    channels.controls.accept_subscription(controls_sub.create_subscription());
+                    controls_pub.accept_subscription(channels.controls.create_unreliable_subscription());
 
-                            let sdp = match result {
-                                Ok(x) => x,
-                                Err(e) => {
-                                    godot_error!("Failed to parse incoming sdp: {e}");
-                                    continue;
+                    let mut important_pub = Publisher::default();
+                    important_pub.accept_subscription(channels.important.create_reliable_subscription());
+
+                    loop {
+                        let elapsed;
+                        macro_rules! received {
+                            () => {{
+                                let tmp = last_receive_time.elapsed();
+                                last_receive_time += tmp;
+                                elapsed = tmp;
+                                pinged = false;
+                                shared.base_mut_queue.push(Box::new(|mut base| {
+                                    base.emit_signal("something_received".into(), &[]);
+                                }));
+                            }};
+                        }
+                        tokio::select! {
+                            result = logs_sub.recv_or_closed() => {
+                                let Some(result) = result else { break; };
+                                received!();
+
+                                let log = match result {
+                                    Ok(x) => x,
+                                    Err(e) => {
+                                        godot_error!("Failed to parse incoming log: {e}");
+                                        continue;
+                                    }
+                                };
+                                
+                                godot_print!("{log}");
+                            }
+                            result = camera_sub.recv_or_closed() => {
+                                let Some(result) = result else { break; };
+                                received!();
+
+                                let sdp = match result {
+                                    Ok(x) => x,
+                                    Err(e) => {
+                                        godot_error!("Failed to parse incoming sdp: {e}");
+                                        continue;
+                                    }
+                                };
+                                
+                                std::fs::write("camera.sdp", sdp.as_bytes())
+                                            .expect("camera.sdp should be writable");
+    
+                                let mut child = std::process::Command::new("ffplay")
+                                    .args([
+                                        "-protocol_whitelist",
+                                        "file,rtp,udp",
+                                        "-i",
+                                        "camera.sdp",
+                                        "-flags",
+                                        "low_delay",
+                                        "-avioflags",
+                                        "direct",
+                                        "-probesize",
+                                        "32",
+                                        "-analyzeduration",
+                                        "0",
+                                        "-sync",
+                                        "ext",
+                                        "-framedrop",
+                                    ])
+                                    .stderr(Stdio::piped())
+                                    .spawn()
+                                    .expect("Failed to init ffplay process");
+    
+                                if let Some(mut ffplay) = ffplay.take() {
+                                    let _ = ffplay.kill();
                                 }
-                            };
-                            
-                            std::fs::write("camera.sdp", sdp.as_bytes())
-                                        .expect("camera.sdp should be writable");
+    
+                                let mut stderr = child.stderr.take().unwrap();
+                                ffplay = Some(child);
+    
+                                std::thread::spawn(move || {
+                                    let _ = std::io::copy(
+                                        &mut stderr,
+                                        &mut std::fs::OpenOptions::new()
+                                            .append(true)
+                                            .create(true)
+                                            .open("camera-ffmpeg.log")
+                                            .expect("camera-ffmpeg.log should be writable"),
+                                    );
+                                });
+                            }
+                            result = controls_sub.recv_or_closed() => {
+                                let Some(result) = result else { break; };
+                                received!();
 
-                            let mut child = std::process::Command::new("ffplay")
-                                .args([
-                                    "-protocol_whitelist",
-                                    "file,rtp,udp",
-                                    "-i",
-                                    "camera.sdp",
-                                    "-flags",
-                                    "low_delay",
-                                    "-avioflags",
-                                    "direct",
-                                    "-probesize",
-                                    "32",
-                                    "-analyzeduration",
-                                    "0",
-                                    "-sync",
-                                    "ext",
-                                    "-framedrop",
-                                ])
-                                .stderr(Stdio::piped())
-                                .spawn()
-                                .expect("Failed to init ffplay process");
+                                let controls = match result {
+                                    Ok(x) => x,
+                                    Err(e) => {
+                                        godot_error!("Failed to parse incoming controls: {e}");
+                                        continue;
+                                    }
+                                };
 
+                                shared.echo_controls.store(controls != shared.controls_data.load(), Ordering::Relaxed);
+                            }
+                            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                                elapsed = last_receive_time.elapsed();
+                            }
+                        }
+
+                        if Arc::strong_count(&shared) == 1 {
                             if let Some(mut ffplay) = ffplay {
                                 let _ = ffplay.kill();
                             }
-
-                            let mut stderr = child.stderr.take().unwrap();
-                            ffplay = Some(child);
-
-                            std::thread::spawn(move || {
-                                let _ = std::io::copy(
-                                    &mut stderr,
-                                    &mut std::fs::OpenOptions::new()
-                                        .append(true)
-                                        .create(true)
-                                        .open("camera-ffmpeg.log")
-                                        .expect("camera-ffmpeg.log should be writable"),
-                                );
-                            });
+                            return Ok(());
                         }
-                    };
 
-                    let mut controls_sub = Subscriber::new(1);
-                    channels.controls.accept_subscription(controls_sub.create_subscription());
-
-                    let controls_fut = async {
-                        loop {
-                            let Some(result) = controls_sub.recv_or_closed().await else { break; };
-
-                            let _ = match result {
-                                Ok(x) => x,
-                                Err(e) => {
-                                    godot_error!("Failed to parse incoming controls: {e}");
-                                    continue;
-                                }
-                            };
+                        if !pinged && elapsed.as_secs() >= 3 {
+                            pinged = true;
+                            important_pub.set(ImportantMessage::Ping);
                         }
-                    };
-                    
-                    tokio::select!{
-                        _ = logs_fut => {}
-                        _ = cam_fut => {}
-                        _ = controls_fut => {}
+
+                        if elapsed.as_millis() >= 50 {
+                            if shared.echo_controls.load(Ordering::Relaxed) {
+                                controls_pub.set(shared.controls_data.load());
+                            }
+                        }
                     }
                     
                     if let Some(mut ffplay) = ffplay {
                         let _ = ffplay.kill();
                     }
+                    shared.connected.store(false, Ordering::Relaxed);
+                    shared.base_mut_queue.push(Box::new(|mut base| {
+                        base.emit_signal("disconnected".into(), &[]);
+                    }));
                 }
             }, "conn-receiver");
         
@@ -226,205 +236,205 @@ impl INode for LunabotConn {
                 godot_error!("{e}");
             }
         });
-        let task = move || 'main: loop {
-            let mut server = ENetConnection::new_gd();
-            let err = server.create_host_bound("*".into(), Self::RECV_FROM as i32);
-            if err != Error::OK {
-                godot_error!("Failed to start ENet Server: {err:?}");
-                std::thread::sleep(Duration::from_secs(3));
-                continue;
-            }
+        // let task = move || 'main: loop {
+        //     let mut server = ENetConnection::new_gd();
+        //     let err = server.create_host_bound("*".into(), Self::RECV_FROM as i32);
+        //     if err != Error::OK {
+        //         godot_error!("Failed to start ENet Server: {err:?}");
+        //         std::thread::sleep(Duration::from_secs(3));
+        //         continue;
+        //     }
 
-            loop {
-                loop {
-                    let result = server.service_ex().timeout(200).done();
+        //     loop {
+        //         loop {
+        //             let result = server.service_ex().timeout(200).done();
 
-                    if Arc::strong_count(&shared) == 1 {
-                        peer.peer_disconnect();
-                        if let Some(mut ffplay) = ffplay {
-                            let _ = ffplay.kill();
-                        }
-                        loop {
-                            let result = server.service();
-                            let event_type: EventType = result.get(0).to();
-                            let new_peer: Option<Gd<ENetPacketPeer>> = result.get(1).to();
+        //             if Arc::strong_count(&shared) == 1 {
+        //                 peer.peer_disconnect();
+        //                 if let Some(mut ffplay) = ffplay {
+        //                     let _ = ffplay.kill();
+        //                 }
+        //                 loop {
+        //                     let result = server.service();
+        //                     let event_type: EventType = result.get(0).to();
+        //                     let new_peer: Option<Gd<ENetPacketPeer>> = result.get(1).to();
 
-                            match event_type {
-                                EventType::ERROR => {
-                                    godot_error!("Server faced an error disconnecting");
-                                    break;
-                                }
-                                EventType::DISCONNECT => break,
-                                EventType::CONNECT => {
-                                    godot_error!(
-                                        "Somehow connected to a peer: {}",
-                                        new_peer.unwrap().get_remote_address()
-                                    );
-                                }
-                                EventType::RECEIVE => {}
-                                _ => unreachable!(),
-                            }
-                        }
-                        server.destroy();
-                        return;
-                    }
+        //                     match event_type {
+        //                         EventType::ERROR => {
+        //                             godot_error!("Server faced an error disconnecting");
+        //                             break;
+        //                         }
+        //                         EventType::DISCONNECT => break,
+        //                         EventType::CONNECT => {
+        //                             godot_error!(
+        //                                 "Somehow connected to a peer: {}",
+        //                                 new_peer.unwrap().get_remote_address()
+        //                             );
+        //                         }
+        //                         EventType::RECEIVE => {}
+        //                         _ => unreachable!(),
+        //                     }
+        //                 }
+        //                 server.destroy();
+        //                 return;
+        //             }
 
-                    let receive_elapsed = last_receive_time.elapsed();
-                    if !pinged && receive_elapsed.as_secs() >= 3 {
-                        pinged = true;
-                        peer.send(
-                            Channels::Important.into_godot() as i32 - 1,
-                            std::iter::once(ImportantMessage::Ping.into_godot() - 1).collect(),
-                            ENetPacketPeer::FLAG_RELIABLE,
-                        );
-                    }
+        //             let receive_elapsed = last_receive_time.elapsed();
+        //             if !pinged && receive_elapsed.as_secs() >= 3 {
+        //                 pinged = true;
+        //                 peer.send(
+        //                     Channels::Important.into_godot() as i32 - 1,
+        //                     std::iter::once(ImportantMessage::Ping.into_godot() - 1).collect(),
+        //                     ENetPacketPeer::FLAG_RELIABLE,
+        //                 );
+        //             }
 
-                    let controls_data: Box<[u8]> = shared
-                        .controls_data
-                        .iter()
-                        .map(|n| n.load(Ordering::Relaxed))
-                        .collect();
-                    let event_type: EventType = result.get(0).to();
-                    let new_peer: Option<Gd<ENetPacketPeer>> = result.get(1).to();
-                    // let _data: i32 = result.get(2).to();
-                    let channel: u8 = result.get(3).to();
-                    let channel = Channels::from_godot(channel + 1);
+        //             let controls_data: Box<[u8]> = shared
+        //                 .controls_data
+        //                 .iter()
+        //                 .map(|n| n.load(Ordering::Relaxed))
+        //                 .collect();
+        //             let event_type: EventType = result.get(0).to();
+        //             let new_peer: Option<Gd<ENetPacketPeer>> = result.get(1).to();
+        //             // let _data: i32 = result.get(2).to();
+        //             let channel: u8 = result.get(3).to();
+        //             let channel = Channels::from_godot(channel + 1);
 
-                    match event_type {
-                        EventType::ERROR => {
-                            server.destroy();
-                            godot_error!("Server faced an error");
-                            shared.connected.store(false, Ordering::Relaxed);
-                            shared.base_mut_queue.push(Box::new(|mut base| {
-                                base.emit_signal("disconnected".into(), &[]);
-                            }));
-                            continue 'main;
-                        }
-                        EventType::DISCONNECT => break,
-                        EventType::CONNECT => {
-                            godot_error!(
-                                "Somehow connected to a peer: {}",
-                                new_peer.unwrap().get_remote_address()
-                            );
-                        }
-                        EventType::RECEIVE => {
-                            pinged = false;
-                            last_receive_time += receive_elapsed;
-                            shared.base_mut_queue.push(Box::new(|mut base| {
-                                base.emit_signal("something_received".into(), &[]);
-                            }));
-                            let data = peer.get_packet().to_vec();
+        //             match event_type {
+        //                 EventType::ERROR => {
+        //                     server.destroy();
+        //                     godot_error!("Server faced an error");
+        //                     shared.connected.store(false, Ordering::Relaxed);
+        //                     shared.base_mut_queue.push(Box::new(|mut base| {
+        //                         base.emit_signal("disconnected".into(), &[]);
+        //                     }));
+        //                     continue 'main;
+        //                 }
+        //                 EventType::DISCONNECT => break,
+        //                 EventType::CONNECT => {
+        //                     godot_error!(
+        //                         "Somehow connected to a peer: {}",
+        //                         new_peer.unwrap().get_remote_address()
+        //                     );
+        //                 }
+        //                 EventType::RECEIVE => {
+        //                     pinged = false;
+        //                     last_receive_time += receive_elapsed;
+        //                     shared.base_mut_queue.push(Box::new(|mut base| {
+        //                         base.emit_signal("something_received".into(), &[]);
+        //                     }));
+        //                     let data = peer.get_packet().to_vec();
 
-                            match channel {
-                                Channels::Important => {}
-                                Channels::Camera => {
-                                    // let data = data.to_vec();
-                                    std::fs::write("camera.sdp", data)
-                                        .expect("camera.sdp should be writable");
+        //                     match channel {
+        //                         Channels::Important => {}
+        //                         Channels::Camera => {
+        //                             // let data = data.to_vec();
+        //                             std::fs::write("camera.sdp", data)
+        //                                 .expect("camera.sdp should be writable");
 
-                                    let mut child = std::process::Command::new("ffplay")
-                                        .args([
-                                            "-protocol_whitelist",
-                                            "file,rtp,udp",
-                                            "-i",
-                                            "camera.sdp",
-                                            "-flags",
-                                            "low_delay",
-                                            "-avioflags",
-                                            "direct",
-                                            "-probesize",
-                                            "32",
-                                            "-analyzeduration",
-                                            "0",
-                                            "-sync",
-                                            "ext",
-                                            "-framedrop",
-                                        ])
-                                        .stderr(Stdio::piped())
-                                        .spawn()
-                                        .expect("Failed to init ffplay process");
+        //                             let mut child = std::process::Command::new("ffplay")
+        //                                 .args([
+        //                                     "-protocol_whitelist",
+        //                                     "file,rtp,udp",
+        //                                     "-i",
+        //                                     "camera.sdp",
+        //                                     "-flags",
+        //                                     "low_delay",
+        //                                     "-avioflags",
+        //                                     "direct",
+        //                                     "-probesize",
+        //                                     "32",
+        //                                     "-analyzeduration",
+        //                                     "0",
+        //                                     "-sync",
+        //                                     "ext",
+        //                                     "-framedrop",
+        //                                 ])
+        //                                 .stderr(Stdio::piped())
+        //                                 .spawn()
+        //                                 .expect("Failed to init ffplay process");
 
-                                    let mut stderr = child.stderr.take().unwrap();
-                                    ffplay = Some(child);
+        //                             let mut stderr = child.stderr.take().unwrap();
+        //                             ffplay = Some(child);
 
-                                    std::thread::spawn(move || {
-                                        let _ = std::io::copy(
-                                            &mut stderr,
-                                            &mut std::fs::OpenOptions::new()
-                                                .append(true)
-                                                .create(true)
-                                                .open("camera-ffmpeg.log")
-                                                .expect("camera-ffmpeg.log should be writable"),
-                                        );
-                                    });
-                                }
-                                Channels::Odometry => {
-                                    let x =
-                                        f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                                    let y =
-                                        f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-                                    // if x == 0.0 || y == 0.0 {
-                                    //     godot_error!("Invalid odometry origin");
-                                    // }
-                                    let origin = Vector2::new(x, y);
-                                    shared.base_mut_queue.push(Box::new(move |mut base| {
-                                        base.emit_signal(
-                                            "odometry_received".into(),
-                                            &[origin.to_variant()],
-                                        );
-                                    }));
-                                }
-                                Channels::Controls => {
-                                    if data.len() != shared.controls_data.len() {
-                                        godot_error!("Invalid controls packet");
-                                        continue;
-                                    }
-                                    shared.echo_controls.store(
-                                        data.as_slice() != controls_data.deref(),
-                                        Ordering::Relaxed,
-                                    );
-                                }
-                                Channels::Logs => {
-                                    let Ok(log) = String::from_utf8(data) else {
-                                        godot_error!("Failed to parse incoming log");
-                                        continue;
-                                    };
-                                    godot_print!("{log}");
-                                }
-                                Channels::Max => {}
-                            }
-                        }
-                        _ => {}
-                    }
+        //                             std::thread::spawn(move || {
+        //                                 let _ = std::io::copy(
+        //                                     &mut stderr,
+        //                                     &mut std::fs::OpenOptions::new()
+        //                                         .append(true)
+        //                                         .create(true)
+        //                                         .open("camera-ffmpeg.log")
+        //                                         .expect("camera-ffmpeg.log should be writable"),
+        //                                 );
+        //                             });
+        //                         }
+        //                         Channels::Odometry => {
+        //                             let x =
+        //                                 f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        //                             let y =
+        //                                 f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        //                             // if x == 0.0 || y == 0.0 {
+        //                             //     godot_error!("Invalid odometry origin");
+        //                             // }
+        //                             let origin = Vector2::new(x, y);
+        //                             shared.base_mut_queue.push(Box::new(move |mut base| {
+        //                                 base.emit_signal(
+        //                                     "odometry_received".into(),
+        //                                     &[origin.to_variant()],
+        //                                 );
+        //                             }));
+        //                         }
+        //                         Channels::Controls => {
+        //                             if data.len() != shared.controls_data.len() {
+        //                                 godot_error!("Invalid controls packet");
+        //                                 continue;
+        //                             }
+        //                             shared.echo_controls.store(
+        //                                 data.as_slice() != controls_data.deref(),
+        //                                 Ordering::Relaxed,
+        //                             );
+        //                         }
+        //                         Channels::Logs => {
+        //                             let Ok(log) = String::from_utf8(data) else {
+        //                                 godot_error!("Failed to parse incoming log");
+        //                                 continue;
+        //                             };
+        //                             godot_print!("{log}");
+        //                         }
+        //                         Channels::Max => {}
+        //                     }
+        //                 }
+        //                 _ => {}
+        //             }
 
-                    if shared.echo_controls.load(Ordering::Relaxed) {
-                        peer.send(
-                            Channels::Controls.into_godot() as i32 - 1,
-                            controls_data.into_iter().copied().collect(),
-                            ENetPacketPeer::FLAG_UNRELIABLE_FRAGMENT
-                                | ENetPacketPeer::FLAG_UNSEQUENCED,
-                        );
-                    }
+        //             if shared.echo_controls.load(Ordering::Relaxed) {
+        //                 peer.send(
+        //                     Channels::Controls.into_godot() as i32 - 1,
+        //                     controls_data.into_iter().copied().collect(),
+        //                     ENetPacketPeer::FLAG_UNRELIABLE_FRAGMENT
+        //                         | ENetPacketPeer::FLAG_UNSEQUENCED,
+        //                 );
+        //             }
 
-                    while let Some(packet) = shared.packet_queue.pop() {
-                        peer.send(
-                            packet.channel.into_godot() as i32 - 1,
-                            packet.data.into_iter().collect(),
-                            packet.flags,
-                        );
-                    }
-                }
+        //             while let Some(packet) = shared.packet_queue.pop() {
+        //                 peer.send(
+        //                     packet.channel.into_godot() as i32 - 1,
+        //                     packet.data.into_iter().collect(),
+        //                     packet.flags,
+        //                 );
+        //             }
+        //         }
 
-                if let Some(mut ffplay) = ffplay {
-                    let _ = ffplay.kill();
-                }
-                shared.connected.store(false, Ordering::Relaxed);
-                shared.base_mut_queue.push(Box::new(|mut base| {
-                    base.emit_signal("disconnected".into(), &[]);
-                }));
-            }
-        };
-        self.thr = Some(std::thread::spawn(task));
+        //         if let Some(mut ffplay) = ffplay {
+        //             let _ = ffplay.kill();
+        //         }
+        //         shared.connected.store(false, Ordering::Relaxed);
+        //         shared.base_mut_queue.push(Box::new(|mut base| {
+        //             base.emit_signal("disconnected".into(), &[]);
+        //         }));
+        //     }
+        // };
+        // self.thr = Some(std::thread::spawn(task));
     }
 
     fn exit_tree(&mut self) {
@@ -439,8 +449,6 @@ impl INode for LunabotConn {
 impl LunabotConn {
     #[constant]
     const RECV_FROM: u16 = 43721;
-    #[constant]
-    const USE_ARCHIMEDES: bool = false;
     #[constant]
     const IMAGE_WIDTH: usize = 1280;
     #[constant]
@@ -477,38 +485,6 @@ impl LunabotConn {
     }
 
     #[func]
-    fn raw_send(&self, channel: Channels, data: PackedByteArray, flags: i32) {
-        self.shared.as_ref().unwrap().packet_queue.push(Packet {
-            channel,
-            data: data.to_vec(),
-            flags,
-        });
-    }
-
-    #[func]
-    fn raw_send_reliable(&self, channel: Channels, data: PackedByteArray) {
-        self.raw_send(channel, data, ENetPacketPeer::FLAG_RELIABLE);
-    }
-
-    #[func]
-    fn raw_send_unreliable(&self, channel: Channels, data: PackedByteArray) {
-        self.raw_send(
-            channel,
-            data,
-            ENetPacketPeer::FLAG_UNRELIABLE_FRAGMENT | ENetPacketPeer::FLAG_UNSEQUENCED,
-        );
-    }
-
-    #[func]
-    fn send_important_msg(&self, msg: ImportantMessage) {
-        self.shared.as_ref().unwrap().packet_queue.push(Packet {
-            channel: Channels::Important,
-            data: vec![msg.into_godot()],
-            flags: ENetPacketPeer::FLAG_RELIABLE,
-        });
-    }
-
-    #[func]
     fn send_steering(&self, mut drive: f32, mut steering: f32) {
         if drive > 1.0 {
             drive = 1.0;
@@ -527,42 +503,29 @@ impl LunabotConn {
             godot_warn!("Steering lesser than -1!")
         }
 
-        let drive = (drive * 127.0).round() as i8;
-        let steering = (steering * 127.0).round() as i8;
-
         let shared = self.shared.as_ref().unwrap();
-        shared.controls_data[0].store(drive.to_le_bytes()[0], Ordering::Relaxed);
-        shared.controls_data[1].store(steering.to_le_bytes()[0], Ordering::Relaxed);
+        let mut controls_packet = shared.controls_data.load();
+        controls_packet.drive = (drive * 127.0).round() as i8;
+        controls_packet.steering = (steering * 127.0).round() as i8;
+        shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }
 
     #[func]
-    fn send_arm_controls(&self, mut arm_vel: f32, mut drum_vel: f32) {
+    fn send_arm_controls(&self, mut arm_vel: f32) {
         if arm_vel > 1.0 {
             arm_vel = 1.0;
             godot_warn!("arm_vel greater than 1!")
         }
         if arm_vel < -1.0 {
             arm_vel = -1.0;
-            godot_warn!("arm_vel lesser than -1!");
+            godot_warn!("arm_vel lesser than -1!")
         }
-
-        let arm_vel = (arm_vel * 127.0).round() as i8;
 
         let shared = self.shared.as_ref().unwrap();
-        shared.controls_data[2].store(arm_vel.to_le_bytes()[0], Ordering::Relaxed);
-        if Self::USE_ARCHIMEDES {
-            if drum_vel > 1.0 {
-                drum_vel = 1.0;
-                godot_warn!("drum_vel greater than 1!")
-            }
-            if drum_vel < -1.0 {
-                drum_vel = -1.0;
-                godot_warn!("drum_vel lesser than -1!")
-            }
-            let drum_vel = (drum_vel * 127.0).round() as i8;
-            shared.controls_data[3].store(drum_vel.to_le_bytes()[0], Ordering::Relaxed);
-            shared.echo_controls.store(true, Ordering::Relaxed);
-        }
+        let mut controls_packet = shared.controls_data.load();
+        controls_packet.arm_vel = (arm_vel * 127.0).round() as i8;
+        shared.controls_data.store(controls_packet);
+        shared.echo_controls.store(true, Ordering::Relaxed);
     }
 }

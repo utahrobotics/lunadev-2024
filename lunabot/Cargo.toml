@@ -24,7 +24,6 @@ camera-info = { path = "../camera-info" }
 spin_sleep = { workspace = true }
 image = { workspace = true }
 global-msgs = { path = "../global-msgs" }
-ordered-float = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 realsense = { path = "../realsense" }
