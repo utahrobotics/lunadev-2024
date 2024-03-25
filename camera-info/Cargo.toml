@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 serde = { workspace = true }
 # nalgebra = { workspace = true }
-opencv = { version = "0.88", default-features = false, features = ["calib3d", "imgproc", "clang-runtime"] }
+opencv = { version = "0.89", default-features = false, features = ["calib3d", "imgproc", "clang-runtime"] }
 serde_json = "1"
 unros = { path = "../unros" }
 image = { workspace = true }
