@@ -23,14 +23,10 @@
 )]
 
 use std::{
-    future::Future,
-    marker::PhantomData,
-    sync::{
+    backtrace::Backtrace, future::Future, marker::PhantomData, sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
-    },
-    thread::{panicking, JoinHandle},
-    time::Instant,
+    }, thread::{panicking, JoinHandle}, time::{Duration, Instant}
 };
 
 pub mod logging;
@@ -456,6 +452,7 @@ macro_rules! default_run_options {
 }
 
 static THREADS: SegQueue<JoinHandle<()>> = SegQueue::new();
+static THREAD_DROP_CHECKS: SegQueue<(ObservingDropCheck, Backtrace)> = SegQueue::new();
 
 /// Spawns a thread that is guaranteed to run the given closure to completion.
 ///
@@ -469,7 +466,13 @@ where
     F: FnOnce(),
     F: Send + 'static,
 {
-    THREADS.push(std::thread::spawn(f));
+    let drop_check = DropCheck::default();
+    let drop_obs = drop_check.get_observing();
+    THREAD_DROP_CHECKS.push((drop_obs, Backtrace::force_capture()));
+    THREADS.push(std::thread::spawn(move || {
+        let _drop_check = drop_check;
+        f();
+    }));
 }
 
 pub fn asyncify_run<F, T>(f: F) -> impl Future<Output = anyhow::Result<T>>
@@ -479,9 +482,9 @@ where
     T: Send + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    THREADS.push(std::thread::spawn(move || {
+    spawn_persistent_thread(move || {
         let _ = tx.send(f());
-    }));
+    });
     async { rx.await.map_err(anyhow::Error::from).flatten() }
 }
 
@@ -644,6 +647,14 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
 
     info!("Exiting...");
 
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(5));
+        while let Some((drop_obs, backtrace)) = THREAD_DROP_CHECKS.pop() {
+            if !drop_obs.has_dropped() {
+                warn!("The following persistent thread has not exited yet:\n{backtrace}");
+            }
+        }
+    });
     let dropper = std::thread::spawn(move || {
         drop(runtime);
         while let Some(x) = THREADS.pop() {
