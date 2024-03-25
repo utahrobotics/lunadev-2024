@@ -96,9 +96,10 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
     }
 
     pub fn map_input<NewI: Send + Clone + 'static>(
-        self,
+        mut self,
         input_map: impl FnMut(NewI) -> Bytes + Send + 'static,
     ) -> SerialConnection<NewI, O> {
+        self.intrinsics.ignore_drop();
         SerialConnection {
             path: self.path,
             baud_rate: self.baud_rate,
@@ -112,9 +113,10 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
     }
 
     pub fn map_output<NewO: Send + Clone + 'static>(
-        self,
+        mut self,
         output_map: impl FnMut(Bytes) -> Option<NewO> + Send + 'static,
     ) -> SerialConnection<I, NewO> {
+        self.intrinsics.ignore_drop();
         SerialConnection {
             path: self.path,
             baud_rate: self.baud_rate,

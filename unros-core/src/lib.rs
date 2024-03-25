@@ -28,7 +28,7 @@ use std::{
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        Arc, OnceLock, Weak,
     },
     thread::{panicking, JoinHandle},
     time::{Duration, Instant},
@@ -457,7 +457,7 @@ macro_rules! default_run_options {
 }
 
 static THREADS: SegQueue<JoinHandle<()>> = SegQueue::new();
-static THREAD_DROP_CHECKS: SegQueue<(ObservingDropCheck, Backtrace)> = SegQueue::new();
+static THREAD_DROP_CHECKS: SegQueue<Weak<Backtrace>> = SegQueue::new();
 
 /// Spawns a thread that is guaranteed to run the given closure to completion.
 ///
@@ -471,11 +471,16 @@ where
     F: FnOnce(),
     F: Send + 'static,
 {
-    let drop_check = DropCheck::default();
-    let drop_obs = drop_check.get_observing();
-    THREAD_DROP_CHECKS.push((drop_obs, Backtrace::force_capture()));
+    let backtrace = Arc::new(Backtrace::force_capture());
+    for _ in 0..THREAD_DROP_CHECKS.len() {
+        let current = THREAD_DROP_CHECKS.pop().unwrap();
+        if current.strong_count() > 0 {
+            THREAD_DROP_CHECKS.push(current);
+        }
+    }
+    THREAD_DROP_CHECKS.push(Arc::downgrade(&backtrace));
     THREADS.push(std::thread::spawn(move || {
-        let _drop_check = drop_check;
+        let _backtrace = backtrace;
         f();
     }));
 }
@@ -654,8 +659,8 @@ pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Sen
 
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_secs(5));
-        while let Some((drop_obs, backtrace)) = THREAD_DROP_CHECKS.pop() {
-            if !drop_obs.has_dropped() {
+        while let Some(backtrace) = THREAD_DROP_CHECKS.pop() {
+            if let Some(backtrace) = backtrace.upgrade() {
                 warn!("The following persistent thread has not exited yet:\n{backtrace}");
             }
         }
