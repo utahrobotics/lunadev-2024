@@ -202,7 +202,7 @@ struct FocalLengthEstimate {
     id: usize,
 }
 
-/// https://raw.githubusercontent.com/opencv/opencv/4.x/doc/pattern.png
+/// <https://raw.githubusercontent.com/opencv/opencv/4.x/doc/pattern.png>
 pub async fn interactive_examine(
     app: &mut Application,
     accept_sub: impl FnOnce(Subscription<Arc<DynamicImage>>),

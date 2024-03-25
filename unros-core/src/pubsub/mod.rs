@@ -247,6 +247,10 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         }
     }
 
+    pub fn get_size(&self) -> usize {
+        self.queue.capacity()
+    }
+
     /// Receive some message (waiting if none are available), or `None` if all `Publishers` have been dropped.
     pub async fn recv_or_closed(&mut self) -> Option<T> {
         loop {

@@ -23,10 +23,15 @@
 )]
 
 use std::{
-    backtrace::Backtrace, future::Future, marker::PhantomData, sync::{
+    backtrace::Backtrace,
+    future::Future,
+    marker::PhantomData,
+    sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
-    }, thread::{panicking, JoinHandle}, time::{Duration, Instant}
+    },
+    thread::{panicking, JoinHandle},
+    time::{Duration, Instant},
 };
 
 pub mod logging;

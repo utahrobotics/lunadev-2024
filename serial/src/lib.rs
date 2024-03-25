@@ -17,11 +17,15 @@ use unros::{
 };
 
 /// A single duplex connection to a serial port
-pub struct SerialConnection {
+pub struct SerialConnection<I: Send + Clone + 'static = Bytes, O: Send + Clone + 'static = Bytes> {
     path: Arc<str>,
     baud_rate: u32,
-    msg_received: Publisher<Bytes>,
-    messages_to_send: Subscriber<Bytes>,
+
+    output_map: Box<dyn FnMut(Bytes) -> Option<O> + Send>,
+    input_map: Box<dyn FnMut(I) -> Bytes + Send>,
+
+    serial_output: Publisher<O>,
+    serial_input: Subscriber<I>,
     tolerate_error: bool,
     intrinsics: NodeIntrinsics<Self>,
 }
@@ -36,13 +40,17 @@ impl SerialConnection {
         Self {
             path: path.into_boxed_str().into(),
             baud_rate,
-            msg_received: Publisher::default(),
-            messages_to_send: Subscriber::new(8),
+            output_map: Box::new(|x| Some(x)),
+            input_map: Box::new(|x| x),
+            serial_output: Publisher::default(),
+            serial_input: Subscriber::new(8),
             tolerate_error,
             intrinsics: Default::default(),
         }
     }
+}
 
+impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O> {
     async fn connect(&mut self, context: &RuntimeContext) -> anyhow::Result<Option<SerialStream>> {
         setup_logging!(context);
 
@@ -78,18 +86,50 @@ impl SerialConnection {
     }
 
     /// Gets a reference to the `Signal` that represents received `Bytes`.
-    pub fn accept_msg_received_sub(&mut self, sub: Subscription<Bytes>) {
-        self.msg_received.accept_subscription(sub);
+    pub fn accept_msg_received_sub(&mut self, sub: Subscription<O>) {
+        self.serial_output.accept_subscription(sub);
     }
 
     /// Provide a subscription whose messages will be written to the serial port.
-    pub fn create_message_to_send_sub(&self) -> Subscription<Bytes> {
-        self.messages_to_send.create_subscription()
+    pub fn create_message_to_send_sub(&self) -> Subscription<I> {
+        self.serial_input.create_subscription()
+    }
+
+    pub fn map_input<NewI: Send + Clone + 'static>(
+        self,
+        input_map: impl FnMut(NewI) -> Bytes + Send + 'static,
+    ) -> SerialConnection<NewI, O> {
+        SerialConnection {
+            path: self.path,
+            baud_rate: self.baud_rate,
+            output_map: self.output_map,
+            input_map: Box::new(input_map),
+            serial_output: self.serial_output,
+            serial_input: Subscriber::new(self.serial_input.get_size()),
+            tolerate_error: self.tolerate_error,
+            intrinsics: NodeIntrinsics::default(),
+        }
+    }
+
+    pub fn map_output<NewO: Send + Clone + 'static>(
+        self,
+        output_map: impl FnMut(Bytes) -> Option<NewO> + Send + 'static,
+    ) -> SerialConnection<I, NewO> {
+        SerialConnection {
+            path: self.path,
+            baud_rate: self.baud_rate,
+            output_map: Box::new(output_map),
+            input_map: self.input_map,
+            serial_output: Publisher::default(),
+            serial_input: self.serial_input,
+            tolerate_error: self.tolerate_error,
+            intrinsics: NodeIntrinsics::default(),
+        }
     }
 }
 
 #[async_trait]
-impl Node for SerialConnection {
+impl<I: Send + Clone + 'static, O: Send + Clone + 'static> Node for SerialConnection<I, O> {
     const DEFAULT_NAME: &'static str = "serial_connection";
 
     fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
@@ -108,7 +148,8 @@ impl Node for SerialConnection {
             let mut buf = [0; 1024];
             let e = loop {
                 tokio::select! {
-                    msg = self.messages_to_send.recv() => {
+                    msg = self.serial_input.recv() => {
+                        let msg = (self.input_map)(msg);
                         let Err(e) = stream.write_all(&msg).await else { continue; };
                         break e;
                     }
@@ -118,7 +159,9 @@ impl Node for SerialConnection {
                             Err(e) => break e,
                         };
                         let bytes = buf.split_at(n).0.to_vec();
-                        self.msg_received.set(bytes.into());
+                        if let Some(msg) = (self.output_map)(bytes.into()) {
+                            self.serial_output.set(msg);
+                        }
                     }
                 }
             };
