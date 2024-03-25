@@ -471,13 +471,16 @@ where
     F: FnOnce(),
     F: Send + 'static,
 {
-    let backtrace = Arc::new(Backtrace::force_capture());
-    for _ in 0..THREAD_DROP_CHECKS.len() {
-        let current = THREAD_DROP_CHECKS.pop().unwrap();
-        if current.strong_count() > 0 {
-            THREAD_DROP_CHECKS.push(current);
+    let count = THREAD_DROP_CHECKS.len();
+    if count >= 16 {
+        for _ in 0..count {
+            let current = THREAD_DROP_CHECKS.pop().unwrap();
+            if current.strong_count() > 0 {
+                THREAD_DROP_CHECKS.push(current);
+            }
         }
     }
+    let backtrace = Arc::new(Backtrace::force_capture());
     THREAD_DROP_CHECKS.push(Arc::downgrade(&backtrace));
     THREADS.push(std::thread::spawn(move || {
         let _backtrace = backtrace;
