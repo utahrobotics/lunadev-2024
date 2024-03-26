@@ -15,6 +15,7 @@ members = [
     "lunasimbot", "unros-macros", "unros", "lunabase-lib", "camera-info", "networking",
 ]
 resolver = "2"
+exclude = ["publishing/", "logs/", "lunabase/", "camera-db/"]
 
 [workspace.dependencies]
 fxhash = "0.2"

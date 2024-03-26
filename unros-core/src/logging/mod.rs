@@ -1,7 +1,5 @@
 use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
-    time::Instant,
+    panic::catch_unwind, path::{Path, PathBuf}, sync::{Arc, Mutex, OnceLock}, time::Instant
 };
 
 use anyhow::Context;
@@ -204,7 +202,9 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
             .context("Logger should have initialized correctly")?;
 
         if run_options.enable_console_subscriber {
-            console_subscriber::init();
+            if let Err(e) = catch_unwind(console_subscriber::init) {
+                log::error!("Failed to initialize console subscriber: {e:?}");
+            }
         }
         Ok(log_folder_name)
     })?;
