@@ -6,7 +6,7 @@ use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
     anyhow, async_trait, asyncify_run,
-    pubsub::{Publisher, Subscriber, Subscription},
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
     setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
 
@@ -42,11 +42,11 @@ impl DifferentialDriver<fn(Float) -> Float> {
         }
     }
 
-    pub fn accept_steering_sub(&mut self, sub: Subscription<Steering>) {
-        self.steering_signal.accept_subscription(sub);
+    pub fn steering_pub(&self) -> PublisherRef<Steering> {
+        self.steering_signal.get_ref()
     }
 
-    pub fn create_path_sub(&self) -> Subscription<Arc<[Point2<Float>]>> {
+    pub fn create_path_sub(&self) -> DirectSubscription<Arc<[Point2<Float>]>> {
         self.path_sub.create_subscription()
     }
 }

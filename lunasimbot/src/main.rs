@@ -12,7 +12,7 @@ use rand_distr::{Distribution, Normal};
 use rig::Robot;
 use unros::{
     anyhow, log,
-    pubsub::{Publisher, Subscriber},
+    pubsub::{subs::Subscription, Publisher, Subscriber},
     rayon,
     rng::quick_rng,
     tokio::{
@@ -63,13 +63,17 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         }
     });
 
-    let mut pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.1);
+    let pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.1);
     let mut path_sub = Subscriber::new(1);
-    pathfinder.accept_path_sub(path_sub.create_subscription());
+    pathfinder
+        .path_pub()
+        .accept_subscription(path_sub.create_subscription());
 
-    let mut driver = DifferentialDriver::new(robot_base.get_ref());
+    let driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
-    pathfinder.accept_path_sub(driver.create_path_sub());
+    pathfinder
+        .path_pub()
+        .accept_subscription(driver.create_path_sub());
     let nav_task = pathfinder.get_navigation_handle();
 
     // let robot_base_ref = robot_base.get_ref();
@@ -88,7 +92,9 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     imu_pub.accept_subscription(localizer.create_imu_sub().set_name("imu"));
 
     let mut steering_sub = Subscriber::new(1);
-    driver.accept_steering_sub(steering_sub.create_subscription());
+    driver
+        .steering_pub()
+        .accept_subscription(steering_sub.create_subscription());
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
     app.add_task(

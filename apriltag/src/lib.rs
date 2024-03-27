@@ -16,7 +16,7 @@ use nalgebra::{Isometry3, Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros::{
     anyhow, async_trait,
-    pubsub::{Publisher, Subscriber, Subscription},
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
     rayon, setup_logging,
     tokio::{self, sync::mpsc::channel},
     Node, NodeIntrinsics, RuntimeContext,
@@ -128,11 +128,11 @@ impl AprilTagDetector {
         );
     }
 
-    pub fn accept_tag_detected_sub(&mut self, sub: Subscription<PoseObservation>) {
-        self.tag_detected.accept_subscription(sub);
+    pub fn tag_detected_pub(&self) -> PublisherRef<PoseObservation> {
+        self.tag_detected.get_ref()
     }
 
-    pub fn create_image_subscription(&self) -> Subscription<Arc<DynamicImage>> {
+    pub fn create_image_subscription(&self) -> DirectSubscription<Arc<DynamicImage>> {
         self.image_sub.create_subscription()
     }
 }

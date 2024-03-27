@@ -28,7 +28,7 @@ use realsense_rust::{
 use rig::RobotElementRef;
 use unros::{
     anyhow, async_trait, asyncify_run,
-    pubsub::{Publisher, Subscription},
+    pubsub::{Publisher, PublisherRef},
     rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
@@ -88,12 +88,12 @@ impl RealSenseCamera {
         })
     }
 
-    pub fn accept_image_received_sub(&mut self, sub: Subscription<Arc<DynamicImage>>) {
-        self.image_received.accept_subscription(sub);
+    pub fn image_received_pub(&self) -> PublisherRef<Arc<DynamicImage>> {
+        self.image_received.get_ref()
     }
 
-    pub fn accept_cloud_received_sub(&mut self, sub: Subscription<PointCloud>) {
-        self.point_cloud_received.accept_subscription(sub);
+    pub fn cloud_received_pub(&self) -> PublisherRef<PointCloud> {
+        self.point_cloud_received.get_ref()
     }
 
     pub fn get_path(&self) -> &Path {
@@ -116,8 +116,8 @@ impl RealSenseCamera {
 
     /// IMU frames are in global space, according to the rigid body
     /// provided to the RealSense camera.
-    pub fn accept_imu_frame_received_sub(&mut self, sub: Subscription<IMUFrame>) {
-        self.imu_frame_received.accept_subscription(sub);
+    pub fn imu_frame_received_pub(&self) -> PublisherRef<IMUFrame> {
+        self.imu_frame_received.get_ref()
     }
 
     /// Sets the robot element that represents this camera.

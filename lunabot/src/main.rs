@@ -21,7 +21,13 @@ use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
 use telemetry::Telemetry;
-use unros::{anyhow, log::info, logging::dump::DataDump, pubsub::Subscriber, Application, Node};
+use unros::{
+    anyhow,
+    log::info,
+    logging::dump::DataDump,
+    pubsub::{subs::Subscription, Subscriber},
+    Application, Node,
+};
 
 mod telemetry;
 
@@ -44,23 +50,26 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     info!("Discovered {camera_count} cameras");
 
     #[cfg(unix)]
-    let mut realsense_camera = {
-        use costmap::Points;
-        let mut camera = discover_all_realsense()?
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
+    let realsense_camera =
+        {
+            use costmap::Points;
+            let mut camera = discover_all_realsense()?
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
 
-        camera.set_robot_element_ref(camera_element.get_ref());
-        let camera_element_ref = camera_element.get_ref();
-        camera.accept_cloud_received_sub(costmap.create_points_sub().map(move |x: PointCloud| {
-            Points {
-                points: x.iter().map(|x| x.0),
-                robot_element: camera_element_ref.clone(),
-            }
-        }));
+            camera.set_robot_element_ref(camera_element.get_ref());
+            let camera_element_ref = camera_element.get_ref();
+            camera
+                .cloud_received_pub()
+                .accept_subscription(costmap.create_points_sub().map(move |x: PointCloud| {
+                    Points {
+                        points: x.iter().map(|x| x.0),
+                        robot_element: camera_element_ref.clone(),
+                    }
+                }));
 
-        camera
-    };
+            camera
+        };
 
     let costmap = Arc::new(costmap);
 
@@ -72,7 +81,9 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     )
     .await?;
     let steering_sub = Subscriber::new(8);
-    telemetry.accept_steering_sub(steering_sub.create_subscription());
+    telemetry
+        .steering_pub()
+        .accept_subscription(steering_sub.create_subscription());
     steering_sub
         .into_logger(|x| format!("{x:?}"), "steering.logs")
         .await?;
@@ -80,7 +91,9 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let mut teleop_camera = Camera::new(2)?;
     teleop_camera.res_x = 1280;
     teleop_camera.res_y = 720;
-    teleop_camera.accept_image_received_sub(telemetry.create_image_subscription());
+    teleop_camera
+        .image_received_pub()
+        .accept_subscription(telemetry.create_image_subscription());
 
     // let costmap_ref = costmap.clone();
 
@@ -125,44 +138,57 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let localizer = Localizer::new(robot_base, 0.4);
 
-    apriltag.accept_tag_detected_sub(localizer.create_position_sub().map(
-        |pose: PoseObservation| PositionFrame {
-            position: nalgebra::convert(Point3::from(pose.pose.translation.vector)),
-            variance: 0.1,
-            robot_element: pose.robot_element,
-        },
-    ));
+    apriltag
+        .tag_detected_pub()
+        .accept_subscription(
+            localizer
+                .create_position_sub()
+                .map(|pose: PoseObservation| PositionFrame {
+                    position: nalgebra::convert(Point3::from(pose.pose.translation.vector)),
+                    variance: 0.1,
+                    robot_element: pose.robot_element,
+                }),
+        );
 
-    apriltag.accept_tag_detected_sub(localizer.create_orientation_sub().map(
-        |pose: PoseObservation| OrientationFrame {
-            orientation: nalgebra::convert(pose.pose.rotation),
-            variance: 0.1,
-            robot_element: pose.robot_element,
-        },
-    ));
+    apriltag
+        .tag_detected_pub()
+        .accept_subscription(
+            localizer
+                .create_orientation_sub()
+                .map(|pose: PoseObservation| OrientationFrame {
+                    orientation: nalgebra::convert(pose.pose.rotation),
+                    variance: 0.1,
+                    robot_element: pose.robot_element,
+                }),
+        );
 
-    let mut imu01 = open_imu(
+    let imu01 = open_imu(
         "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00",
         imu01,
     )
     .await;
-    imu01.accept_msg_received_sub(localizer.create_imu_sub().set_name("imu01"));
+    imu01
+        .msg_received_pub()
+        .accept_subscription(localizer.create_imu_sub().set_name("imu01"));
 
     #[cfg(unix)]
     {
-        realsense_camera.accept_image_received_sub(
+        realsense_camera.image_received_pub().accept_subscription(
             apriltag
                 .create_image_subscription()
                 .set_name("RealSense Apriltag Image"),
         );
         realsense_camera
-            .accept_imu_frame_received_sub(localizer.create_imu_sub().set_name("RealSense IMU"));
+            .imu_frame_received_pub()
+            .accept_subscription(localizer.create_imu_sub().set_name("RealSense IMU"));
     }
 
-    let mut navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.clone(), 0.5, 0.15);
+    let navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.clone(), 0.5, 0.15);
     let driver = DifferentialDriver::new(robot_base_ref.clone());
 
-    navigator.accept_path_sub(driver.create_path_sub());
+    navigator
+        .path_pub()
+        .accept_subscription(driver.create_path_sub());
 
     let mut data_dump = DataDump::new_file("motion.csv").await?;
     writeln!(
@@ -172,7 +198,9 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     .unwrap();
     let mut imu_sub = Subscriber::<IMUFrame>::new(32);
     #[cfg(unix)]
-    realsense_camera.accept_imu_frame_received_sub(imu_sub.create_subscription());
+    realsense_camera
+        .imu_frame_received_pub()
+        .accept_subscription(imu_sub.create_subscription());
     app.add_task(|_| async move {
     let start = Instant::now();
     let mut elapsed = Duration::ZERO;

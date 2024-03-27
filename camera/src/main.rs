@@ -13,9 +13,11 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let fps = 20;
     discover_all_cameras()
         .context("Failed to discover cameras")?
-        .for_each(|mut camera| {
+        .for_each(|camera| {
             let mut sub = Subscriber::new(8);
-            camera.accept_image_received_sub(sub.create_subscription());
+            camera
+                .image_received_pub()
+                .accept_subscription(sub.create_subscription());
             let frame_count = AtomicUsize::new(0);
             let idx = camera.camera_index;
             tokio::spawn(async move {

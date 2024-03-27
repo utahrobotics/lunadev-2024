@@ -10,7 +10,7 @@ use nalgebra::{Point2, Point3};
 use rig::RobotBaseRef;
 use unros::{
     anyhow, async_trait, asyncify_run,
-    pubsub::{Publisher, Subscription},
+    pubsub::{Publisher, PublisherRef},
     service::{new_service, Pending, Service, ServiceHandle},
     setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
@@ -86,8 +86,8 @@ impl<T: CostmapReference> DirectPathfinder<T> {
         }
     }
 
-    pub fn accept_path_sub(&mut self, sub: Subscription<Arc<[Point2<Float>]>>) {
-        self.path_signal.accept_subscription(sub);
+    pub fn path_pub(&self) -> PublisherRef<Arc<[Point2<Float>]>> {
+        self.path_signal.get_ref()
     }
 
     pub fn get_navigation_handle(&self) -> NavigationServiceHandle {

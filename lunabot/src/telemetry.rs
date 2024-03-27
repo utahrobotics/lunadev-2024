@@ -16,7 +16,7 @@ use unros::{
         dump::{ScalingFilter, VideoDataDump},
         log_accept_subscription,
     },
-    pubsub::{Publisher, Subscriber, Subscription},
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
     setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
@@ -67,11 +67,11 @@ impl Telemetry {
         })
     }
 
-    pub fn accept_steering_sub(&self, sub: Subscription<Steering>) {
-        self.steering_signal.accept_subscription(sub);
+    pub fn steering_pub(&self) -> PublisherRef<Steering> {
+        self.steering_signal.get_ref()
     }
 
-    pub fn create_image_subscription(&self) -> Subscription<Arc<DynamicImage>> {
+    pub fn create_image_subscription(&self) -> DirectSubscription<Arc<DynamicImage>> {
         self.image_subscriptions.create_subscription()
     }
 }

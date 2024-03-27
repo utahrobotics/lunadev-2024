@@ -20,11 +20,15 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     discover_all_cameras()
         .context("Failed to discover cameras")?
         .for_each(|_| {});
-    let mut camera = Camera::new(0)?;
-    camera.accept_image_received_sub(apriltag.create_image_subscription());
+    let camera = Camera::new(0)?;
+    camera
+        .image_received_pub()
+        .accept_subscription(apriltag.create_image_subscription());
     let mut pose_sub = Subscriber::new(1);
     apriltag.add_tag(Default::default(), Default::default(), 0.137, 0);
-    apriltag.accept_tag_detected_sub(pose_sub.create_subscription());
+    apriltag
+        .tag_detected_pub()
+        .accept_subscription(pose_sub.create_subscription());
     app.add_task(
         |_| async move {
             loop {

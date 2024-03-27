@@ -18,7 +18,10 @@ use enet::{
 use fxhash::{FxHashMap, FxHasher};
 use unros::{
     anyhow, async_trait, asyncify_run, log,
-    pubsub::{Publisher, PublisherRef, Subscriber, Subscription},
+    pubsub::{
+        subs::{DirectSubscription, Subscription},
+        Publisher, PublisherRef, Subscriber,
+    },
     setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
@@ -76,7 +79,7 @@ impl ChannelMap {
 
 pub struct NetworkPeer {
     remote_addr: SocketAddrV4,
-    packets_to_send: Subscription<(Box<[u8]>, PacketMode)>,
+    packets_to_send: DirectSubscription<(Box<[u8]>, PacketMode)>,
     packets_router: Weak<Mutex<FxHashMap<u8, Box<dyn FnMut(Box<[u8]>) + Send>>>>,
 }
 
@@ -187,7 +190,7 @@ impl NetworkNode {
 pub struct Channel<T> {
     channel_id: u8,
     received_packets: PublisherRef<Result<T, Arc<bitcode::Error>>>,
-    packets_to_send: Subscription<(Box<[u8]>, PacketMode)>,
+    packets_to_send: DirectSubscription<(Box<[u8]>, PacketMode)>,
 }
 
 impl<T> Clone for Channel<T> {
@@ -200,21 +203,24 @@ impl<T> Clone for Channel<T> {
     }
 }
 
-impl<T: Decode> Channel<T> {
-    pub fn accept_subscription(&self, sub: Subscription<Result<T, Arc<bitcode::Error>>>) {
+impl<T: Decode + Send + 'static> Channel<T> {
+    pub fn accept_subscription(
+        &self,
+        sub: impl Subscription<Item = Result<T, Arc<bitcode::Error>>> + Send + 'static,
+    ) {
         self.received_packets.accept_subscription(sub);
     }
 
     pub fn accept_subscription_or_closed(
         &self,
-        sub: Subscription<Result<T, Arc<bitcode::Error>>>,
+        sub: DirectSubscription<Result<T, Arc<bitcode::Error>>>,
     ) -> bool {
         self.received_packets.accept_subscription_or_closed(sub)
     }
 }
 
 impl<T: Encode> Channel<T> {
-    pub fn create_reliable_subscription(&self) -> Subscription<T> {
+    pub fn create_reliable_subscription(&self) -> impl Subscription<Item = T> {
         let channel_id = self.channel_id;
         self.packets_to_send.clone().map(move |value| {
             let mut data = bitcode::encode(&value).expect("Failed to serialize value");
@@ -223,7 +229,7 @@ impl<T: Encode> Channel<T> {
         })
     }
 
-    pub fn create_unreliable_subscription(&self) -> Subscription<T> {
+    pub fn create_unreliable_subscription(&self) -> impl Subscription<Item = T> {
         let channel_id = self.channel_id;
         self.packets_to_send.clone().map(move |value| {
             let mut data = bitcode::encode(&value).expect("Failed to serialize value");

@@ -25,7 +25,7 @@ use rig::{RobotBase, RobotElementRef};
 use smach::{State, StateResult};
 use unros::{
     anyhow, async_trait,
-    pubsub::{Subscriber, Subscription},
+    pubsub::{subs::DirectSubscription, Subscriber},
     rayon::{
         iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator},
         join,
@@ -87,28 +87,28 @@ impl Localizer {
     /// Provide an imu subscription.
     ///
     /// Some messages may be skipped if there are too many.
-    pub fn create_imu_sub(&self) -> Subscription<IMUFrame> {
+    pub fn create_imu_sub(&self) -> DirectSubscription<IMUFrame> {
         self.imu_sub.create_subscription()
     }
 
     /// Provide a position subscription.
     ///
     /// Some messages may be skipped if there are too many.
-    pub fn create_position_sub(&self) -> Subscription<PositionFrame> {
+    pub fn create_position_sub(&self) -> DirectSubscription<PositionFrame> {
         self.position_sub.create_subscription()
     }
 
     /// Provide a velocity subscription.
     ///
     /// Some messages may be skipped if there are too many.
-    pub fn create_velocity_sub(&self) -> Subscription<VelocityFrame> {
+    pub fn create_velocity_sub(&self) -> DirectSubscription<VelocityFrame> {
         self.velocity_sub.create_subscription()
     }
 
     /// Provide an orientation subscription.
     ///
     /// Some messages may be skipped if there are too many.
-    pub fn create_orientation_sub(&self) -> Subscription<OrientationFrame> {
+    pub fn create_orientation_sub(&self) -> DirectSubscription<OrientationFrame> {
         self.orientation_sub.create_subscription()
     }
 }

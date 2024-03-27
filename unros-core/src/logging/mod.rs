@@ -1,5 +1,8 @@
 use std::{
-    panic::catch_unwind, path::{Path, PathBuf}, sync::{Arc, Mutex, OnceLock}, time::Instant
+    panic::catch_unwind,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+    time::Instant,
 };
 
 use anyhow::Context;
@@ -10,7 +13,10 @@ use log::Level;
 
 use crate::{
     logging::eyre::UnrosEyreMessage,
-    pubsub::{Publisher, Subscription},
+    pubsub::{
+        subs::{BoxedSubscription, Subscription},
+        Publisher,
+    },
     RunOptions,
 };
 
@@ -64,10 +70,10 @@ macro_rules! setup_logging {
 
 static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static START_TIME: OnceLock<Instant> = OnceLock::new();
-static LOG_SUBS: OnceLock<SegQueue<Subscription<Arc<str>>>> = OnceLock::new();
+static LOG_SUBS: OnceLock<SegQueue<BoxedSubscription<Arc<str>>>> = OnceLock::new();
 
-pub fn log_accept_subscription(sub: Subscription<Arc<str>>) {
-    LOG_SUBS.get_or_init(Default::default).push(sub);
+pub fn log_accept_subscription(sub: impl Subscription<Item = Arc<str>> + Send + 'static) {
+    LOG_SUBS.get_or_init(Default::default).push(sub.boxed());
 }
 
 #[derive(Default)]

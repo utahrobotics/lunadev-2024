@@ -29,7 +29,10 @@ use serde_json::{from_reader, to_string_pretty, to_writer_pretty};
 use unros::{
     anyhow::{self, Context},
     log,
-    pubsub::{Publisher, Subscriber, Subscription},
+    pubsub::{
+        subs::{DirectSubscription, Subscription},
+        Publisher, Subscriber,
+    },
     setup_logging,
     tokio::{self, task::JoinHandle},
     Application,
@@ -120,10 +123,11 @@ impl CameraInfo {
 
     pub fn undistort_subscription(
         &self,
-        sub: Subscription<Arc<DynamicImage>>,
-    ) -> Subscription<Arc<DynamicImage>> {
+        sub: DirectSubscription<Arc<DynamicImage>>,
+    ) -> Result<impl Subscription<Item = Arc<DynamicImage>>, DirectSubscription<Arc<DynamicImage>>>
+    {
         if let Some(distortion_data) = self.distortion_data.clone() {
-            sub.map(move |dyn_img: Arc<DynamicImage>| {
+            Ok(sub.map(move |dyn_img: Arc<DynamicImage>| {
                 let mut src = Mat::new_rows_cols_with_default(
                     dyn_img.height() as i32,
                     dyn_img.width() as i32,
@@ -182,9 +186,9 @@ impl CameraInfo {
                     .resize_to_fill(dyn_img.width(), dyn_img.height(), FilterType::Triangle);
 
                 Arc::new(img)
-            })
+            }))
         } else {
-            sub
+            Err(sub)
         }
     }
 }
@@ -205,7 +209,7 @@ struct FocalLengthEstimate {
 /// <https://raw.githubusercontent.com/opencv/opencv/4.x/doc/pattern.png>
 pub async fn interactive_examine(
     app: &mut Application,
-    accept_sub: impl FnOnce(Subscription<Arc<DynamicImage>>),
+    accept_sub: impl FnOnce(DirectSubscription<Arc<DynamicImage>>),
     camera_name: String,
 ) {
     let join: JoinHandle<Result<_, anyhow::Error>> = tokio::task::spawn_blocking(|| {
@@ -451,7 +455,9 @@ pub async fn interactive_examine(
                     img_pub.accept_subscription(apriltag.create_image_subscription());
 
                     apriltag.add_tag(Default::default(), Default::default(), width, id);
-                    apriltag.accept_tag_detected_sub(pose_sub.create_subscription());
+                    apriltag
+                        .tag_detected_pub()
+                        .accept_subscription(pose_sub.create_subscription());
                     context.spawn_node(apriltag);
 
                     if first {

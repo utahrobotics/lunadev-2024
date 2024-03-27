@@ -11,14 +11,16 @@ use unros::{
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
-    let mut serial = SerialConnection::new(
+    let serial = SerialConnection::new(
         "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00".into(),
         115200,
         true,
     )
     .await;
     let mut sub = Subscriber::<Bytes>::new(8);
-    serial.accept_msg_received_sub(sub.create_subscription());
+    serial
+        .msg_received_pub()
+        .accept_subscription(sub.create_subscription());
     tokio::spawn(async move {
         loop {
             let x = sub.recv().await;
@@ -31,7 +33,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         }
     });
     let mut write_signal: Publisher<_> = Default::default();
-    write_signal.accept_subscription(serial.create_message_to_send_sub());
+    write_signal.accept_subscription(serial.message_to_send_sub());
 
     spawn_persistent_thread(move || {
         let stdin = stdin();

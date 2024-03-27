@@ -17,7 +17,7 @@ use nokhwa::{
 use unros::{
     anyhow::{self, Context},
     async_trait, asyncify_run, log,
-    pubsub::{Publisher, Subscription},
+    pubsub::{Publisher, PublisherRef},
     setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
@@ -60,8 +60,8 @@ impl Camera {
     }
 
     /// Gets a reference to the `Signal` that represents received images.
-    pub fn accept_image_received_sub(&mut self, sub: Subscription<Arc<DynamicImage>>) {
-        self.image_received.accept_subscription(sub);
+    pub fn image_received_pub(&self) -> PublisherRef<Arc<DynamicImage>> {
+        self.image_received.get_ref()
     }
 }
 

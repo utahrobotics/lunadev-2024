@@ -14,7 +14,7 @@ use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait,
-    pubsub::{Subscriber, Subscription},
+    pubsub::{subs::Subscription, Subscriber},
     rayon::{
         self,
         iter::{
@@ -73,7 +73,7 @@ impl GlobalCostmap {
 
     pub fn create_points_sub<T: Send + IntoParallelIterator<Item = Point3<f32>> + 'static>(
         &self,
-    ) -> Subscription<Points<T>> {
+    ) -> impl Subscription<Item = Points<T>> {
         let cell_width = self.cell_width;
         let area_width = self.area_width;
         let area_length = self.area_length;

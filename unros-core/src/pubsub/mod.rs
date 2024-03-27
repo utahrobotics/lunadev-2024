@@ -18,10 +18,13 @@ use crossbeam::{
     queue::{ArrayQueue, SegQueue},
     utils::Backoff,
 };
-use log::warn;
 use tokio::sync::Notify;
 
+pub mod subs;
+
 use crate::logging::{dump::DataDump, START_TIME};
+
+use self::subs::{DirectSubscription, PublisherToken, Subscription};
 
 /// An essential component that promotes separation of concerns, and is
 /// an intrinsic element of the ROS framework.
@@ -35,7 +38,7 @@ use crate::logging::{dump::DataDump, START_TIME};
 /// `Arc`. Since Nodes will often be used from different threads, the type `T`
 /// should also be `Send`.
 pub struct Publisher<T> {
-    subs: Arc<SegQueue<Subscription<T>>>,
+    subs: Arc<SegQueue<Box<dyn Subscription<Item = T> + Send>>>,
 }
 
 impl<T> Default for Publisher<T> {
@@ -52,26 +55,11 @@ impl<T: Clone> Publisher<T> {
     /// Only the node that owns this signal should call this method.
     pub fn set(&mut self, value: T) {
         for _ in 0..self.subs.len() {
+            // This is thte only place we pop from subs, so we are guaranteed
+            // to always have at least self.subs.len() to elements to pop
             let mut sub = self.subs.pop().unwrap();
-            match sub.queue.push(value.clone()) {
-                EnqueueResult::Ok => {
-                    sub.lag = 0;
-                    if let Some(notify) = sub.notify.upgrade() {
-                        notify.notify_one();
-                        self.subs.push(sub);
-                    }
-                }
-                EnqueueResult::Full => {
-                    sub.lag += 1;
-                    if let Some(name) = &sub.name {
-                        warn!(target: "publishers", "{name} lagging by {} messages", sub.lag);
-                    }
-                    if let Some(notify) = sub.notify.upgrade() {
-                        notify.notify_one();
-                        self.subs.push(sub);
-                    }
-                }
-                EnqueueResult::Closed => {}
+            if sub.push(value.clone()) {
+                self.subs.push(sub);
             }
         }
     }
@@ -80,12 +68,9 @@ impl<T: Clone> Publisher<T> {
 impl<T> Publisher<T> {
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
-
-    pub fn accept_subscription(&self, sub: Subscription<T>) {
-        for count in &sub.pub_count {
-            count.fetch_add(1, Ordering::Release);
-        }
-        self.subs.push(sub);
+    pub fn accept_subscription(&self, sub: impl Subscription<Item = T> + Send + 'static) {
+        sub.increment_publishers(PublisherToken(()));
+        self.subs.push(Box::new(sub));
     }
 
     pub fn get_ref(&self) -> PublisherRef<T> {
@@ -111,25 +96,19 @@ impl<T> Drop for Publisher<T> {
         };
 
         for sub in subs.into_iter() {
-            for count in &sub.pub_count {
-                count.fetch_sub(1, Ordering::Release);
-            }
-            drop(sub.queue);
-            if let Some(notify) = sub.notify.upgrade() {
-                notify.notify_one();
-            };
+            sub.decrement_publishers(PublisherToken(()));
         }
     }
 }
 
 pub struct PublisherRef<T> {
-    subs: Weak<SegQueue<Subscription<T>>>,
+    subs: Weak<SegQueue<Box<dyn Subscription<Item = T> + Send>>>,
 }
 
 impl<T> PublisherRef<T> {
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
-    pub fn accept_subscription(&self, sub: Subscription<T>) {
+    pub fn accept_subscription(&self, sub: impl Subscription<Item = T> + Send + 'static) {
         self.accept_subscription_or_closed(sub);
     }
 
@@ -137,14 +116,15 @@ impl<T> PublisherRef<T> {
     /// receive new messages.
     ///
     /// Returns true iff the original `Publisher` has not been dropped
-    pub fn accept_subscription_or_closed(&self, sub: Subscription<T>) -> bool {
+    pub fn accept_subscription_or_closed(
+        &self,
+        sub: impl Subscription<Item = T> + Send + 'static,
+    ) -> bool {
         let Some(subs) = self.subs.upgrade() else {
             return false;
         };
-        for count in &sub.pub_count {
-            count.fetch_add(1, Ordering::Release);
-        }
-        subs.push(sub);
+        sub.increment_publishers(PublisherToken(()));
+        subs.push(Box::new(sub));
         true
     }
 }
@@ -157,48 +137,49 @@ impl<T> Clone for PublisherRef<T> {
     }
 }
 
-trait Queue<T>: Send + Sync {
-    fn push(&mut self, value: T) -> EnqueueResult;
-    fn clone(&self) -> Box<dyn Queue<T>>;
-}
-
 #[derive(PartialEq, Eq)]
-enum EnqueueResult {
+pub enum EnqueueResult {
     Ok,
     Full,
     Closed,
 }
 
-impl<T: Send + 'static> Queue<T> for Weak<ArrayQueue<T>> {
-    fn push(&mut self, value: T) -> EnqueueResult {
-        if let Some(queue) = self.upgrade() {
-            if queue.force_push(value).is_some() {
-                EnqueueResult::Full
-            } else {
-                EnqueueResult::Ok
-            }
-        } else {
-            EnqueueResult::Closed
-        }
-    }
-    fn clone(&self) -> Box<dyn Queue<T>> {
-        Box::new(Clone::clone(self))
-    }
-}
+// impl<T: Send + 'static> Subscription<T> for Weak<ArrayQueue<T>> {
+//     fn push(&mut self, value: T) -> EnqueueResult {
+//         if let Some(queue) = self.upgrade() {
+//             if queue.force_push(value).is_some() {
+//                 EnqueueResult::Full
+//             } else {
+//                 EnqueueResult::Ok
+//             }
+//         } else {
+//             EnqueueResult::Closed
+//         }
+//     }
+//     fn clone(&self) -> Box<dyn Subscription<T>> {
+//         Box::new(Clone::clone(self))
+//     }
+// }
 
-impl<T, F: FnMut(T) -> EnqueueResult + Send + Sync + Clone + 'static> Queue<T> for F {
-    fn push(&mut self, value: T) -> EnqueueResult {
-        self(value)
-    }
-    fn clone(&self) -> Box<dyn Queue<T>> {
-        Box::new(Clone::clone(self))
-    }
-}
+// impl<T, F: FnMut(T) -> EnqueueResult + Send + Sync + Clone + 'static> Subscription<T> for F {
+//     fn push(&mut self, value: T) -> EnqueueResult {
+//         self(value)
+//     }
+//     fn clone(&self) -> Box<dyn Subscription<T>> {
+//         Box::new(Clone::clone(self))
+//     }
+// }
 
-impl<T> Clone for Box<dyn Queue<T>> {
-    fn clone(&self) -> Self {
-        Queue::clone(self.deref())
-    }
+// impl<T> Clone for Box<dyn Subscription<T>> {
+//     fn clone(&self) -> Self {
+//         Subscription::clone(self.deref())
+//     }
+// }
+
+struct SubscriberInner<T> {
+    queue: ArrayQueue<T>,
+    notify: Notify,
+    pub_count: AtomicUsize,
 }
 
 /// An essential companion to the `Publisher`.
@@ -207,68 +188,43 @@ impl<T> Clone for Box<dyn Queue<T>> {
 /// from multiple Publishers concurrently. To subscribe to a `Publisher`,
 /// a `Subscriber` must create a subscription and pass that to the `Publisher`.
 pub struct Subscriber<T> {
-    queue: Arc<ArrayQueue<T>>,
-    notify: Arc<Notify>,
-    pub_count: Arc<AtomicUsize>,
-}
-
-/// An object that must be passed to a `Publisher`, enabling the `Subscriber`
-/// that created the subscription to receive messages from that `Publisher`.
-///
-/// If dropped, no change will occur to the `Subscriber` and no resources will be leaked.
-pub struct Subscription<T> {
-    // subscriber: Box<dyn FnOnce(watch::Receiver<()>, Option<Box<str>>)>,
-    queue: Box<dyn Queue<T>>,
-    notify: Weak<Notify>,
-    name: Option<Box<str>>,
-    pub_count: Vec<Arc<AtomicUsize>>,
-    lag: usize,
-}
-
-impl<T> Clone for Subscription<T> {
-    fn clone(&self) -> Self {
-        Self {
-            queue: self.queue.clone(),
-            notify: self.notify.clone(),
-            name: self.name.clone(),
-            lag: self.lag.clone(),
-            pub_count: self.pub_count.clone(),
-        }
-    }
+    inner: Arc<SubscriberInner<T>>,
 }
 
 impl<T: Clone + Send + 'static> Subscriber<T> {
     #[must_use]
     pub fn new(size: usize) -> Self {
         Self {
-            queue: Arc::new(ArrayQueue::new(size)),
-            notify: Arc::new(Notify::new()),
-            pub_count: Arc::default(),
+            inner: Arc::new(SubscriberInner {
+                queue: ArrayQueue::new(size),
+                notify: Notify::default(),
+                pub_count: AtomicUsize::default(),
+            }),
         }
     }
 
     pub fn get_size(&self) -> usize {
-        self.queue.capacity()
+        self.inner.queue.capacity()
     }
 
     /// Receive some message (waiting if none are available), or `None` if all `Publishers` have been dropped.
     pub async fn recv_or_closed(&mut self) -> Option<T> {
         loop {
-            if let Some(value) = self.queue.pop() {
+            if let Some(value) = self.inner.queue.pop() {
                 return Some(value);
             }
 
-            if self.pub_count.load(Ordering::Acquire) == 0 {
+            if self.inner.pub_count.load(Ordering::Acquire) == 0 {
                 return None;
             }
 
-            self.notify.notified().await;
+            self.inner.notify.notified().await;
         }
     }
 
     /// Try to receive a message if one is available.
     pub fn try_recv(&mut self) -> Option<T> {
-        self.queue.pop()
+        self.inner.queue.pop()
     }
 
     /// Wait until a message is received, even if all `Publisher`s have been dropped.
@@ -311,13 +267,11 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
 
     /// Creates a `Subscription` that needs to be passed to a `Publisher`.
     #[must_use]
-    pub fn create_subscription(&self) -> Subscription<T> {
-        Subscription {
-            queue: Box::new(Arc::downgrade(&self.queue)),
-            notify: Arc::downgrade(&self.notify),
+    pub fn create_subscription(&self) -> DirectSubscription<T> {
+        DirectSubscription {
+            sub: Arc::downgrade(&self.inner),
             name: None,
             lag: 0,
-            pub_count: vec![self.pub_count.clone()],
         }
     }
 
@@ -351,82 +305,6 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         } else {
             Err(self)
         }
-    }
-}
-
-impl<T: 'static> Subscription<T> {
-    /// Changes the generic type of this `Subscription` using the given `map` function.
-    pub fn map<V>(
-        mut self,
-        mut map: impl FnMut(V) -> T + Send + Sync + Clone + 'static,
-    ) -> Subscription<V> {
-        Subscription {
-            queue: Box::new(move |x| self.queue.push(map(x))),
-            notify: self.notify,
-            lag: 0,
-            name: None,
-            pub_count: self.pub_count,
-        }
-    }
-
-    /// Changes the generic type of this `Subscription` using the given `filter_map` function.
-    ///
-    /// If the function returns `None`, the value will not be published.
-    pub fn filter_map<V>(
-        mut self,
-        mut filter_map: impl FnMut(V) -> Option<T> + Send + Sync + Clone + 'static,
-    ) -> Subscription<V> {
-        Subscription {
-            queue: Box::new(move |x| {
-                if let Some(x) = filter_map(x) {
-                    self.queue.push(x)
-                } else {
-                    EnqueueResult::Ok
-                }
-            }),
-            notify: self.notify,
-            lag: 0,
-            name: None,
-            pub_count: self.pub_count,
-        }
-    }
-
-    pub fn zip<V: 'static>(mut self, mut other: Subscription<V>) -> Subscription<(T, V)> {
-        self.pub_count.append(&mut other.pub_count);
-        Subscription {
-            queue: Box::new(move |(left, right)| {
-                let left_result = self.queue.push(left);
-                let right_result = other.queue.push(right);
-                match left_result {
-                    EnqueueResult::Ok => right_result,
-                    EnqueueResult::Full => {
-                        if right_result == EnqueueResult::Closed {
-                            EnqueueResult::Closed
-                        } else {
-                            EnqueueResult::Full
-                        }
-                    }
-                    EnqueueResult::Closed => EnqueueResult::Closed,
-                }
-            }),
-            notify: self.notify,
-            lag: 0,
-            name: None,
-            pub_count: self.pub_count,
-        }
-    }
-
-    /// Provides a name to this subscription, which enables lag logging.
-    ///
-    /// If the `Publisher` that accepts this `Subscription` cannot push
-    /// new messages into this `Subscription` without deleting old message,
-    /// we say that the `Subscription` is lagging. Catching lagging is important
-    /// as it indicates data loss and a lack of processing speed. With a name,
-    /// these lags will be logged as warnings in the standard log file (`.log`).
-    #[must_use]
-    pub fn set_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into().into_boxed_str());
-        self
     }
 }
 
@@ -502,7 +380,7 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     /// Creates a `Subscription` with a size of 1.
     ///
     /// There is no benefit to having a queue size of more than 1.
-    pub fn create_subscription(&self) -> Subscription<T> {
+    pub fn create_subscription(&self) -> DirectSubscription<T> {
         self.inner.create_subscription()
     }
 

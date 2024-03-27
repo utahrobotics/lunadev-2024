@@ -8,7 +8,7 @@ use ordered_float::NotNan;
 use quadtree_rs::{area::AreaBuilder, point::Point, Quadtree};
 use rig::RobotBaseRef;
 use unros::{
-    pubsub::{Subscriber, Subscription},
+    pubsub::{subs::DirectSubscription, Subscriber},
     tokio,
 };
 
@@ -86,7 +86,7 @@ impl LocalCostmap {
 
     pub fn create_points_sub<T: Send + IntoIterator<Item = Point3<f32>> + Clone + 'static>(
         &self,
-    ) -> Subscription<Points<T>> {
+    ) -> DirectSubscription<Points<T>> {
         let cell_width = self.cell_width;
         let area_width = self.area_width;
         let height_step = self.height_step;

@@ -34,11 +34,11 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let index = join.await.unwrap()?;
 
-    let mut camera = Camera::new(index)?;
+    let camera = Camera::new(index)?;
     let camera_name = camera.get_camera_name().to_string();
     interactive_examine(
         &mut app,
-        |x| camera.accept_image_received_sub(x),
+        |x| camera.image_received_pub().accept_subscription(x),
         camera_name,
     )
     .await;

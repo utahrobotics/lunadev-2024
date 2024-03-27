@@ -2,7 +2,7 @@ use global_msgs::Steering;
 use serial::SerialConnection;
 use unros::{
     anyhow, async_trait,
-    pubsub::{Publisher, Subscriber, Subscription},
+    pubsub::{subs::DirectSubscription, Publisher, Subscriber},
     setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
 };
 
@@ -21,7 +21,7 @@ impl Drive {
         }
     }
 
-    pub fn create_steering_sub(&self) -> Subscription<Steering> {
+    pub fn create_steering_sub(&self) -> DirectSubscription<Steering> {
         self.steering_sub.create_subscription()
     }
 }
@@ -39,10 +39,13 @@ impl Node for Drive {
         setup_logging!(context);
 
         let mut write_signal = Publisher::default();
-        write_signal.accept_subscription(self.drive_controller.create_message_to_send_sub());
+        write_signal
+            .get_ref()
+            .accept_subscription(self.drive_controller.message_to_send_sub());
         let mut read_sub = Subscriber::new(8);
         self.drive_controller
-            .accept_msg_received_sub(read_sub.create_subscription());
+            .msg_received_pub()
+            .accept_subscription(read_sub.create_subscription());
 
         let handle = tokio::spawn(async move {
             'main: loop {

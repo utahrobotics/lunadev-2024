@@ -7,7 +7,7 @@ use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros::{
     anyhow, async_trait,
     bytes::Bytes,
-    pubsub::{Publisher, Subscriber, Subscription},
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
     setup_logging,
     tokio::{
         self,
@@ -86,12 +86,12 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
     }
 
     /// Gets a reference to the `Signal` that represents received `Bytes`.
-    pub fn accept_msg_received_sub(&mut self, sub: Subscription<O>) {
-        self.serial_output.accept_subscription(sub);
+    pub fn msg_received_pub(&self) -> PublisherRef<O> {
+        self.serial_output.get_ref()
     }
 
     /// Provide a subscription whose messages will be written to the serial port.
-    pub fn create_message_to_send_sub(&self) -> Subscription<I> {
+    pub fn message_to_send_sub(&self) -> DirectSubscription<I> {
         self.serial_input.create_subscription()
     }
 
@@ -202,12 +202,12 @@ impl VescConnection {
     }
 
     /// Provide a subscription for the current level.
-    pub fn connect_current_from(&self) -> Subscription<u32> {
+    pub fn connect_current_from(&self) -> DirectSubscription<u32> {
         self.current.create_subscription()
     }
 
     /// Provide a subscription for the duty cycle.
-    pub fn connect_duty_from(&self) -> Subscription<u32> {
+    pub fn connect_duty_from(&self) -> DirectSubscription<u32> {
         self.current.create_subscription()
     }
 }
