@@ -41,7 +41,6 @@ pub mod utils;
 pub use anyhow;
 use anyhow::Context;
 pub use async_trait::async_trait;
-pub use bytes;
 use config::Config;
 use crossbeam::queue::SegQueue;
 pub use log;

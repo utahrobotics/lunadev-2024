@@ -3238,6 +3238,7 @@ dependencies = [
 name = "serial"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "tokio-serial",
  "unros",
  "vesc-comm",
@@ -3811,7 +3812,6 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
- "bytes",
  "chrono",
  "color-eyre",
  "config",

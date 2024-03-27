@@ -1,9 +1,8 @@
 use std::io::{stdin, stdout, BufRead, Write};
 
-use serial::SerialConnection;
+use serial::{SerialConnection, Bytes};
 use unros::{
     anyhow,
-    bytes::Bytes,
     pubsub::{Publisher, Subscriber},
     spawn_persistent_thread, tokio, Application,
 };

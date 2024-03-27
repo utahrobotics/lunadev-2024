@@ -7,8 +7,8 @@ use networking::{
     Channel, ChannelMap, NetworkPeer,
 };
 use rig::{euler_to_quat, RobotElementRef, RotationSequence, RotationType};
-use serial::SerialConnection;
-use unros::{bytes::Bytes, log};
+use serial::{Bytes, SerialConnection};
+use unros::log;
 
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Default)]
 pub struct ControlsPacket {
