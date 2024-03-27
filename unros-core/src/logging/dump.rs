@@ -197,7 +197,7 @@ impl std::fmt::Display for VideoDataDumpType {
 }
 
 /// A dump for writing images into videos using `ffmpeg`.
-/// 
+///
 /// If `ffmpeg` is not installed, it will be downloaded locally
 /// automatically.
 pub struct VideoDataDump {
@@ -249,11 +249,11 @@ impl Display for VideoDumpInitError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalingFilter {
     /// Nearest neighbor. Excellent for performance.
-    /// 
+    ///
     /// This adds no blurring whatsoever when upscaling, and mediocre quality when downscaling.
     Neighbor,
     /// Uses a fast bilinear algorithm. Good for performance.
-    /// 
+    ///
     /// This adds some blurring when upscaling, and average quality when downscaling.
     FastBilinear,
 }
@@ -291,7 +291,7 @@ a=fmtp:96 packetization-mode=1",
     }
 
     /// Creates a new `VideoDataDump` that displays to a window.
-    /// 
+    ///
     /// `ffplay` may need to be installed separately.
     pub fn new_display(
         in_width: u32,

@@ -21,7 +21,7 @@ pub trait Subscription {
     type Item;
 
     /// Places a value into this Subscription.
-    /// 
+    ///
     /// Returns `true` iff the value could be consumed. If `false` is returned,
     /// this `Subscription` should be dropped by the caller.
     fn push(&mut self, value: Self::Item, token: PublisherToken) -> bool;
@@ -130,7 +130,7 @@ impl<T> Clone for DirectSubscription<T> {
         Self {
             sub: self.sub.clone(),
             name: self.name.clone(),
-            lag: self.lag.clone(),
+            lag: self.lag,
         }
     }
 }

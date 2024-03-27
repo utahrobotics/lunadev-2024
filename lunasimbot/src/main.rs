@@ -35,7 +35,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let mut costmap = LocalCostmap::new(400, 0.05, 0.01, robot_base.get_ref());
     costmap.min_frequency = 0.0;
-    let mut points_signal = Publisher::<Vec<Point3<f32>>>::default();
+    let points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
     points_signal.accept_subscription(costmap.create_points_sub().map(move |points| Points {
         points,
@@ -79,16 +79,16 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     // let robot_base_ref = robot_base.get_ref();
     let localizer = Localizer::new(robot_base, 0.0);
 
-    let mut position_pub = Publisher::default();
+    let position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));
 
-    let mut velocity_pub = Publisher::default();
+    let velocity_pub = Publisher::default();
     velocity_pub.accept_subscription(localizer.create_velocity_sub().set_name("velocity"));
 
-    let mut orientation_pub = Publisher::default();
+    let orientation_pub = Publisher::default();
     orientation_pub.accept_subscription(localizer.create_orientation_sub().set_name("orientation"));
 
-    let mut imu_pub = Publisher::default();
+    let imu_pub = Publisher::default();
     imu_pub.accept_subscription(localizer.create_imu_sub().set_name("imu"));
 
     let mut steering_sub = Subscriber::new(1);

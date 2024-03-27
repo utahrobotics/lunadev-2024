@@ -1,16 +1,21 @@
 use std::sync::Arc;
 
 use image::{DynamicImage, ImageBuffer, Rgb};
-use opencv::{calib3d::undistort, core::{Mat, MatTraitConstManual, MatTraitManual, Vector, CV_8UC3}};
-use unros::{log, pubsub::subs::{PublisherToken, Subscription}};
+use opencv::{
+    calib3d::undistort,
+    core::{Mat, MatTraitConstManual, MatTraitManual, Vector, CV_8UC3},
+};
+use unros::{
+    log,
+    pubsub::subs::{PublisherToken, Subscription},
+};
 
 use crate::DistortionData;
 
 pub struct Undistorter<I> {
     pub(super) inner: I,
-    pub(super) distortion_data: Arc<DistortionData>
+    pub(super) distortion_data: Arc<DistortionData>,
 }
-
 
 impl<I: Subscription<Item = Arc<DynamicImage>>> Subscription for Undistorter<I> {
     type Item = Arc<DynamicImage>;
@@ -37,7 +42,8 @@ impl<I: Subscription<Item = Arc<DynamicImage>>> Subscription for Undistorter<I> 
             Mat::from_slice_rows_cols(&self.distortion_data.camera_matrix, 3, 3).unwrap();
         let new_camera_matrix =
             Mat::from_slice_rows_cols(&self.distortion_data.new_camera_matrix, 3, 3).unwrap();
-        let dist_coeffs: Vector<f64> = self.distortion_data
+        let dist_coeffs: Vector<f64> = self
+            .distortion_data
             .distortion_coefficients
             .iter()
             .copied()

@@ -5,10 +5,14 @@
 //! to `Rust`'s channels in that they do not trigger code, unlike `ROS` subscriber callbacks.
 
 use std::{
-    io::Write, marker::PhantomData, ops::{Deref, DerefMut}, path::Path, sync::{
+    io::Write,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    path::Path,
+    sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Weak,
-    }
+    },
 };
 
 use crossbeam::{
@@ -50,7 +54,7 @@ impl<T: Clone> Publisher<T> {
     /// Sets a value into this `Publisher`, allowing it to be received by Subscribers.
     ///
     /// Only the node that owns this `Publisher` should call this method for hygiene.
-    pub fn set(&mut self, value: T) {
+    pub fn set(&self, value: T) {
         for _ in 0..self.subs.len() {
             // This is the only place we pop from subs, so we are guaranteed
             // to always have at least self.subs.len() to elements to pop
@@ -100,24 +104,22 @@ impl<T> Drop for Publisher<T> {
     }
 }
 
-
-
 /// Similar to a `Publisher`, except that it can only publish to one `Subscriber`,
 /// eliminating the need for `T` to implement `Clone`.
-/// 
+///
 /// As such, MonoPublishers must be created directly from Subscriptions using `From`
 /// and `Into`.
-pub struct MonoPublisher<T, S: Subscription<Item=T>> {
-    sub: Option<S>
+pub struct MonoPublisher<T, S: Subscription<Item = T>> {
+    sub: Option<S>,
 }
 
-impl<T, S: Subscription<Item=T>> From<S> for MonoPublisher<T, S> {
+impl<T, S: Subscription<Item = T>> From<S> for MonoPublisher<T, S> {
     fn from(sub: S) -> Self {
         Self { sub: Some(sub) }
     }
 }
 
-impl<T, S: Subscription<Item=T>> MonoPublisher<T, S> {
+impl<T, S: Subscription<Item = T>> MonoPublisher<T, S> {
     /// Sets a value into this `MonoPublisher`, allowing it to be received by a Subscriber.
     ///
     /// Only the node that owns this `MonoPublisher` should call this method for hygiene.
@@ -130,7 +132,7 @@ impl<T, S: Subscription<Item=T>> MonoPublisher<T, S> {
     }
 }
 
-impl<T, S: Subscription<Item=T>> Drop for MonoPublisher<T, S> {
+impl<T, S: Subscription<Item = T>> Drop for MonoPublisher<T, S> {
     fn drop(&mut self) {
         if let Some(sub) = &self.sub {
             sub.decrement_publishers(PublisherToken(PhantomData));
@@ -140,7 +142,7 @@ impl<T, S: Subscription<Item=T>> Drop for MonoPublisher<T, S> {
 
 /// A non-owning reference to a `Publisher` that cannot be used to set values into
 /// the `Publisher`.
-/// 
+///
 /// Sharing `&Publisher` publicly allows users of the reference to set a value into it
 /// which is in violation of how pubsub should work. Only one "thing" should ever be able
 /// to provide values.

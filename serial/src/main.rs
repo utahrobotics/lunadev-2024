@@ -1,6 +1,6 @@
 use std::io::{stdin, stdout, BufRead, Write};
 
-use serial::{SerialConnection, Bytes};
+use serial::{Bytes, SerialConnection};
 use unros::{
     anyhow,
     pubsub::{Publisher, Subscriber},
@@ -31,7 +31,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
             stdout.flush().expect("Stdout should have been flushable");
         }
     });
-    let mut write_signal: Publisher<_> = Default::default();
+    let write_signal: Publisher<_> = Default::default();
     write_signal.accept_subscription(serial.message_to_send_sub());
 
     spawn_persistent_thread(move || {

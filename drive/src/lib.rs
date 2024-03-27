@@ -38,7 +38,7 @@ impl Node for Drive {
         let context2 = context.clone();
         setup_logging!(context);
 
-        let mut write_signal = Publisher::default();
+        let write_signal = Publisher::default();
         write_signal
             .get_ref()
             .accept_subscription(self.drive_controller.message_to_send_sub());

@@ -88,7 +88,7 @@ impl NetworkPeer {
     where
         T: Decode + Clone + 'static,
     {
-        let mut pub_received_packets = Publisher::default();
+        let pub_received_packets = Publisher::default();
         let recv_packets_sub = pub_received_packets.get_ref();
 
         if let Some(packets_router) = self.packets_router.upgrade() {
@@ -384,7 +384,7 @@ impl Node for NetworkNode {
 
                             let mut drop = false;
                             if let Some((_, packets_router)) = conns.get(&addr) {
-                                if Arc::weak_count(&packets_router) == 0 {
+                                if Arc::weak_count(packets_router) == 0 {
                                     drop = true;
                                 } else if let Some(packet_sender) =
                                     packets_router.lock().unwrap().get_mut(&channel)

@@ -111,12 +111,12 @@ impl INode for LunabotConn {
                     let mut camera_sub = Subscriber::new(1);
                     channels.camera.accept_subscription(camera_sub.create_subscription());
 
-                    let mut controls_pub = Publisher::default();
+                    let controls_pub = Publisher::default();
                     let mut controls_sub = Subscriber::new(1);
                     channels.controls.accept_subscription(controls_sub.create_subscription());
                     controls_pub.accept_subscription(channels.controls.create_unreliable_subscription());
 
-                    let mut important_pub = Publisher::default();
+                    let important_pub = Publisher::default();
                     let mut important_sub = Subscriber::new(8);
                     channels.important.accept_subscription(important_sub.create_subscription());
                     important_pub.accept_subscription(channels.important.create_reliable_subscription());

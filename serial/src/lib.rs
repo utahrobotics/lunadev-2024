@@ -3,6 +3,7 @@
 
 use std::{ops::Deref, sync::Arc, time::Duration};
 
+pub use bytes::Bytes;
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros::{
     anyhow, async_trait,
@@ -14,7 +15,6 @@ use unros::{
     },
     Node, NodeIntrinsics, RuntimeContext,
 };
-pub use bytes::Bytes;
 
 /// A single duplex connection to a serial port
 pub struct SerialConnection<I: Send + Clone + 'static = Bytes, O: Send + Clone + 'static = Bytes> {
@@ -40,7 +40,7 @@ impl SerialConnection {
         Self {
             path: path.into_boxed_str().into(),
             baud_rate,
-            output_map: Box::new(|x| Some(x)),
+            output_map: Box::new(Some),
             input_map: Box::new(|x| x),
             serial_output: Publisher::default(),
             serial_input: Subscriber::new(8),

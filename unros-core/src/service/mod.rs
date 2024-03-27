@@ -5,9 +5,9 @@
 use tokio::sync::{mpsc, oneshot};
 
 /// The API for a `Service`. This is essentially the public facing end of a `Service`.
-/// 
+///
 /// There are 4 generic types that must be specified:
-/// 
+///
 /// 1. `ScheduleInput` - The input data that the `Service` requires to schedule a task.
 /// 2. `ScheduleError` - The type of the error that may occur during scheduling.
 /// 3. `ScheduleOutput` - The data that the `Service` returned when scheduling is successful.
@@ -60,7 +60,7 @@ impl<ScheduleInput, ScheduleError, ScheduleOutput, TaskOutput>
 }
 
 /// Represents a task that was successfully scheduled.
-/// 
+///
 /// This is used by service requesters.
 pub struct ScheduledService<ScheduleOutput, TaskOutput> {
     data: Option<ScheduleOutput>,
@@ -68,7 +68,7 @@ pub struct ScheduledService<ScheduleOutput, TaskOutput> {
 }
 
 /// Represents a request to schedule a task.
-/// 
+///
 /// This is used by service providers.
 pub struct ScheduleRequest<ScheduleInput, ScheduleError, ScheduleOutput, TaskOutput> {
     input: Option<ScheduleInput>,
@@ -76,19 +76,19 @@ pub struct ScheduleRequest<ScheduleInput, ScheduleError, ScheduleOutput, TaskOut
 }
 
 /// A scheduled task that is awaiting output.
-/// 
+///
 /// This is used by service providers.
 pub struct Pending<TaskOutput> {
     output_sender: oneshot::Sender<TaskOutput>,
 }
 
 /// The private end of a `Service`.
-/// 
+///
 /// Users will access this `Service` through its `ServiceHandle`. As such, no references
 /// to this should be shared.
-/// 
+///
 /// There are 4 generic types that must be specified:
-/// 
+///
 /// 1. `ScheduleInput` - The input data that the `Service` requires to schedule a task.
 /// 2. `ScheduleError` - The type of the error that may occur during scheduling.
 /// 3. `ScheduleOutput` - The data that the `Service` returned when scheduling is successful.
@@ -100,9 +100,9 @@ pub struct Service<ScheduleInput, ScheduleError, ScheduleOutput, TaskOutput> {
 }
 
 /// Creates a new `Service` and `ServiceHandle` that are tied together.
-/// 
+///
 /// There are 4 generic types that must be specified:
-/// 
+///
 /// 1. `ScheduleInput` - The input data that the `Service` requires to schedule a task.
 /// 2. `ScheduleError` - The type of the error that may occur during scheduling.
 /// 3. `ScheduleOutput` - The data that the `Service` returned when scheduling is successful.
@@ -139,7 +139,7 @@ impl<ScheduleInput, ScheduleError, ScheduleOutput, TaskOutput>
 {
     /// Accepts this `ScheduleRequest`, indicating to the requester that the task
     /// will now start processing.
-    /// 
+    ///
     /// The given data will be sent to the requester.
     pub fn accept(self, data: ScheduleOutput) -> Option<Pending<TaskOutput>> {
         let (output_sender, output_recv) = oneshot::channel();
@@ -173,7 +173,7 @@ impl<ScheduleInput, ScheduleError, ScheduleOutput, TaskOutput>
     }
 
     /// Takes the `ScheduleInput`.
-    /// 
+    ///
     /// Subsequent calls to this and the various `get_*` methods will return `None`.
     pub fn take_input(&mut self) -> Option<ScheduleInput> {
         self.input.take()
@@ -182,7 +182,7 @@ impl<ScheduleInput, ScheduleError, ScheduleOutput, TaskOutput>
 
 impl<TaskOutput> Pending<TaskOutput> {
     /// Finishes this task by providing its `TaskOutput`.
-    /// 
+    ///
     /// It is not guaranteed that the requester will receive this, since
     /// the requester may drop their handle before this method is called.
     pub fn finish(self, output: TaskOutput) {
@@ -190,7 +190,7 @@ impl<TaskOutput> Pending<TaskOutput> {
     }
 
     /// Checks if the requester has dropped their handle to the task.
-    /// 
+    ///
     /// Do not rely on this to guarantee that the requester will receive
     /// the `TaskOutput` due to TOCTOU issues.
     #[must_use]
@@ -211,7 +211,7 @@ impl<ScheduleOutput, TaskOutput> ScheduledService<ScheduleOutput, TaskOutput> {
     }
 
     /// Takes the `ScheduleOutput`.
-    /// 
+    ///
     /// Subsequent calls to this and the various `get_*` methods will return `None`.
     pub fn take_data(&mut self) -> Option<ScheduleOutput> {
         self.data.take()

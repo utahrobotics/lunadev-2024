@@ -13,12 +13,10 @@ use apriltag::AprilTagDetector;
 use image::DynamicImage;
 use opencv::{
     calib3d::{
-        calibrate_camera, find_chessboard_corners, get_optimal_new_camera_matrix, CALIB_CB_ADAPTIVE_THRESH, CALIB_CB_NORMALIZE_IMAGE,
+        calibrate_camera, find_chessboard_corners, get_optimal_new_camera_matrix,
+        CALIB_CB_ADAPTIVE_THRESH, CALIB_CB_NORMALIZE_IMAGE,
     },
-    core::{
-        Mat, MatTraitConst, Point3f, Rect, Size, TermCriteria,
-        Vector,
-    },
+    core::{Mat, MatTraitConst, Point3f, Rect, Size, TermCriteria, Vector},
     imgproc::corner_sub_pix,
     types::{VectorOfMat, VectorOfPoint2f, VectorOfPoint3f, VectorOfVec3d},
 };
@@ -123,15 +121,14 @@ impl CameraInfo {
         get_camera_db().get(name).cloned()
     }
 
-    pub fn undistort_subscription<T: Subscription<Item=Arc<DynamicImage>>>(
+    pub fn undistort_subscription<T: Subscription<Item = Arc<DynamicImage>>>(
         &self,
         sub: T,
-    ) -> Result<Undistorter<T>, T>
-    {
+    ) -> Result<Undistorter<T>, T> {
         if let Some(distortion_data) = self.distortion_data.clone() {
             Ok(Undistorter {
                 inner: sub,
-                distortion_data
+                distortion_data,
             })
         } else {
             Err(sub)
@@ -403,7 +400,7 @@ pub async fn interactive_examine(
                 let mut fails = 0;
 
                 loop {
-                    let mut img_pub = Publisher::default();
+                    let img_pub = Publisher::default();
                     let mut apriltag = AprilTagDetector::new(
                         length,
                         img.width(),
@@ -499,6 +496,7 @@ pub async fn interactive_examine(
                     let fps = (count as f32 / 5.0).round() as usize;
                     if fps == 0 {
                         println!("Received no frames during fps testing!");
+                        continue;
                     }
                     camera_info.fps = Some(NonZeroUsize::new(fps).unwrap());
                     break;

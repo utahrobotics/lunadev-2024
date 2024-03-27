@@ -1,6 +1,6 @@
 //! A good logging solution is instrumental to big projects with rapid
 //! prototyping cycles.
-//! 
+//!
 //! Having plenty sources of data while remaining highly configurable is
 //! the goal of Unros, and this module provides that.
 
@@ -18,9 +18,7 @@ use log::Level;
 
 use crate::{
     logging::eyre::UnrosEyreMessage,
-    pubsub::{
-        Publisher, PublisherRef,
-    },
+    pubsub::{Publisher, PublisherRef},
     RunOptions,
 };
 
@@ -77,7 +75,7 @@ pub(crate) static START_TIME: OnceLock<Instant> = OnceLock::new();
 static LOG_PUB: OnceLock<PublisherRef<Arc<str>>> = OnceLock::new();
 
 /// Gets a reference to the `Publisher` for logs.
-/// 
+///
 /// # Panics
 /// Panics if the logger has not been initialized. If this method
 /// is called inside of or after `start_unros_runtime`, the logger is
@@ -100,7 +98,10 @@ impl log::Log for LogPub {
         if !self.enabled(record.metadata()) {
             return;
         }
-        self.publisher.lock().unwrap().set(format!("{}", record.args()).into_boxed_str().into());
+        self.publisher
+            .lock()
+            .unwrap()
+            .set(format!("{}", record.args()).into_boxed_str().into());
     }
 
     fn flush(&self) {}
@@ -160,7 +161,7 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
 
         let _ = START_TIME.set(Instant::now());
 
-        let log_pub: Box<dyn log::Log> = Box::new(LogPub::default());
+        let log_pub: Box<dyn log::Log> = Box::<LogPub>::default();
 
         fern::Dispatch::new()
             // Add blanket level filter -

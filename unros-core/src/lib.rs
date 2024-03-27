@@ -14,11 +14,7 @@
 //! 5. The Service framework (analagous to ROS actions and services)
 
 #![allow(clippy::type_complexity)]
-#![feature(
-    once_cell_try,
-    result_flattening,
-    div_duration
-)]
+#![feature(once_cell_try, result_flattening, div_duration)]
 
 use std::{
     backtrace::Backtrace,
@@ -67,7 +63,7 @@ enum Running {
 }
 
 /// An object that all Nodes must store.
-/// 
+///
 /// This object allows Unros to track the state of the Node,
 /// specifically if it was dropped before being added to the Application
 /// or if the thread running this node has panicked.
@@ -82,7 +78,7 @@ impl<N: Node + ?Sized> NodeIntrinsics<N> {
         self.running = Running::Ignored;
     }
     /// Explicitly state that this Node has already started running.
-    /// 
+    ///
     /// If the thread panics, an error will be printed from now on. This is useful
     /// if you're wrapping around another Node that will not be added to the Application.
     pub fn manually_run(&mut self, name: Arc<str>) {
@@ -151,13 +147,13 @@ pub trait Node: Send + 'static {
     async fn run(self, context: RuntimeContext) -> anyhow::Result<()>;
 
     /// Get a mutable reference to the `NodeIntrinsics` in this Node.
-    /// 
+    ///
     /// Implementors only need to store 1 `NodeIntrinsics` object.
     fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self>;
 }
 
 /// Configuration for an `Application` that will be ran by Unros.
-/// 
+///
 /// Nodes and tasks added to this `Application` will not run until this
 /// object is returned back to Unros.
 pub struct Application {
@@ -200,7 +196,7 @@ impl Application {
     }
 
     /// Add a `Future` to this `Application`.
-    /// 
+    ///
     /// It will not be polled until this `Application` is ran.
     pub fn add_future(
         &mut self,
@@ -217,7 +213,7 @@ impl Application {
     }
 
     /// Add a task to this `Application`.
-    /// 
+    ///
     /// A task in this context is a function that returns a `Future`. This function
     /// will not be called until the `Application` is ran. The function will be given
     /// the `RuntimeContext` as its only parameter.
@@ -351,7 +347,7 @@ impl Drop for RuntimeContext {
 }
 
 /// A simple primitive for tracking when clones of itself have been dropped.
-/// 
+///
 /// Clones of this are all connected such that if any clone is dropped, all other
 /// clones will be aware of that. For an object that only tracks if its clones were
 /// dropped without updating them when itself is dropped, refer to `ObservingDropCheck`.
@@ -410,7 +406,7 @@ impl DropCheck {
 
 /// A similar object to `DropCheck`, however, none of its clones
 /// will be updated when this is dropped.
-/// 
+///
 /// This is equivalent to calling `dont_update_on_drop` on `DropCheck`,
 /// except that this is enforced statically.
 #[derive(Clone)]
@@ -510,7 +506,7 @@ static THREAD_DROP_CHECKS: SegQueue<Weak<Backtrace>> = SegQueue::new();
 ///
 /// Functionally, this just spawns a thread that will always be joined before the
 /// main thread exits, *assuming* that you call `start_unros_runtime`.
-/// 
+///
 /// There is no mechanism to terminate this thread when the runtime is exiting, so
 /// that is up to you. If your thread does not terminate affter some time after exiting,
 /// a backtrace will be printed, allowing you to identify which of your persistent threads
@@ -538,7 +534,7 @@ where
 }
 
 /// Spawns a blocking thread (using `spawn_persistent_thread`) that can be awaited on.
-/// 
+///
 /// Dropping or cancelling the future is not a valid way to terminate the thread. Refer
 /// to `spawn_persistent_thread` for more information.
 pub fn asyncify_run<F, T>(f: F) -> impl Future<Output = anyhow::Result<T>>
@@ -577,7 +573,7 @@ enum EndCondition {
 }
 
 /// The main entry point to an Unros runtime.
-/// 
+///
 /// The easiest way to use this is to use the `#[unros::main]` procedural macro that works
 /// very similarly to `#[tokio::main]`. Most functionality in this library depends on this
 /// function being called *exactly once.*

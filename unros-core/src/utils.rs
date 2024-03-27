@@ -165,10 +165,10 @@ impl<T> ResourceQueue<T> {
     }
 
     /// Manually sets a resource into this queue.
-    /// 
+    ///
     /// You only need to call this if you want to add elements into this queue since
     /// `ResourceGuard` calls this automatically.
-    /// 
+    ///
     /// If you set more values than this queue can hold, the oldest resource is dropped.
     pub fn set(&self, value: T) {
         self.queue
@@ -178,7 +178,7 @@ impl<T> ResourceQueue<T> {
 }
 
 /// An RAII Guard around a resource.
-/// 
+///
 /// When this is dropped, the resource will be returned to the `ResourceQueue`.
 pub struct ResourceGuard<'a, T> {
     inner: Option<T>,
@@ -188,7 +188,7 @@ pub struct ResourceGuard<'a, T> {
 impl<'a, T> ResourceGuard<'a, T> {
     /// Unwraps this object, returning the resource instead of returning it to the
     /// `ResourceQueue`.
-    /// 
+    ///
     /// If the queue is lacking a resource, a new one will be generated.
     pub fn do_not_return(mut this: Self) -> T {
         this.inner.take().unwrap()

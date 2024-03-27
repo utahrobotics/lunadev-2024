@@ -10,12 +10,12 @@ pub struct RateLogger {
     epoch: usize,
     count: usize,
     /// The duration of time in seconds to track `increment` for.
-    /// 
+    ///
     /// Logs are produced every `window_size` seconds. You are advised
     /// to not change this after `increment` has been called.
     pub window_size: f32,
     /// The target to log to.
-    /// 
+    ///
     /// This is essentially the name that will be added to the log.
     pub target: String,
 }

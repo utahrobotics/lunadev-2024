@@ -12,7 +12,8 @@ use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait, asyncify_run,
     logging::{
-        dump::{ScalingFilter, VideoDataDump}, get_log_pub,
+        dump::{ScalingFilter, VideoDataDump},
+        get_log_pub,
     },
     pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
     setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext,
@@ -127,7 +128,7 @@ impl Node for Telemetry {
                 get_log_pub().accept_subscription(channels.logs.create_reliable_subscription());
 
                 let important_fut = async {
-                    let mut important_pub = Publisher::default();
+                    let important_pub = Publisher::default();
                     let mut important_sub = Subscriber::new(8);
                     channels
                         .important
@@ -155,7 +156,7 @@ impl Node for Telemetry {
                 };
 
                 let steering_fut = async {
-                    let mut controls_pub = Publisher::default();
+                    let controls_pub = Publisher::default();
                     let mut controls_sub = Subscriber::new(1);
                     controls_pub
                         .accept_subscription(channels.controls.create_unreliable_subscription());
@@ -182,7 +183,7 @@ impl Node for Telemetry {
                 };
 
                 let camera_fut = async {
-                    let mut camera_pub = Publisher::default();
+                    let camera_pub = Publisher::default();
                     let mut camera_sub = Subscriber::new(1);
                     channels
                         .camera
