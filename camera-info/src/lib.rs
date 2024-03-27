@@ -10,15 +10,14 @@ use std::{
 };
 
 use apriltag::AprilTagDetector;
-use image::{imageops::FilterType, DynamicImage, ImageBuffer, Rgb};
+use image::DynamicImage;
 use opencv::{
     calib3d::{
-        calibrate_camera, find_chessboard_corners, get_optimal_new_camera_matrix, undistort,
-        CALIB_CB_ADAPTIVE_THRESH, CALIB_CB_NORMALIZE_IMAGE,
+        calibrate_camera, find_chessboard_corners, get_optimal_new_camera_matrix, CALIB_CB_ADAPTIVE_THRESH, CALIB_CB_NORMALIZE_IMAGE,
     },
     core::{
-        Mat, MatTraitConst, MatTraitConstManual, MatTraitManual, Point3f, Rect, Size, TermCriteria,
-        Vector, CV_8UC3,
+        Mat, MatTraitConst, Point3f, Rect, Size, TermCriteria,
+        Vector,
     },
     imgproc::corner_sub_pix,
     types::{VectorOfMat, VectorOfPoint2f, VectorOfPoint3f, VectorOfVec3d},
@@ -26,6 +25,7 @@ use opencv::{
 use rig::Robot;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string_pretty, to_writer_pretty};
+use sub::Undistorter;
 use unros::{
     anyhow::{self, Context},
     log,
@@ -37,6 +37,8 @@ use unros::{
     tokio::{self, task::JoinHandle},
     Application,
 };
+
+pub mod sub;
 
 static CAMERA_DB: OnceLock<HashMap<String, Arc<CameraInfo>>> = OnceLock::new();
 
@@ -95,10 +97,10 @@ struct DistortionData {
     distortion_coefficients: Vec<f64>,
     camera_matrix: [f64; 9],
     new_camera_matrix: [f64; 9],
-    roi_x: usize,
-    roi_y: usize,
-    roi_width: usize,
-    roi_height: usize,
+    roi_x: u32,
+    roi_y: u32,
+    roi_width: u32,
+    roi_height: u32,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -113,7 +115,7 @@ pub struct CameraInfo {
     pub focal_length_px: Option<NonZeroUsize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    distortion_data: Option<DistortionData>,
+    distortion_data: Option<Arc<DistortionData>>,
 }
 
 impl CameraInfo {
@@ -121,75 +123,31 @@ impl CameraInfo {
         get_camera_db().get(name).cloned()
     }
 
-    pub fn undistort_subscription(
+    pub fn undistort_subscription<T: Subscription<Item=Arc<DynamicImage>>>(
         &self,
-        sub: DirectSubscription<Arc<DynamicImage>>,
-    ) -> Result<impl Subscription<Item = Arc<DynamicImage>>, DirectSubscription<Arc<DynamicImage>>>
+        sub: T,
+    ) -> Result<Undistorter<T>, T>
     {
         if let Some(distortion_data) = self.distortion_data.clone() {
-            Ok(sub.map(move |dyn_img: Arc<DynamicImage>| {
-                let mut src = Mat::new_rows_cols_with_default(
-                    dyn_img.height() as i32,
-                    dyn_img.width() as i32,
-                    CV_8UC3,
-                    1.into(),
-                )
-                .unwrap();
-                src.data_bytes_mut()
-                    .unwrap()
-                    .copy_from_slice(&dyn_img.to_rgb8());
-                let mut dst = Mat::new_rows_cols_with_default(
-                    dyn_img.height() as i32,
-                    dyn_img.width() as i32,
-                    CV_8UC3,
-                    1.into(),
-                )
-                .unwrap();
-                let camera_matrix =
-                    Mat::from_slice_rows_cols(&distortion_data.camera_matrix, 3, 3).unwrap();
-                let new_camera_matrix =
-                    Mat::from_slice_rows_cols(&distortion_data.new_camera_matrix, 3, 3).unwrap();
-                let dist_coeffs: Vector<f64> = distortion_data
-                    .distortion_coefficients
-                    .iter()
-                    .copied()
-                    .collect();
-
-                match undistort(
-                    &src,
-                    &mut dst,
-                    &camera_matrix,
-                    &dist_coeffs,
-                    &new_camera_matrix,
-                ) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        log::error!("Failed to undistort image: {e}");
-                        return dyn_img;
-                    }
-                }
-
-                let img = ImageBuffer::<Rgb<u8>, _>::from_vec(
-                    dyn_img.width(),
-                    dyn_img.height(),
-                    dst.data_bytes().unwrap().to_vec(),
-                )
-                .unwrap();
-                let mut img: DynamicImage = img.into();
-                img = img
-                    .crop_imm(
-                        distortion_data.roi_x as u32,
-                        distortion_data.roi_y as u32,
-                        distortion_data.roi_width as u32,
-                        distortion_data.roi_height as u32,
-                    )
-                    .resize_to_fill(dyn_img.width(), dyn_img.height(), FilterType::Triangle);
-
-                Arc::new(img)
-            }))
+            Ok(Undistorter {
+                inner: sub,
+                distortion_data
+            })
         } else {
             Err(sub)
         }
+    }
+
+    pub fn get_undistorted_size(&self) -> (u32, u32) {
+        if let Some(data) = &self.distortion_data {
+            (data.roi_width, data.roi_height)
+        } else {
+            (self.width, self.height)
+        }
+    }
+
+    pub fn has_distortion_data(&self) -> bool {
+        self.distortion_data.is_some()
     }
 }
 
@@ -423,13 +381,13 @@ pub async fn interactive_examine(
                     distortion_coefficients: dist_coeffs.into_iter().collect(),
                     camera_matrix: array::from_fn(|i| *camera_matrix.at(i as i32).unwrap()),
                     new_camera_matrix: array::from_fn(|i| *new_camera_matrix.at(i as i32).unwrap()),
-                    roi_x: roi.x as usize,
-                    roi_y: roi.y as usize,
-                    roi_width: roi.width as usize,
-                    roi_height: roi.height as usize,
+                    roi_x: roi.x as u32,
+                    roi_y: roi.y as u32,
+                    roi_width: roi.width as u32,
+                    roi_height: roi.height as u32,
                 };
 
-                camera_info.distortion_data = Some(distortion_data);
+                camera_info.distortion_data = Some(distortion_data.into());
             }
 
             if let Some(FocalLengthEstimate {

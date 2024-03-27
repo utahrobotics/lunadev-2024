@@ -25,7 +25,7 @@ image = "0.24"
 ordered-float = "4"
 nalgebra = { version = "0.32", features = ["serde-serialize"] }
 toml = "0.8"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 anyhow = "1"
 crossbeam = "0.8"
 quaternion-core = "0.4"
