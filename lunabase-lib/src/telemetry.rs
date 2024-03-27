@@ -145,7 +145,7 @@ impl INode for LunabotConn {
                                         continue;
                                     }
                                 };
-                                
+
                                 match msg {
                                     ImportantMessage::Ping => pinged = false,
                                     _ => {}
@@ -162,7 +162,7 @@ impl INode for LunabotConn {
                                         continue;
                                     }
                                 };
-                                
+
                                 godot_print!("{log}");
                             }
                             result = camera_sub.recv_or_closed() => {
@@ -176,10 +176,10 @@ impl INode for LunabotConn {
                                         continue;
                                     }
                                 };
-                                
+
                                 std::fs::write("camera.sdp", sdp.as_bytes())
                                             .expect("camera.sdp should be writable");
-    
+
                                 let mut child = std::process::Command::new("ffplay")
                                     .args([
                                         "-protocol_whitelist",
@@ -201,14 +201,14 @@ impl INode for LunabotConn {
                                     .stderr(Stdio::piped())
                                     .spawn()
                                     .expect("Failed to init ffplay process");
-    
+
                                 if let Some(mut ffplay) = ffplay.take() {
                                     let _ = ffplay.kill();
                                 }
-    
+
                                 let mut stderr = child.stderr.take().unwrap();
                                 ffplay = Some(child);
-    
+
                                 std::thread::spawn(move || {
                                     let _ = std::io::copy(
                                         &mut stderr,
@@ -261,7 +261,7 @@ impl INode for LunabotConn {
                             controls_pub.set(shared.controls_data.load());
                         }
                     }
-                    
+
                     shared.connected.store(false, Ordering::Relaxed);
                     shared.base_mut_queue.push(Box::new(|mut base| {
                         base.emit_signal("disconnected".into(), &[]);
