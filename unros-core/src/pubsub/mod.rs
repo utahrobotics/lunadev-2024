@@ -5,13 +5,10 @@
 //! to `Rust`'s channels in that they do not trigger code, unlike `ROS` subscriber callbacks.
 
 use std::{
-    io::Write,
-    ops::{Deref, DerefMut},
-    path::Path,
-    sync::{
+    io::Write, marker::PhantomData, ops::{Deref, DerefMut}, path::Path, sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Weak,
-    },
+    }
 };
 
 use crossbeam::{
@@ -31,7 +28,7 @@ use self::subs::{DirectSubscription, PublisherToken, Subscription};
 ///
 /// Publishers provide a simple way to send a message to receivers, much
 /// like Rust's channels. These are analagous to single-producer-multi-consumer
-/// channels.
+/// channels, except that a `Publisher` can be a producer to many different consumers.
 ///
 /// Signals make numerous clones of the values it will send, so you should
 /// use a type `T` that is cheap to clone with this signal. A good default is
@@ -50,15 +47,15 @@ impl<T> Default for Publisher<T> {
 }
 
 impl<T: Clone> Publisher<T> {
-    /// Sets a value into this signal, allowing it to be received by Subscribers.
+    /// Sets a value into this `Publisher`, allowing it to be received by Subscribers.
     ///
-    /// Only the node that owns this signal should call this method.
+    /// Only the node that owns this `Publisher` should call this method for hygiene.
     pub fn set(&mut self, value: T) {
         for _ in 0..self.subs.len() {
-            // This is thte only place we pop from subs, so we are guaranteed
+            // This is the only place we pop from subs, so we are guaranteed
             // to always have at least self.subs.len() to elements to pop
             let mut sub = self.subs.pop().unwrap();
-            if sub.push(value.clone()) {
+            if sub.push(value.clone(), PublisherToken(PhantomData)) {
                 self.subs.push(sub);
             }
         }
@@ -69,10 +66,12 @@ impl<T> Publisher<T> {
     /// Accepts a given subscription, allowing the corresponding `Subscriber` to
     /// receive new messages.
     pub fn accept_subscription(&self, sub: impl Subscription<Item = T> + Send + 'static) {
-        sub.increment_publishers(PublisherToken(()));
+        sub.increment_publishers(PublisherToken(PhantomData));
         self.subs.push(Box::new(sub));
     }
 
+    /// Gets a reference to this `Publisher` that is safe to share publicly since
+    /// users of that reference cannot set values into it.
     pub fn get_ref(&self) -> PublisherRef<T> {
         PublisherRef {
             subs: Arc::downgrade(&self.subs),
@@ -96,11 +95,55 @@ impl<T> Drop for Publisher<T> {
         };
 
         for sub in subs.into_iter() {
-            sub.decrement_publishers(PublisherToken(()));
+            sub.decrement_publishers(PublisherToken(PhantomData));
         }
     }
 }
 
+
+
+/// Similar to a `Publisher`, except that it can only publish to one `Subscriber`,
+/// eliminating the need for `T` to implement `Clone`.
+/// 
+/// As such, MonoPublishers must be created directly from Subscriptions using `From`
+/// and `Into`.
+pub struct MonoPublisher<T, S: Subscription<Item=T>> {
+    sub: Option<S>
+}
+
+impl<T, S: Subscription<Item=T>> From<S> for MonoPublisher<T, S> {
+    fn from(sub: S) -> Self {
+        Self { sub: Some(sub) }
+    }
+}
+
+impl<T, S: Subscription<Item=T>> MonoPublisher<T, S> {
+    /// Sets a value into this `MonoPublisher`, allowing it to be received by a Subscriber.
+    ///
+    /// Only the node that owns this `MonoPublisher` should call this method for hygiene.
+    pub fn set(&mut self, value: T) {
+        if let Some(sub) = &mut self.sub {
+            if !sub.push(value, PublisherToken(PhantomData)) {
+                self.sub = None;
+            }
+        }
+    }
+}
+
+impl<T, S: Subscription<Item=T>> Drop for MonoPublisher<T, S> {
+    fn drop(&mut self) {
+        if let Some(sub) = &self.sub {
+            sub.decrement_publishers(PublisherToken(PhantomData));
+        }
+    }
+}
+
+/// A non-owning reference to a `Publisher` that cannot be used to set values into
+/// the `Publisher`.
+/// 
+/// Sharing `&Publisher` publicly allows users of the reference to set a value into it
+/// which is in violation of how pubsub should work. Only one "thing" should ever be able
+/// to provide values.
 pub struct PublisherRef<T> {
     subs: Weak<SegQueue<Box<dyn Subscription<Item = T> + Send>>>,
 }
@@ -123,7 +166,7 @@ impl<T> PublisherRef<T> {
         let Some(subs) = self.subs.upgrade() else {
             return false;
         };
-        sub.increment_publishers(PublisherToken(()));
+        sub.increment_publishers(PublisherToken(PhantomData));
         subs.push(Box::new(sub));
         true
     }
@@ -136,45 +179,6 @@ impl<T> Clone for PublisherRef<T> {
         }
     }
 }
-
-#[derive(PartialEq, Eq)]
-pub enum EnqueueResult {
-    Ok,
-    Full,
-    Closed,
-}
-
-// impl<T: Send + 'static> Subscription<T> for Weak<ArrayQueue<T>> {
-//     fn push(&mut self, value: T) -> EnqueueResult {
-//         if let Some(queue) = self.upgrade() {
-//             if queue.force_push(value).is_some() {
-//                 EnqueueResult::Full
-//             } else {
-//                 EnqueueResult::Ok
-//             }
-//         } else {
-//             EnqueueResult::Closed
-//         }
-//     }
-//     fn clone(&self) -> Box<dyn Subscription<T>> {
-//         Box::new(Clone::clone(self))
-//     }
-// }
-
-// impl<T, F: FnMut(T) -> EnqueueResult + Send + Sync + Clone + 'static> Subscription<T> for F {
-//     fn push(&mut self, value: T) -> EnqueueResult {
-//         self(value)
-//     }
-//     fn clone(&self) -> Box<dyn Subscription<T>> {
-//         Box::new(Clone::clone(self))
-//     }
-// }
-
-// impl<T> Clone for Box<dyn Subscription<T>> {
-//     fn clone(&self) -> Self {
-//         Subscription::clone(self.deref())
-//     }
-// }
 
 struct SubscriberInner<T> {
     queue: ArrayQueue<T>,
@@ -191,7 +195,8 @@ pub struct Subscriber<T> {
     inner: Arc<SubscriberInner<T>>,
 }
 
-impl<T: Clone + Send + 'static> Subscriber<T> {
+impl<T: Send + 'static> Subscriber<T> {
+    /// Creates a new `Subscriber` that can store at most `size` elements inside.
     #[must_use]
     pub fn new(size: usize) -> Self {
         Self {
@@ -203,6 +208,8 @@ impl<T: Clone + Send + 'static> Subscriber<T> {
         }
     }
 
+    /// Gets the size of the `Subscriber`. This corresponds to the number of elements this
+    /// `Subscriber` can store, and *not* the number of elements currently in the `Subscriber`.
     pub fn get_size(&self) -> usize {
         self.inner.queue.capacity()
     }

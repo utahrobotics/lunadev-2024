@@ -1,3 +1,7 @@
+//! Subscriptions are produced by Subscribers with the intent of being consumed by Publishers.
+//! However, Subscriptions can be manipulated in the same way as iterators to change its generic
+//! type, allowing Subscriptions and Publishers with different generic types to connect.
+
 use std::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
@@ -8,12 +12,19 @@ use log::warn;
 
 use super::SubscriberInner;
 
-pub struct PublisherToken(pub(super) ());
+/// A token produced only by Publishers, ensuring that only Unros
+/// can call specific methods.
+pub struct PublisherToken<'a>(pub(super) PhantomData<&'a ()>);
 
+/// A trait for all Subscriptions, similar to the `Iterator` trait.
 pub trait Subscription {
     type Item;
 
-    fn push(&mut self, value: Self::Item) -> bool;
+    /// Places a value into this Subscription.
+    /// 
+    /// Returns `true` iff the value could be consumed. If `false` is returned,
+    /// this `Subscription` should be dropped by the caller.
+    fn push(&mut self, value: Self::Item, token: PublisherToken) -> bool;
 
     /// Changes the generic type of this `Subscription` using the given `map` function.
     fn map<F, O>(self, map: F) -> Map<Self, F, O>
@@ -43,6 +54,7 @@ pub trait Subscription {
         }
     }
 
+    /// Convenience method to box this subscription.
     fn boxed(self) -> BoxedSubscription<Self::Item>
     where
         Self: Sized + Send + 'static,
@@ -91,9 +103,15 @@ pub trait Subscription {
         self
     }
 
+    /// Analagous to `set_name`, except that mutation is done through a mutable reference.
     fn set_name_mut(&mut self, name: Box<str>);
 
+    /// Increments the publisher count of the `Subscriber`, which is important for it to know
+    /// when no more publishers are connected to it.
     fn increment_publishers(&self, token: PublisherToken);
+
+    /// Decrements the publisher count of the `Subscriber`, which is important for it to know
+    /// when no more publishers are connected to it.
     fn decrement_publishers(&self, token: PublisherToken);
 }
 
@@ -120,7 +138,7 @@ impl<T> Clone for DirectSubscription<T> {
 impl<T> Subscription for DirectSubscription<T> {
     type Item = T;
 
-    fn push(&mut self, value: Self::Item) -> bool {
+    fn push(&mut self, value: Self::Item, _token: PublisherToken) -> bool {
         if let Some(sub) = self.sub.upgrade() {
             if sub.queue.force_push(value).is_some() {
                 self.lag += 1;
@@ -171,8 +189,8 @@ where
 {
     type Item = O;
 
-    fn push(&mut self, value: Self::Item) -> bool {
-        self.inner.push((self.map)(value))
+    fn push(&mut self, value: Self::Item, token: PublisherToken) -> bool {
+        self.inner.push((self.map)(value), token)
     }
 
     fn set_name_mut(&mut self, name: Box<str>) {
@@ -211,9 +229,9 @@ where
 {
     type Item = O;
 
-    fn push(&mut self, value: Self::Item) -> bool {
+    fn push(&mut self, value: Self::Item, token: PublisherToken) -> bool {
         if let Some(value) = (self.map)(value) {
-            self.inner.push(value)
+            self.inner.push(value, token)
         } else {
             true
         }
@@ -247,8 +265,8 @@ pub type BoxedSubscription<T> = Box<dyn Subscription<Item = T> + Send>;
 impl<T> Subscription for BoxedSubscription<T> {
     type Item = T;
 
-    fn push(&mut self, value: Self::Item) -> bool {
-        self.deref_mut().push(value)
+    fn push(&mut self, value: Self::Item, token: PublisherToken) -> bool {
+        self.deref_mut().push(value, token)
     }
 
     fn set_name_mut(&mut self, name: Box<str>) {

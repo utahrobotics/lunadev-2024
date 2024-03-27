@@ -151,14 +151,17 @@ impl Write for DataDump {
     }
 }
 
+/// An error faced while writing video frames.
 #[derive(Debug)]
 pub enum VideoWriteError {
+    /// The size of the given image is incorrect.
     IncorrectDimensions {
         expected_width: u32,
         expected_height: u32,
         actual_width: u32,
         actual_height: u32,
     },
+    /// There is no information attached to the error.
     Unknown,
 }
 
@@ -193,8 +196,12 @@ impl std::fmt::Display for VideoDataDumpType {
     }
 }
 
+/// A dump for writing images into videos using `ffmpeg`.
+/// 
+/// If `ffmpeg` is not installed, it will be downloaded locally
+/// automatically.
 pub struct VideoDataDump {
-    video_writer: Arc<ArrayQueue<DynamicImage>>,
+    video_writer: Arc<ArrayQueue<Arc<DynamicImage>>>,
     writer_drop: DropCheck,
     width: u32,
     height: u32,
@@ -203,11 +210,16 @@ pub struct VideoDataDump {
     // start: Instant,
 }
 
+/// An error faced while initializing a `VideoDataDump`.
 #[derive(Debug)]
 pub enum VideoDumpInitError {
+    /// An error writing to or reading from `ffmpeg`.
     IOError(std::io::Error),
+    /// An error from `ffmpeg` while it was encoding the video.
     VideoError(String),
+    /// An error setting up the logging for the dump.
     LoggingError(anyhow::Error),
+    /// An error automatically installing `ffmpeg`.
     FFMPEGInstallError(String),
 }
 
@@ -233,9 +245,16 @@ impl Display for VideoDumpInitError {
     }
 }
 
+/// The type of filter used when scaling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalingFilter {
+    /// Nearest neighbor. Excellent for performance.
+    /// 
+    /// This adds no blurring whatsoever when upscaling, and mediocre quality when downscaling.
     Neighbor,
+    /// Uses a fast bilinear algorithm. Good for performance.
+    /// 
+    /// This adds some blurring when upscaling, and average quality when downscaling.
     FastBilinear,
 }
 
@@ -248,25 +267,15 @@ impl std::fmt::Display for ScalingFilter {
     }
 }
 
-pub enum SubtitleWriteError {
-    IOError(std::io::Error),
-}
-
 impl VideoDataDump {
+    /// Generates the sdp file for this data dump assuming that this dump
+    /// was made for RTP.
     #[must_use]
     pub fn generate_sdp(&self) -> Option<String> {
         let VideoDataDumpType::Rtp(addr) = &self.dump_type else {
             return None;
         };
         Some(format!(
-            //             "v=0
-            // o=- 0 0 IN IP4 127.0.0.1
-            // s=No Name
-            // c=IN IP4 {}
-            // t=0 0
-            // a=tool:libavformat 58.76.100
-            // m=video {} RTP/AVP 96
-            // a=rtpmap:96 H264/90000",
             "v=0
 o=- 0 0 IN IP4 127.0.0.1
 s=No Name
@@ -281,6 +290,9 @@ a=fmtp:96 packetization-mode=1",
         ))
     }
 
+    /// Creates a new `VideoDataDump` that displays to a window.
+    /// 
+    /// `ffplay` may need to be installed separately.
     pub fn new_display(
         in_width: u32,
         in_height: u32,
@@ -305,7 +317,7 @@ a=fmtp:96 packetization-mode=1",
             .spawn()
             .map_err(VideoDumpInitError::IOError)?;
 
-        let queue_sender = Arc::new(ArrayQueue::<DynamicImage>::new(1));
+        let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();
         let writer_drop = DropCheck::default();
         let reader_drop = writer_drop.clone();
@@ -327,7 +339,7 @@ a=fmtp:96 packetization-mode=1",
             };
             backoff.reset();
 
-            if let Err(e) = video_out.write_all(frame.into_rgb8().as_bytes()) {
+            if let Err(e) = video_out.write_all(frame.to_rgb8().as_bytes()) {
                 if e.kind() == ErrorKind::BrokenPipe {
                     error!("Display has closed!");
                     break;
@@ -346,6 +358,7 @@ a=fmtp:96 packetization-mode=1",
         })
     }
 
+    /// Creates a new `VideoDataDump` that writes to a video file.
     pub fn new_file(
         in_width: u32,
         in_height: u32,
@@ -396,6 +409,7 @@ a=fmtp:96 packetization-mode=1",
         )
     }
 
+    /// Creates a new `VideoDataDump` that streams to a client over RTP.
     pub fn new_rtp(
         in_width: u32,
         in_height: u32,
@@ -452,7 +466,7 @@ a=fmtp:96 packetization-mode=1",
         dump_type: VideoDataDumpType,
         mut output: FfmpegChild,
     ) -> Result<Self, VideoDumpInitError> {
-        let queue_sender = Arc::new(ArrayQueue::<DynamicImage>::new(1));
+        let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();
         let writer_drop = DropCheck::default();
         let reader_drop = writer_drop.clone();
@@ -494,7 +508,7 @@ a=fmtp:96 packetization-mode=1",
             };
             backoff.reset();
 
-            if let Err(e) = video_out.write_all(frame.into_rgb8().as_bytes()) {
+            if let Err(e) = video_out.write_all(frame.to_rgb8().as_bytes()) {
                 if e.kind() == ErrorKind::BrokenPipe {
                     error!("{} has closed!", dump_type2);
                     break;
@@ -517,7 +531,8 @@ a=fmtp:96 packetization-mode=1",
         })
     }
 
-    pub fn write_frame(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
+    /// Writes an image into this dump.
+    pub fn write_frame(&mut self, frame: Arc<DynamicImage>) -> Result<(), VideoWriteError> {
         if frame.width() != self.width || frame.height() != self.height {
             return Err(VideoWriteError::IncorrectDimensions {
                 expected_width: self.width,
@@ -542,7 +557,7 @@ a=fmtp:96 packetization-mode=1",
         }
     }
 
-    pub fn write_frame_quiet(&mut self, frame: DynamicImage) -> Result<(), VideoWriteError> {
+    pub fn write_frame_quiet(&mut self, frame: Arc<DynamicImage>) -> Result<(), VideoWriteError> {
         if frame.width() != self.width || frame.height() != self.height {
             return Err(VideoWriteError::IncorrectDimensions {
                 expected_width: self.width,
@@ -572,6 +587,12 @@ a=fmtp:96 packetization-mode=1",
     //     })
     // }
 }
+
+// /// An error while writing subtitles to a video.
+// pub enum SubtitleWriteError {
+//     /// An error while writing the subtitiles to the file.
+//     IOError(std::io::Error),
+// }
 
 // pub struct SubtitleDump {
 //     file: DataDump,

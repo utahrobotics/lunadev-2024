@@ -7,15 +7,13 @@ use std::{
 
 use anyhow::Context;
 use chrono::{Datelike, Timelike};
-use crossbeam::queue::SegQueue;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
 
 use crate::{
     logging::eyre::UnrosEyreMessage,
     pubsub::{
-        subs::{BoxedSubscription, Subscription},
-        Publisher,
+        Publisher, PublisherRef,
     },
     RunOptions,
 };
@@ -70,10 +68,16 @@ macro_rules! setup_logging {
 
 static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static START_TIME: OnceLock<Instant> = OnceLock::new();
-static LOG_SUBS: OnceLock<SegQueue<BoxedSubscription<Arc<str>>>> = OnceLock::new();
+static LOG_PUB: OnceLock<PublisherRef<Arc<str>>> = OnceLock::new();
 
-pub fn log_accept_subscription(sub: impl Subscription<Item = Arc<str>> + Send + 'static) {
-    LOG_SUBS.get_or_init(Default::default).push(sub.boxed());
+/// Gets a reference to the `Publisher` for logs.
+/// 
+/// # Panics
+/// Panics if the logger has not been initialized. If this method
+/// is called inside of or after `start_unros_runtime`, the logger is
+/// always initialized.
+pub fn get_log_pub() -> PublisherRef<Arc<str>> {
+    LOG_PUB.get().unwrap().clone()
 }
 
 #[derive(Default)]
@@ -90,13 +94,7 @@ impl log::Log for LogPub {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let mut publisher = self.publisher.lock().unwrap();
-        if let Some(subs) = LOG_SUBS.get() {
-            while let Some(sub) = subs.pop() {
-                publisher.accept_subscription(sub);
-            }
-        }
-        publisher.set(format!("{}", record.args()).into_boxed_str().into());
+        self.publisher.lock().unwrap().set(format!("{}", record.args()).into_boxed_str().into());
     }
 
     fn flush(&self) {}

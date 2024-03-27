@@ -1,12 +1,22 @@
+//! Simple primitives for tracking the rate at which events occur.
+
 use std::time::Instant;
 
 use log::info;
 
+/// Tracks the number of times its `increment` method is called within a specific duration and logs it.
 pub struct RateLogger {
     start: Instant,
     epoch: usize,
     count: usize,
+    /// The duration of time in seconds to track `increment` for.
+    /// 
+    /// Logs are produced every `window_size` seconds. You are advised
+    /// to not change this after `increment` has been called.
     pub window_size: f32,
+    /// The target to log to.
+    /// 
+    /// This is essentially the name that will be added to the log.
     pub target: String,
 }
 
@@ -23,6 +33,7 @@ impl Default for RateLogger {
 }
 
 impl RateLogger {
+    /// Increments the number of calls per duration of time.
     pub fn increment(&mut self) {
         let current_epoch = (self.start.elapsed().as_secs_f32() / self.window_size) as usize;
         if self.epoch != current_epoch {
