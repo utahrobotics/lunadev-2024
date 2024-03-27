@@ -11,13 +11,11 @@
 //! 2. A complete logging system
 //! 3. An asynchronous Node runtime
 //! 4. Publisher and Subscribers (analagous to ROS publisher and subscribers)
-//! 5. The Service trait (analagous to ROS actions and services)
+//! 5. The Service framework (analagous to ROS actions and services)
 
 #![allow(clippy::type_complexity)]
 #![feature(
-    associated_type_defaults,
     once_cell_try,
-    iter_collect_into,
     result_flattening,
     div_duration
 )]
@@ -69,15 +67,25 @@ enum Running {
     Ignored,
 }
 
+/// An object that all Nodes must store.
+/// 
+/// This object allows Unros to track the state of the Node,
+/// specifically if it was dropped before being added to the Application
+/// or if the thread running this node has panicked.
 pub struct NodeIntrinsics<N: Node + ?Sized> {
     running: Running,
     _phantom: PhantomData<N>,
 }
 
 impl<N: Node + ?Sized> NodeIntrinsics<N> {
+    /// Do not warn if the Node was dropped without being added to the Application.
     pub fn ignore_drop(&mut self) {
         self.running = Running::Ignored;
     }
+    /// Explicitly state that this Node has already started running.
+    /// 
+    /// If the thread panics, an error will be printed from now on. This is useful
+    /// if you're wrapping around another Node that will not be added to the Application.
     pub fn manually_run(&mut self, name: Arc<str>) {
         self.running = Running::Yes(name);
     }
@@ -131,21 +139,28 @@ pub trait Node: Send + 'static {
     /// Nodes are always expected to be asynchronous, as asynchronous code is much
     /// easier to manage.
     ///
-    /// If a node needs to run blocking code, it is recommended to use `tokio_rayon::spawn`
-    /// instead of `rayon::spawn` or `std::thread::spawn`, as `tokio_rayon` allows you
+    /// If a node needs to run blocking code, it is recommended to use `asyncify_run`
+    /// instead of `rayon::spawn` or `std::thread::spawn`, as `asyncify_run` allows you
     /// to await the spawned thread in a non-blocking way. If you spawn a thread and do not
     /// wait on it, you may accidentally exit this method while threads are still running.
     /// While this is not unsafe or incorrect, it can lead to misleading logs. Unros automatically
     /// logs all nodes whose `run` methods have returned as terminated, even if they have spawned
     /// threads that are still running.
     ///
-    /// Do keep in mind that `tokio_rayon` threads do not terminate if their handles are dropped,
+    /// Do keep in mind that `asyncify_run` threads do not terminate if not awaited or dropped,
     /// which relates back to the issue previously mentioned.
     async fn run(self, context: RuntimeContext) -> anyhow::Result<()>;
 
+    /// Get a mutable reference to the `NodeIntrinsics` in this Node.
+    /// 
+    /// Implementors only need to store 1 `NodeIntrinsics` object.
     fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self>;
 }
 
+/// Configuration for an `Application` that will be ran by Unros.
+/// 
+/// Nodes and tasks added to this `Application` will not run until this
+/// object is returned back to Unros.
 pub struct Application {
     pending: Vec<
         Box<
@@ -159,6 +174,7 @@ pub struct Application {
 }
 
 impl Application {
+    /// Add a `Node` to the application with its default name.
     pub fn add_node<N: Node>(&mut self, mut node: N) {
         let name: Arc<str> = Arc::from(N::DEFAULT_NAME.to_string().into_boxed_str());
         let name2 = name.clone();
@@ -171,6 +187,7 @@ impl Application {
         );
     }
 
+    /// Add a `Node` to the application with the given name.
     pub fn add_node_with_name<N: Node>(&mut self, mut node: N, name: impl Into<String>) {
         let name: Arc<str> = Arc::from(name.into().into_boxed_str());
         let name2 = name.clone();
@@ -183,6 +200,9 @@ impl Application {
         );
     }
 
+    /// Add a `Future` to this `Application`.
+    /// 
+    /// It will not be polled until this `Application` is ran.
     pub fn add_future(
         &mut self,
         fut: impl Future<Output = anyhow::Result<()>> + Send + 'static,
@@ -197,6 +217,11 @@ impl Application {
         }));
     }
 
+    /// Add a task to this `Application`.
+    /// 
+    /// A task in this context is a function that returns a `Future`. This function
+    /// will not be called until the `Application` is ran. The function will be given
+    /// the `RuntimeContext` as its only parameter.
     pub fn add_task<F: Future<Output = anyhow::Result<()>> + Send + 'static>(
         &mut self,
         f: impl FnOnce(RuntimeContext) -> F + Send + 'static,
@@ -251,6 +276,8 @@ impl Application {
         }
     }
 
+    /// Gets an `ObservingDropCheck` for the main thread that can be used to check
+    /// if the Unros runtime is exiting.
     #[must_use]
     pub fn get_main_thread_drop_check(&self) -> ObservingDropCheck {
         self.drop_check.get_observing()
@@ -276,6 +303,7 @@ impl RuntimeContext {
         &self.name
     }
 
+    /// If set to `true`, the entire Unros runtime will exit if this `RuntimeContext` is dropped.
     pub fn set_quit_on_drop(&mut self, value: bool) {
         self.quit_on_drop = value;
     }
@@ -313,8 +341,8 @@ impl RuntimeContext {
 
 impl Drop for RuntimeContext {
     fn drop(&mut self) {
-        let name = self.name.clone();
         if self.quit_on_drop {
+            let name = self.name.clone();
             let _ = self.node_sender.send(Box::new(move |join_set| {
                 warn!("Quitting runtime from {name}...");
                 join_set.abort_all();
@@ -323,6 +351,11 @@ impl Drop for RuntimeContext {
     }
 }
 
+/// A simple primitive for tracking when clones of itself have been dropped.
+/// 
+/// Clones of this are all connected such that if any clone is dropped, all other
+/// clones will be aware of that. For an object that only tracks if its clones were
+/// dropped without updating them when itself is dropped, refer to `ObservingDropCheck`.
 #[derive(Clone)]
 pub struct DropCheck {
     dropped: Arc<AtomicBool>,
@@ -347,23 +380,28 @@ impl Drop for DropCheck {
 }
 
 impl DropCheck {
+    /// Returns true iff a clone has been dropped.
     #[must_use]
     pub fn has_dropped(&self) -> bool {
         self.dropped.load(Ordering::SeqCst)
     }
 
+    /// Forget if a clone has been dropped.
     pub fn reset(&self) {
         self.dropped.store(true, Ordering::SeqCst);
     }
 
+    /// Ensures that this `DropCheck` will update its clones when dropped.
     pub fn update_on_drop(&mut self) {
         self.update_on_drop = true;
     }
 
+    /// Ensures that this `DropCheck` will *not* update its clones when dropped.
     pub fn dont_update_on_drop(&mut self) {
         self.update_on_drop = true;
     }
 
+    /// Get an observer to this `DropCheck` and its clones.
     pub fn get_observing(&self) -> ObservingDropCheck {
         ObservingDropCheck {
             dropped: self.dropped.clone(),
@@ -371,11 +409,18 @@ impl DropCheck {
     }
 }
 
+/// A similar object to `DropCheck`, however, none of its clones
+/// will be updated when this is dropped.
+/// 
+/// This is equivalent to calling `dont_update_on_drop` on `DropCheck`,
+/// except that this is enforced statically.
+#[derive(Clone)]
 pub struct ObservingDropCheck {
     dropped: Arc<AtomicBool>,
 }
 
 impl ObservingDropCheck {
+    /// Returns true iff a clone has been dropped.
     #[must_use]
     pub fn has_dropped(&self) -> bool {
         self.dropped.load(Ordering::SeqCst)
@@ -461,11 +506,16 @@ static THREAD_DROP_CHECKS: SegQueue<Weak<Backtrace>> = SegQueue::new();
 
 /// Spawns a thread that is guaranteed to run the given closure to completion.
 ///
-/// There is a caveat, and that is if the program is forcefully exited, this
+/// There is a caveat, and that is if the program is killed, this
 /// function cannot do anything.
 ///
 /// Functionally, this just spawns a thread that will always be joined before the
-/// main thread exits, *assuming* that you call `async_run_all` or `run_all`.
+/// main thread exits, *assuming* that you call `start_unros_runtime`.
+/// 
+/// There is no mechanism to terminate this thread when the runtime is exiting, so
+/// that is up to you. If your thread does not terminate affter some time after exiting,
+/// a backtrace will be printed, allowing you to identify which of your persistent threads
+/// is stuck. *As such, this function is expensive to call.*
 pub fn spawn_persistent_thread<F>(f: F)
 where
     F: FnOnce(),
@@ -488,6 +538,10 @@ where
     }));
 }
 
+/// Spawns a blocking thread (using `spawn_persistent_thread`) that can be awaited on.
+/// 
+/// Dropping or cancelling the future is not a valid way to terminate the thread. Refer
+/// to `spawn_persistent_thread` for more information.
 pub fn asyncify_run<F, T>(f: F) -> impl Future<Output = anyhow::Result<T>>
 where
     F: FnOnce() -> anyhow::Result<T>,
@@ -503,6 +557,7 @@ where
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
+/// Deserialize environment variables and dhe default config file into the given generic type.
 pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
     CONFIG
         .get_or_try_init(|| {
@@ -522,6 +577,11 @@ enum EndCondition {
     Dropped,
 }
 
+/// The main entry point to an Unros runtime.
+/// 
+/// The easiest way to use this is to use the `#[unros::main]` procedural macro that works
+/// very similarly to `#[tokio::main]`. Most functionality in this library depends on this
+/// function being called *exactly once.*
 pub fn start_unros_runtime<F: Future<Output = anyhow::Result<Application>> + Send + 'static>(
     main: impl FnOnce(Application) -> F,
     run_options: RunOptions,
