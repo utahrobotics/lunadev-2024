@@ -557,7 +557,7 @@ where
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-/// Deserialize environment variables and dhe default config file into the given generic type.
+/// Deserialize environment variables and the default config file into the given generic type.
 pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
     CONFIG
         .get_or_try_init(|| {

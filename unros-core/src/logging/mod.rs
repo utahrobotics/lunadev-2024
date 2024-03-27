@@ -1,3 +1,9 @@
+//! A good logging solution is instrumental to big projects with rapid
+//! prototyping cycles.
+//! 
+//! Having plenty sources of data while remaining highly configurable is
+//! the goal of Unros, and this module provides that.
+
 use std::{
     panic::catch_unwind,
     path::{Path, PathBuf},
