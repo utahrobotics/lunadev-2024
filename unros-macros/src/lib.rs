@@ -4,6 +4,26 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, ItemFn};
 
+/// Wraps the given method to be ran using `start_unros_runtime`.
+/// 
+/// This can be used on any method, but we will use `main` as an example:
+/// 
+/// ```rust
+/// fn main() {
+///     todo!()
+/// }
+/// ```
+/// 
+/// The above code needs to be converted to the below code:
+/// 
+/// ```rust
+/// #[unros::main]
+/// async fn main(app: unros::Application) -> unros::anyhow::Result<unros::Application> {
+///     todo!()
+/// }
+/// ```
+/// 
+/// Refer to the [book](https://utahrobotics.github.io/unros-book/hello-goodbye.html) for more information.
 #[proc_macro_attribute]
 pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {

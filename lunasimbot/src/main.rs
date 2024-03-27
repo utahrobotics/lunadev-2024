@@ -59,7 +59,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
             let img = costmap_ref.obstacles_to_img(&obstacles);
             // let img = costmap_ref.costmap_to_img(&costmap).0;
 
-            costmap_display.write_frame(img.into()).unwrap();
+            costmap_display.write_frame(Arc::new(img.into())).unwrap();
         }
     });
 

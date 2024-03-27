@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 use opencv::{calib3d::undistort, core::{Mat, MatTraitConstManual, MatTraitManual, Vector, CV_8UC3}};
-use unros::{log, pubsub::subs::Subscription};
+use unros::{log, pubsub::subs::{PublisherToken, Subscription}};
 
 use crate::DistortionData;
 
@@ -15,7 +15,7 @@ pub struct Undistorter<I> {
 impl<I: Subscription<Item = Arc<DynamicImage>>> Subscription for Undistorter<I> {
     type Item = Arc<DynamicImage>;
 
-    fn push(&mut self, dyn_img: Self::Item) -> bool {
+    fn push(&mut self, dyn_img: Self::Item, token: PublisherToken) -> bool {
         let mut src = Mat::new_rows_cols_with_default(
             dyn_img.height() as i32,
             dyn_img.width() as i32,
@@ -73,18 +73,18 @@ impl<I: Subscription<Item = Arc<DynamicImage>>> Subscription for Undistorter<I> 
         //     )
         //     .resize_to_fill(dyn_img.width(), dyn_img.height(), FilterType::Triangle);
 
-        self.inner.push(Arc::new(img.into()))
+        self.inner.push(Arc::new(img.into()), token)
     }
 
     fn set_name_mut(&mut self, name: Box<str>) {
         self.inner.set_name_mut(name);
     }
 
-    fn increment_publishers(&self, token: unros::pubsub::subs::PublisherToken) {
+    fn increment_publishers(&self, token: PublisherToken) {
         self.inner.increment_publishers(token);
     }
 
-    fn decrement_publishers(&self, token: unros::pubsub::subs::PublisherToken) {
+    fn decrement_publishers(&self, token: PublisherToken) {
         self.inner.decrement_publishers(token);
     }
 }

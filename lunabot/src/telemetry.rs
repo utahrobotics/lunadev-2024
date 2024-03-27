@@ -1,6 +1,5 @@
 use std::{
     net::SocketAddrV4,
-    ops::Deref,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -13,8 +12,7 @@ use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait, asyncify_run,
     logging::{
-        dump::{ScalingFilter, VideoDataDump},
-        log_accept_subscription,
+        dump::{ScalingFilter, VideoDataDump}, get_log_pub,
     },
     pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
     setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext,
@@ -105,7 +103,7 @@ impl Node for Telemetry {
                     return Ok(());
                 }
                 if let Some(img) = self.image_subscriptions.try_recv() {
-                    self.video_dump.write_frame(img.deref().clone())?;
+                    self.video_dump.write_frame(img.clone())?;
                 }
 
                 let elapsed = start_service.elapsed();
@@ -126,7 +124,7 @@ impl Node for Telemetry {
                 };
                 info!("Connected to lunabase!");
                 let channels = Channels::new(&peer);
-                log_accept_subscription(channels.logs.create_reliable_subscription());
+                get_log_pub().accept_subscription(channels.logs.create_reliable_subscription());
 
                 let important_fut = async {
                     let mut important_pub = Publisher::default();
