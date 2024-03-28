@@ -10,5 +10,5 @@ unros = { path = "../unros" }
 enet = "0.3"
 fxhash = { workspace = true }
 serde = { workspace = true }
-bitcode = "0.5"
+bitcode = "0.6"
 # bimap = "0.6"
