@@ -161,7 +161,9 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
 
         let _ = START_TIME.set(Instant::now());
 
-        let log_pub: Box<dyn log::Log> = Box::<LogPub>::default();
+        let mut log_pub = LogPub::default();
+        let _ = LOG_PUB.set(log_pub.publisher.get_mut().unwrap().get_ref());
+        let log_pub: Box<dyn log::Log> = Box::new(log_pub);
 
         fern::Dispatch::new()
             // Add blanket level filter -
