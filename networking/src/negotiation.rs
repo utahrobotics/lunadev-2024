@@ -152,8 +152,8 @@ impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
                 }),
                 valid: Box::new(move || pub_received_packets2.get_sub_count() > 0),
             },
-        )
-        .unwrap();
+        );
+        
         Channel {
             channel_id: *ids,
             received_packets: recv_packets_sub,
