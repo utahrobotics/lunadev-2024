@@ -90,7 +90,7 @@ impl LocalCostmap {
         let cell_width = self.cell_width;
         let area_width = self.area_width;
         let height_step = self.height_step;
-        let mut sub = Subscriber::<Points<T>>::new(1);
+        let sub = Subscriber::<Points<T>>::new(1);
         let subscription = sub.create_subscription();
         let heightmap = self.heightmap.clone();
 

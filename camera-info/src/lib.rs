@@ -266,7 +266,7 @@ pub async fn interactive_examine(
         .unwrap();
     let camera_element = elements.remove("center").unwrap();
 
-    let mut camera_sub = Subscriber::new(1);
+    let camera_sub = Subscriber::new(1);
     accept_sub(camera_sub.create_subscription());
 
     app.add_task(
@@ -393,7 +393,7 @@ pub async fn interactive_examine(
                 id,
             }) = focal_length_estimate
             {
-                let mut pose_sub = Subscriber::new(1);
+                let pose_sub = Subscriber::new(1);
                 let mut length = img.width().max(img.height()) as f64 / 2.0;
                 let mut close_enoughs = 0usize;
                 let mut first = true;

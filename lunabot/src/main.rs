@@ -196,7 +196,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         "imu_ax,imu_ay,imu_az,imu_rvw,imu_rvi,imu_rvj,imu_rvk,vx,vy,vz,x,y,z,w,i,j,k,delta"
     )
     .unwrap();
-    let mut imu_sub = Subscriber::<IMUFrame>::new(32);
+    let imu_sub = Subscriber::<IMUFrame>::new(32);
     #[cfg(unix)]
     realsense_camera
         .imu_frame_received_pub()

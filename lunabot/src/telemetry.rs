@@ -6,8 +6,11 @@ use std::{
 
 use global_msgs::Steering;
 use image::DynamicImage;
-use lunabot::{Channels, ImportantMessage};
-use networking::{NetworkConnector, NetworkNode};
+use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
+use networking::{
+    negotiation::{ChannelNegotiation, Negotiation},
+    NetworkConnector, NetworkNode,
+};
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait, asyncify_run,
@@ -29,7 +32,22 @@ pub struct Telemetry {
     image_subscriptions: Subscriber<Arc<DynamicImage>>,
     video_dump: VideoDataDump,
     intrinsics: NodeIntrinsics<Self>,
+    negotiation: Negotiation<(
+        ChannelNegotiation<ImportantMessage>,
+        ChannelNegotiation<Arc<str>>,
+        ChannelNegotiation<u8>,
+        ChannelNegotiation<ControlsPacket>,
+        ChannelNegotiation<Arc<str>>,
+    )>,
 }
+// #[derive(Clone)]
+// pub struct Channels {
+//     pub important: Channel<ImportantMessage>,
+//     pub camera: Channel<Arc<str>>,
+//     pub odometry: Channel<u8>,
+//     pub controls: Channel<ControlsPacket>,
+//     pub logs: Channel<Arc<str>>,
+// }
 
 impl Telemetry {
     pub async fn new(
@@ -63,6 +81,7 @@ impl Telemetry {
             camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
             video_dump,
             intrinsics: Default::default(),
+            negotiation: make_negotiation(),
         })
     }
 
@@ -117,24 +136,28 @@ impl Node for Telemetry {
             loop {
                 info!("Connecting to lunabase...");
                 let peer = loop {
-                    let Some(peer) = self.network_connector.connect_to(self.server_addr).await
+                    let Some(peer) = self
+                        .network_connector
+                        .connect_to(self.server_addr, &())
+                        .await
                     else {
                         continue;
                     };
                     break peer;
                 };
+                let Some((important, camera, _odometry, controls, logs)) =
+                    peer.negotiate(&self.negotiation)
+                else {
+                    continue;
+                };
                 info!("Connected to lunabase!");
-                let channels = Channels::new(&peer);
-                get_log_pub().accept_subscription(channels.logs.create_reliable_subscription());
+                get_log_pub().accept_subscription(logs.create_reliable_subscription());
 
                 let important_fut = async {
                     let important_pub = Publisher::default();
-                    let mut important_sub = Subscriber::new(8);
-                    channels
-                        .important
-                        .accept_subscription(important_sub.create_subscription());
-                    important_pub
-                        .accept_subscription(channels.important.create_reliable_subscription());
+                    let important_sub = Subscriber::new(8);
+                    important.accept_subscription(important_sub.create_subscription());
+                    important_pub.accept_subscription(important.create_reliable_subscription());
 
                     loop {
                         let Some(result) = important_sub.recv_or_closed().await else {
@@ -150,19 +173,18 @@ impl Node for Telemetry {
                         match msg {
                             ImportantMessage::EnableCamera => todo!(),
                             ImportantMessage::DisableCamera => todo!(),
-                            ImportantMessage::Ping => important_pub.set(ImportantMessage::Ping),
+                            ImportantMessage::Ping => {
+                                important_pub.set(ImportantMessage::Ping);
+                            }
                         }
                     }
                 };
 
                 let steering_fut = async {
                     let controls_pub = Publisher::default();
-                    let mut controls_sub = Subscriber::new(1);
-                    controls_pub
-                        .accept_subscription(channels.controls.create_unreliable_subscription());
-                    channels
-                        .controls
-                        .accept_subscription(controls_sub.create_subscription());
+                    let controls_sub = Subscriber::new(1);
+                    controls_pub.accept_subscription(controls.create_unreliable_subscription());
+                    controls.accept_subscription(controls_sub.create_subscription());
                     loop {
                         let Some(result) = controls_sub.recv_or_closed().await else {
                             break;
@@ -184,11 +206,9 @@ impl Node for Telemetry {
 
                 let camera_fut = async {
                     let camera_pub = Publisher::default();
-                    let mut camera_sub = Subscriber::new(1);
-                    channels
-                        .camera
-                        .accept_subscription(camera_sub.create_subscription());
-                    camera_pub.accept_subscription(channels.camera.create_reliable_subscription());
+                    let camera_sub = Subscriber::new(1);
+                    camera.accept_subscription(camera_sub.create_subscription());
+                    camera_pub.accept_subscription(camera.create_reliable_subscription());
                     camera_pub.set(sdp.clone());
 
                     loop {

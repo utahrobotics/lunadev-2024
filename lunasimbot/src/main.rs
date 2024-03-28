@@ -64,7 +64,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     });
 
     let pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.1);
-    let mut path_sub = Subscriber::new(1);
+    let path_sub = Subscriber::new(1);
     pathfinder
         .path_pub()
         .accept_subscription(path_sub.create_subscription());
@@ -91,7 +91,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let imu_pub = Publisher::default();
     imu_pub.accept_subscription(localizer.create_imu_sub().set_name("imu"));
 
-    let mut steering_sub = Subscriber::new(1);
+    let steering_sub = Subscriber::new(1);
     driver
         .steering_pub()
         .accept_subscription(steering_sub.create_subscription());

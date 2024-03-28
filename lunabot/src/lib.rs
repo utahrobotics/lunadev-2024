@@ -4,11 +4,31 @@ use localization::frames::IMUFrame;
 use nalgebra::Vector3;
 use networking::{
     bitcode::{self, Decode, Encode},
-    Channel, ChannelMap, NetworkPeer,
+    negotiation::{ChannelNegotiation, Negotiation},
 };
 use rig::{euler_to_quat, RobotElementRef, RotationSequence, RotationType};
 use serial::{Bytes, SerialConnection};
 use unros::log;
+
+pub fn make_negotiation() -> Negotiation<(
+    ChannelNegotiation<ImportantMessage>,
+    ChannelNegotiation<Arc<str>>,
+    ChannelNegotiation<u8>,
+    ChannelNegotiation<ControlsPacket>,
+    ChannelNegotiation<Arc<str>>,
+)> {
+    Negotiation::new(
+        (
+            ChannelNegotiation::new("important"),
+            ChannelNegotiation::new("camera"),
+            ChannelNegotiation::new("odometry"),
+            ChannelNegotiation::new("controls"),
+            ChannelNegotiation::new("logs"),
+        ),
+        46432,
+    )
+    .unwrap()
+}
 
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Default)]
 pub struct ControlsPacket {
@@ -17,35 +37,12 @@ pub struct ControlsPacket {
     pub arm_vel: i8,
 }
 
-#[derive(Clone)]
-pub struct Channels {
-    pub important: Channel<ImportantMessage>,
-    pub camera: Channel<Arc<str>>,
-    pub odometry: Channel<u8>,
-    pub controls: Channel<ControlsPacket>,
-    pub logs: Channel<Arc<str>>,
-}
-
 #[derive(Debug, Eq, PartialEq, Encode, Decode, Clone, Copy)]
 #[repr(u8)]
 pub enum ImportantMessage {
     EnableCamera,
     DisableCamera,
     Ping,
-}
-
-impl Channels {
-    pub fn new(peer: &NetworkPeer) -> Self {
-        let mut channel_map = ChannelMap::new(2342);
-
-        Channels {
-            important: peer.create_channel(channel_map.add_channel("important").unwrap()),
-            camera: peer.create_channel(channel_map.add_channel("camera").unwrap()),
-            odometry: peer.create_channel(channel_map.add_channel("odometry").unwrap()),
-            controls: peer.create_channel(channel_map.add_channel("controls").unwrap()),
-            logs: peer.create_channel(channel_map.add_channel("logs").unwrap()),
-        }
-    }
 }
 
 pub async fn open_imu(

@@ -26,7 +26,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .context("Failed to discover cameras")?
         .for_each(|_| {});
     let camera = Camera::new(CAMERA_INDEX)?;
-    let mut camera_sub = Subscriber::new(1);
+    let camera_sub = Subscriber::new(1);
     camera
         .image_received_pub()
         .accept_subscription(camera_sub.create_subscription());
@@ -34,7 +34,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_task(
         move |context| async move {
             setup_logging!(context);
-            let mut pose_sub = Subscriber::new(1);
+            let pose_sub = Subscriber::new(1);
             let mut length = IMAGE_HEIGHT.max(IMAGE_WIDTH) as f64 / 2.0;
             let mut close_enoughs = 0usize;
 

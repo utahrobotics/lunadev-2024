@@ -24,7 +24,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     camera
         .image_received_pub()
         .accept_subscription(apriltag.create_image_subscription());
-    let mut pose_sub = Subscriber::new(1);
+    let pose_sub = Subscriber::new(1);
     apriltag.add_tag(Default::default(), Default::default(), 0.137, 0);
     apriltag
         .tag_detected_pub()

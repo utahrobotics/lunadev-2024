@@ -11,7 +11,7 @@ use std::{
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
-use lunabot::{Channels, ControlsPacket, ImportantMessage};
+use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
 use networking::NetworkNode;
 use unros::{
     default_run_options,
@@ -66,7 +66,7 @@ impl INode for LunabotConn {
         let shared = self.shared.clone().unwrap();
 
         let main = |mut app: Application| async move {
-            let (network_node, mut peer_receiver, _) = NetworkNode::new_server(
+            let (network_node, mut peer_receiver, _) = NetworkNode::new_server::<()>(
                 SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM),
                 1,
             );
@@ -74,13 +74,14 @@ impl INode for LunabotConn {
             app.add_task(|mut context| async move {
                 context.set_quit_on_drop(true);
                 setup_logging!(context);
+                let negotiation = make_negotiation();
 
                 loop {
                     let peer;
                     tokio::select! {
                         result = peer_receiver.recv() => {
                             let Some(tmp) = result else { break Ok(()); };
-                            peer = tmp;
+                            peer = tmp.unwrap().1;
                         }
                         _ = async {
                             loop {
@@ -103,23 +104,25 @@ impl INode for LunabotConn {
                     let mut pinged = false;
                     let mut ffplay: Option<std::process::Child> = None;
 
-                    let channels = Channels::new(&peer);
+                    let Some((important, camera, _odometry, controls, logs)) = peer.negotiate(&negotiation) else {
+                        continue;
+                    };
 
-                    let mut logs_sub = Subscriber::new(32);
-                    channels.logs.accept_subscription(logs_sub.create_subscription());
+                    let logs_sub = Subscriber::new(32);
+                    logs.accept_subscription(logs_sub.create_subscription());
 
-                    let mut camera_sub = Subscriber::new(1);
-                    channels.camera.accept_subscription(camera_sub.create_subscription());
+                    let camera_sub = Subscriber::new(1);
+                    camera.accept_subscription(camera_sub.create_subscription());
 
                     let controls_pub = Publisher::default();
-                    let mut controls_sub = Subscriber::new(1);
-                    channels.controls.accept_subscription(controls_sub.create_subscription());
-                    controls_pub.accept_subscription(channels.controls.create_unreliable_subscription());
+                    let controls_sub = Subscriber::new(1);
+                    controls.accept_subscription(controls_sub.create_subscription());
+                    controls_pub.accept_subscription(controls.create_unreliable_subscription());
 
                     let important_pub = Publisher::default();
-                    let mut important_sub = Subscriber::new(8);
-                    channels.important.accept_subscription(important_sub.create_subscription());
-                    important_pub.accept_subscription(channels.important.create_reliable_subscription());
+                    let important_sub = Subscriber::new(8);
+                    important.accept_subscription(important_sub.create_subscription());
+                    important_pub.accept_subscription(important.create_reliable_subscription());
 
                     loop {
                         let elapsed;

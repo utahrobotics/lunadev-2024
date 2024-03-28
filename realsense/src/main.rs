@@ -4,7 +4,7 @@ async fn main(mut app: unros::Application) -> unros::anyhow::Result<unros::Appli
     use unros::{pubsub::Subscriber, tokio};
 
     realsense::discover_all_realsense()?.for_each(|x| {
-        let mut img_sub = Subscriber::new(4);
+        let img_sub = Subscriber::new(4);
         x.image_received_pub()
             .accept_subscription(img_sub.create_subscription());
         // let mut imu_sub = x.imu_frame_received().watch();

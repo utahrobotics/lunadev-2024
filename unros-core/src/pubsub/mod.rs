@@ -54,8 +54,12 @@ impl<T: Clone> Publisher<T> {
     /// Sets a value into this `Publisher`, allowing it to be received by Subscribers.
     ///
     /// Only the node that owns this `Publisher` should call this method for hygiene.
-    pub fn set(&self, value: T) {
-        for _ in 0..self.subs.len() {
+    pub fn set(&self, value: T) -> bool {
+        let count = self.subs.len();
+        if count == 0 {
+            return false;
+        }
+        for _ in 0..count {
             // This is the only place we pop from subs, so we are guaranteed
             // to always have at least self.subs.len() to elements to pop
             let mut sub = self.subs.pop().unwrap();
@@ -63,6 +67,7 @@ impl<T: Clone> Publisher<T> {
                 self.subs.push(sub);
             }
         }
+        true
     }
 }
 
@@ -80,6 +85,10 @@ impl<T> Publisher<T> {
         PublisherRef {
             subs: Arc::downgrade(&self.subs),
         }
+    }
+
+    pub fn get_sub_count(&self) -> usize {
+        self.subs.len()
     }
 }
 
@@ -128,6 +137,14 @@ impl<T, S: Subscription<Item = T>> MonoPublisher<T, S> {
             if !sub.push(value, PublisherToken(PhantomData)) {
                 self.sub = None;
             }
+        }
+    }
+
+    pub fn get_pub_count(&self) -> usize {
+        if self.sub.is_some() {
+            1
+        } else {
+            0
         }
     }
 }
@@ -216,8 +233,12 @@ impl<T: Send + 'static> Subscriber<T> {
         self.inner.queue.capacity()
     }
 
+    pub fn get_pub_count(&self) -> usize {
+        self.inner.pub_count.load(Ordering::Acquire)
+    }
+
     /// Receive some message (waiting if none are available), or `None` if all `Publishers` have been dropped.
-    pub async fn recv_or_closed(&mut self) -> Option<T> {
+    pub async fn recv_or_closed(&self) -> Option<T> {
         loop {
             if let Some(value) = self.inner.queue.pop() {
                 return Some(value);
@@ -232,12 +253,12 @@ impl<T: Send + 'static> Subscriber<T> {
     }
 
     /// Try to receive a message if one is available.
-    pub fn try_recv(&mut self) -> Option<T> {
+    pub fn try_recv(&self) -> Option<T> {
         self.inner.queue.pop()
     }
 
     /// Wait until a message is received, even if all `Publisher`s have been dropped.
-    pub async fn recv(&mut self) -> T {
+    pub async fn recv(&self) -> T {
         if let Some(x) = self.recv_or_closed().await {
             x
         } else {
@@ -250,7 +271,7 @@ impl<T: Send + 'static> Subscriber<T> {
     ///
     /// Logs are saved to `path` using a `DataDump`.
     pub async fn into_logger(
-        mut self,
+        self,
         mut display: impl FnMut(T) -> String + Send + 'static,
         path: impl AsRef<Path>,
     ) -> std::io::Result<()> {
@@ -287,7 +308,7 @@ impl<T: Send + 'static> Subscriber<T> {
     /// Converts this `Subscriber` into a `WatchSubscriber`.
     ///
     /// Wait until a message is received, even if all `Publisher`s have been dropped.
-    pub async fn into_watch(mut self) -> WatchSubscriber<T> {
+    pub async fn into_watch(self) -> WatchSubscriber<T> {
         WatchSubscriber {
             value: self.recv().await,
             inner: self,
@@ -297,7 +318,7 @@ impl<T: Send + 'static> Subscriber<T> {
     /// Tries to convert this `Subscriber` into a `WatchSubscriber`.
     ///
     /// If no message is available, this `Subscriber` will be returned.
-    pub fn try_into_watch(mut self) -> Result<WatchSubscriber<T>, Self> {
+    pub fn try_into_watch(self) -> Result<WatchSubscriber<T>, Self> {
         if let Some(value) = self.try_recv() {
             Ok(WatchSubscriber { value, inner: self })
         } else {
@@ -308,7 +329,7 @@ impl<T: Send + 'static> Subscriber<T> {
     /// Convert this `Subscriber` into a `WatchSubscriber`.
     ///
     /// Wait until a message is received. If all `Publisher`s have been dropped this `Subscriber` will be returned.
-    pub async fn into_watch_or_closed(mut self) -> Result<WatchSubscriber<T>, Self> {
+    pub async fn into_watch_or_closed(self) -> Result<WatchSubscriber<T>, Self> {
         if let Some(value) = self.recv_or_closed().await {
             Ok(WatchSubscriber { value, inner: self })
         } else {

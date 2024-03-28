@@ -14,7 +14,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     discover_all_cameras()
         .context("Failed to discover cameras")?
         .for_each(|camera| {
-            let mut sub = Subscriber::new(8);
+            let sub = Subscriber::new(8);
             camera
                 .image_received_pub()
                 .accept_subscription(sub.create_subscription());

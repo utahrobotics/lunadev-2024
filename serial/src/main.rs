@@ -16,7 +16,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         true,
     )
     .await;
-    let mut sub = Subscriber::<Bytes>::new(8);
+    let sub = Subscriber::<Bytes>::new(8);
     serial
         .msg_received_pub()
         .accept_subscription(sub.create_subscription());
