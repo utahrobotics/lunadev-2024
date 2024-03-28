@@ -3,7 +3,6 @@ members = [
     "unros-core",
     "global-msgs",
     "lunabot",
-    "drive",
     "camera",
     "apriltag",
     "realsense",
