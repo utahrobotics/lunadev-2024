@@ -40,7 +40,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
             loop {
                 info!("Current length: {length:.2}");
-                let mut img_pub = Publisher::default();
+                let img_pub = Publisher::default();
                 let mut apriltag = AprilTagDetector::new(
                     length,
                     IMAGE_WIDTH,
