@@ -11,7 +11,7 @@ members = [
     "navigator",
     "rig", "tools", "smach", "costmap",
     # "smooth-diff-drive",
-    "lunasimbot", "unros-macros", "unros", "lunabase-lib", "camera-info", "networking",
+    "lunasimbot", "unros-macros", "unros", "lunabase-lib", "camera-info", "networking", "usb-pluggy",
 ]
 resolver = "2"
 exclude = ["publishing/", "logs/", "lunabase/", "camera-db/"]
