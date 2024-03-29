@@ -200,6 +200,7 @@ impl Node for NetworkNode {
                 match event {
                     laminar::SocketEvent::Packet(packet) => match conns.entry(packet.addr()) {
                         Entry::Occupied(mut entry) => {
+                            let addr = packet.addr();
                             if Retention::Drop
                                 == entry.get_mut().provide_data(
                                     packet,
@@ -207,6 +208,7 @@ impl Node for NetworkNode {
                                     self.peer_buffer_size,
                                 )
                             {
+                                info!("Received disconnect from {}", addr);
                                 entry.remove();
                             }
                         }
@@ -253,9 +255,11 @@ impl Node for NetworkNode {
                         continue;
                     }
                     laminar::SocketEvent::Timeout(addr) => {
+                        info!("Timed out from {addr}");
                         conns.remove(&addr);
                     }
                     laminar::SocketEvent::Disconnect(addr) => {
+                        info!("Disconnected from {addr}");
                         conns.remove(&addr);
                     }
                 }
