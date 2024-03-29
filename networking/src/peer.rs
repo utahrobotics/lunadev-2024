@@ -16,6 +16,13 @@ pub struct NetworkPublisher {
     pub(crate) valid: Box<dyn Fn() -> bool + Send + Sync>,
 }
 
+impl std::fmt::Debug for NetworkPublisher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NetworkPublisher").field("valid", &(self.valid)()).finish()
+    }
+}
+
+#[derive(Debug)]
 pub(super) enum AwaitingNegotiationReq {
     ServerNegotiation {
         negotiation_recv: oneshot::Receiver<FxHashMap<NonZeroU8, NetworkPublisher>>,
@@ -30,6 +37,7 @@ pub(super) enum AwaitingNegotiationReq {
     },
 }
 
+#[derive(Debug)]
 pub(super) enum PeerStateMachine {
     /// Variant only on the client side, created after the init data has been sent to the server
     /// but before a `Negotiate` has been received from the server.
@@ -88,6 +96,7 @@ impl PeerStateMachine {
                             quirk: PeerQuirk::ClientSide,
                         };
                         let peer_sender = std::mem::replace(peer_sender, oneshot::channel().0);
+                        println!("BB");
                         *self = PeerStateMachine::AwaitingNegotiation {
                             packets_sub,
                             req: AwaitingNegotiationReq::ClientNegotiation {
@@ -246,6 +255,7 @@ impl PeerStateMachine {
                         )) {
                             error!("Failed to send Negotiate to {addr}: {e}");
                         }
+                        println!("Aa");
                         
                         *self = PeerStateMachine::Connected {
                             packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),

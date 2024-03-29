@@ -38,6 +38,7 @@ use self::subs::{BoxedSubscription, DirectSubscription, PublisherToken, Subscrip
 /// use a type `T` that is cheap to clone with this signal. A good default is
 /// `Arc`. Since Nodes will often be used from different threads, the type `T`
 /// should also be `Send`.
+#[derive(Debug)]
 pub struct Publisher<T> {
     subs: Arc<SegQueue<Box<dyn Subscription<Item = T> + Send>>>,
 }
@@ -118,6 +119,7 @@ impl<T> Drop for Publisher<T> {
 ///
 /// As such, MonoPublishers must be created directly from Subscriptions using `From`
 /// and `Into`.
+#[derive(Debug)]
 pub struct MonoPublisher<T, S: Subscription<Item = T> = BoxedSubscription<T>> {
     sub: Option<S>,
 }
@@ -173,6 +175,7 @@ impl<T, S: Subscription<Item = T>> Drop for MonoPublisher<T, S> {
 /// Sharing `&Publisher` publicly allows users of the reference to set a value into it
 /// which is in violation of how pubsub should work. Only one "thing" should ever be able
 /// to provide values.
+#[derive(Debug)]
 pub struct PublisherRef<T> {
     subs: Weak<SegQueue<Box<dyn Subscription<Item = T> + Send>>>,
 }
@@ -209,6 +212,7 @@ impl<T> Clone for PublisherRef<T> {
     }
 }
 
+#[derive(Debug)]
 struct SubscriberInner<T> {
     queue: ArrayQueue<T>,
     notify: Notify,
@@ -220,6 +224,7 @@ struct SubscriberInner<T> {
 /// Subscribers are bounded queues that can receive messages `T`
 /// from multiple Publishers concurrently. To subscribe to a `Publisher`,
 /// a `Subscriber` must create a subscription and pass that to the `Publisher`.
+#[derive(Debug)]
 pub struct Subscriber<T> {
     inner: Arc<SubscriberInner<T>>,
 }

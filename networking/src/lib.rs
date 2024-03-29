@@ -39,6 +39,7 @@ enum SpecialMessage {
     Ack
 }
 
+#[derive(Debug)]
 enum PeerQuirk {
     ServerSide {
         received_client_negotiation: oneshot::Receiver<()>,
@@ -46,6 +47,7 @@ enum PeerQuirk {
     ClientSide,
 }
 
+#[derive(Debug)]
 pub struct NetworkPeer {
     remote_addr: SocketAddr,
     packets_to_send: DirectSubscription<Packet>,
@@ -182,6 +184,7 @@ impl Node for NetworkNode {
                 break Ok(());
             }
 
+            // println!("{conns:?}");
             while let Some(event) = socket.recv() {
                 match event {
                     laminar::SocketEvent::Packet(packet) => match conns.entry(packet.addr()) {
@@ -234,8 +237,8 @@ impl Node for NetworkNode {
                             }
                         }
                     },
-                    laminar::SocketEvent::Connect(_) => {
-                        // todo
+                    laminar::SocketEvent::Connect(addr) => {
+                        info!("Connected to {addr}");
                         continue;
                     }
                     laminar::SocketEvent::Timeout(addr) => {
@@ -254,10 +257,19 @@ impl Node for NetworkNode {
 
             while let Ok((packet, peer_sender)) = self.address_receiver.try_recv() {
                 let addr = packet.addr();
-                conns.insert(packet.addr(), PeerStateMachine::Connecting { peer_sender });
 
-                if let Err(e) = socket.send(packet) {
-                    error!("Failed to connect to {addr}: {e}");
+                match conns.entry(packet.addr()) {
+                    Entry::Occupied(_) => {
+                        error!("Already connected to {}", packet.addr());
+                        continue;
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(PeerStateMachine::Connecting { peer_sender });
+
+                        if let Err(e) = socket.send(packet) {
+                            error!("Failed to connect to {addr}: {e}");
+                        }
+                    }
                 }
             }
 

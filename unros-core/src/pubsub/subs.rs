@@ -119,6 +119,7 @@ pub trait Subscription {
 /// that created the subscription to receive messages from that `Publisher`.
 ///
 /// If dropped, no change will occur to the `Subscriber` and no resources will be leaked.
+#[derive(Debug)]
 pub struct DirectSubscription<T> {
     pub(super) sub: Weak<SubscriberInner<T>>,
     pub(super) name: Option<Box<str>>,
@@ -176,6 +177,7 @@ impl<T> Subscription for DirectSubscription<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct Map<I, F, O> {
     inner: I,
     map: F,
@@ -216,6 +218,7 @@ impl<I: Clone, F: Clone, O> Clone for Map<I, F, O> {
     }
 }
 
+#[derive(Debug)]
 pub struct FilterMap<I, F, O> {
     inner: I,
     map: F,
