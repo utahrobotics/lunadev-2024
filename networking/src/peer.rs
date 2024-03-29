@@ -118,7 +118,7 @@ impl PeerStateMachine {
                         }
                     }
                     Err(e) => {
-                        error!("Failed to parse special_msg from {addr}: {e}");
+                        error!("Failed to parse special_msg from {addr} while connecting: {e}");
                         Retention::Retain
                     }
                 }
@@ -170,7 +170,7 @@ impl PeerStateMachine {
                         }
                     }
                     Err(e) => {
-                        error!("Failed to parse special_msg from {addr}: {e}");
+                        error!("Failed to parse special_msg from {addr} while awaiting negotiation: {e}");
                         Retention::Retain
                     }
                 }
@@ -188,7 +188,7 @@ impl PeerStateMachine {
                         Ok(SpecialMessage::Disconnect) => return Retention::Drop,
 
                         Ok(x) => error!("Unexpected special_msg from {addr}: {x:?}"),
-                        Err(e) => error!("Failed to parse special_msg from {addr}: {e}"),
+                        Err(e) => error!("Failed to parse special_msg from {addr} while connected: {e}"),
                     }
                     return Retention::Retain;
                 };
@@ -223,6 +223,7 @@ impl PeerStateMachine {
         match self {
             PeerStateMachine::Connecting { peer_sender } => {
                 if peer_sender.is_closed() {
+                    debug!("{addr} dropped while connecting");
                     Retention::Drop
                 } else {
                     Retention::Retain
@@ -252,7 +253,10 @@ impl PeerStateMachine {
 
                         Retention::Retain
                     }
-                    Err(TryRecvError::Closed) => Retention::Drop,
+                    Err(TryRecvError::Closed) => {
+                        debug!("{addr} dropped while awaiting server negotiation");
+                        Retention::Drop
+                    },
                     Err(TryRecvError::Empty) => Retention::Retain,
                 },
                 AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
@@ -260,6 +264,7 @@ impl PeerStateMachine {
                     client_negotiation_sender,
                 } => {
                     if client_negotiation_sender.is_closed() {
+                        debug!("{addr} dropped while awaiting client response from server");
                         Retention::Drop
                     } else {
                         Retention::Retain
@@ -283,7 +288,10 @@ impl PeerStateMachine {
 
                             Retention::Retain
                         }
-                        Err(TryRecvError::Closed) => Retention::Drop,
+                        Err(TryRecvError::Closed) => {
+                            debug!("{addr} dropped while awaiting client negotiation");
+                            Retention::Drop
+                        }
                         Err(TryRecvError::Empty) => Retention::Retain,
                     }
                 }
@@ -301,6 +309,12 @@ impl PeerStateMachine {
                 packets_router.retain(|_, netpub| (netpub.valid)());
 
                 if packets_router.is_empty() && packets_sub.get_pub_count() == 0 {
+                    let mut payload = bitcode::encode(&SpecialMessage::Disconnect).unwrap();
+                    payload.push(0);
+                    if let Err(e) = socket.send(Packet::reliable_ordered(addr, payload, None)) {
+                        error!("Failed to send disconnect packet to {addr}: {e}");
+                    }
+                    debug!("Disconnected from {addr} as pubsub are dropped");
                     Retention::Drop
                 } else {
                     Retention::Retain

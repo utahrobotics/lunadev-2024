@@ -67,6 +67,12 @@ macro_rules! setup_logging {
                 $crate::log::debug!(target: $context.get_name(), $dol ($dol arg)+)
             };
         }
+        #[allow(unused_macros)]
+        macro_rules! trace {
+            ($dol ($dol arg:tt)+) => {
+                $crate::log::trace!(target: $context.get_name(), $dol ($dol arg)+)
+            };
+        }
     };
 }
 
