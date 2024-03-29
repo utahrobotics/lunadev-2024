@@ -101,10 +101,13 @@ impl INode for LunabotConn {
                         }
                     }
 
-                    let Some((important, camera, _odometry, controls, logs)) = peer.negotiate(&negotiation).await else {
-                        error!("Failed to negotiate with lunabot!");
-                        godot_error!("Failed to negotiate with lunabot!");
-                        continue;
+                    let (important, camera, _odometry, controls, logs) = match peer.negotiate(&negotiation).await {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!("Failed to negotiate with lunabot! {e:?}");
+                            godot_error!("Failed to negotiate with lunabot! {e:?}");
+                            continue;
+                        }
                     };
 
                     shared.base_mut_queue.push(Box::new(|mut base| {
@@ -115,7 +118,7 @@ impl INode for LunabotConn {
                     let mut last_receive_time = Instant::now();
                     let mut pinged = false;
                     let mut ffplay: Option<std::process::Child> = None;
-                    
+
                     let logs_sub = Subscriber::new(32);
                     logs.accept_subscription(logs_sub.create_subscription());
 

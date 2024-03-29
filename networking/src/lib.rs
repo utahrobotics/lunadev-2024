@@ -52,23 +52,29 @@ pub struct NetworkPeer {
     quirk: PeerQuirk,
 }
 
+#[derive(Debug)]
+pub enum NegotiationError {
+    ClientDidNotNegotiate,
+    ServerDropped
+}
+
 impl NetworkPeer {
     pub async fn negotiate<T: FromPeer>(
         mut self,
         negotiation: &Negotiation<T>,
-    ) -> Option<T::Product> {
+    ) -> Result<T::Product, NegotiationError> {
         match std::mem::replace(&mut self.quirk, PeerQuirk::ClientSide) {
             PeerQuirk::ServerSide {
                 received_client_negotiation,
-            } => received_client_negotiation.await.ok()?,
+            } => received_client_negotiation.await.map_err(|_| NegotiationError::ClientDidNotNegotiate)?,
 
             PeerQuirk::ClientSide => {}
         }
 
         let mut map = FxHashMap::default();
         let negotiation = T::from_peer(&self, &negotiation.channel_ids, &mut map);
-        self.packets_router.send(map).ok()?;
-        Some(negotiation)
+        self.packets_router.send(map).map_err(|_| NegotiationError::ServerDropped)?;
+        Ok(negotiation)
     }
 
     pub fn get_remote_addr(&self) -> SocketAddr {

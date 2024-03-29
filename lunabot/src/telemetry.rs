@@ -145,11 +145,14 @@ impl Node for Telemetry {
                         Err(ConnectionError::Timeout) => {}
                     };
                 };
-                let Some((important, camera, _odometry, controls, logs)) =
-                    peer.negotiate(&self.negotiation).await
-                else {
-                    error!("Failed to negotiate with lunabase!");
-                    continue;
+                let (important, camera, _odometry, controls, logs) =
+                    match peer.negotiate(&self.negotiation).await
+                {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!("Failed to negotiate with lunabase!: {e:?}");
+                        continue;
+                    }
                 };
                 info!("Connected to lunabase!");
                 get_log_pub().accept_subscription(logs.create_reliable_subscription());
