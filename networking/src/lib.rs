@@ -57,22 +57,13 @@ impl NetworkPeer {
         mut self,
         negotiation: &Negotiation<T>,
     ) -> Option<T::Product> {
-        match self.quirk {
+        match std::mem::replace(&mut self.quirk, PeerQuirk::ClientSide) {
             PeerQuirk::ServerSide {
                 received_client_negotiation,
             } => received_client_negotiation.await.ok()?,
 
-            PeerQuirk::ClientSide => {
-                let mut pubber = MonoPublisher::from(self.packets_to_send.clone());
-                pubber.set(Packet::reliable_ordered(
-                    self.remote_addr,
-                    bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
-                    None,
-                ));
-            }
+            PeerQuirk::ClientSide => {}
         }
-
-        self.quirk = PeerQuirk::ClientSide;
 
         let mut map = FxHashMap::default();
         let negotiation = T::from_peer(&self, &negotiation.channel_ids, &mut map);
@@ -103,7 +94,7 @@ impl NetworkConnector {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.address_sender
             .send((
-                Packet::reliable_sequenced(addr, bitcode::encode(init_data).unwrap(), None),
+                Packet::reliable_ordered(addr, bitcode::encode(init_data).unwrap(), None),
                 sender,
             ))
             .map_err(|_| ConnectionError::ServerDropped)?;
@@ -124,7 +115,7 @@ pub fn new_client() -> laminar::Result<(NetworkNode, NetworkConnector)> {
     let (address_sender, address_receiver) = std::sync::mpsc::channel();
     Ok((
         NetworkNode {
-            socket: Socket::bind_any()?,
+            socket: Socket::bind("0.0.0.0:0")?,
             service_duration: Duration::from_millis(50),
             peer_buffer_size: 8,
             peer_pub: MonoPublisher::new(),

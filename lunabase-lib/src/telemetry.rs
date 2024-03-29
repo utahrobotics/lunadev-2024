@@ -83,6 +83,7 @@ impl INode for LunabotConn {
                         result = peer_sub.recv_or_closed() => {
                             let Some(tmp) = result else {
                                 error!("Server closed itself");
+                                godot_error!("Server closed itself");
                                 break Ok(());
                             };
                             peer = tmp.unwrap().1;
@@ -99,6 +100,13 @@ impl INode for LunabotConn {
                             break Ok(());
                         }
                     }
+
+                    let Some((important, camera, _odometry, controls, logs)) = peer.negotiate(&negotiation).await else {
+                        error!("Failed to negotiate with lunabot!");
+                        godot_error!("Failed to negotiate with lunabot!");
+                        continue;
+                    };
+
                     shared.base_mut_queue.push(Box::new(|mut base| {
                         base.emit_signal("connected".into(), &[]);
                     }));
@@ -107,12 +115,7 @@ impl INode for LunabotConn {
                     let mut last_receive_time = Instant::now();
                     let mut pinged = false;
                     let mut ffplay: Option<std::process::Child> = None;
-
-                    let Some((important, camera, _odometry, controls, logs)) = peer.negotiate(&negotiation).await else {
-                        error!("Failed to negotiate with lunabot!");
-                        continue;
-                    };
-
+                    
                     let logs_sub = Subscriber::new(32);
                     logs.accept_subscription(logs_sub.create_subscription());
 
