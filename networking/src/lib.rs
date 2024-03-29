@@ -34,6 +34,7 @@ pub mod peer;
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug)]
 enum SpecialMessage {
+    Connect(Vec<u8>),
     Disconnect,
     Negotiate,
     Ack,
@@ -155,8 +156,15 @@ where
             peer_buffer_size: 8,
             peer_pub: MonoPublisher::from(
                 peer_sub
-                    .map(|(packet, peer): (Packet, NetworkPeer)| {
-                        Ok((bitcode::decode(&packet.payload())?, peer))
+                    .filter_map(|(packet, peer): (Packet, NetworkPeer)| {
+                        let msg: SpecialMessage = match bitcode::decode(packet.payload()) {
+                            Ok(x) => x,
+                            Err(e) => return Some(Err(e))
+                        };
+                        let SpecialMessage::Connect(data) = msg else { return None; };
+                        Some(
+                            bitcode::decode(&data).map(|data| (data, peer))
+                        )
                     })
                     .boxed(),
             ),

@@ -100,7 +100,6 @@ impl INode for LunabotConn {
                             loop {
                                 tokio::time::sleep(Duration::from_millis(100)).await;
                                 if Arc::strong_count(&shared) == 1 {
-                                    // tokio::time::sleep(Duration::from_millis(3000)).await;
                                     break;
                                 }
                             }

@@ -110,6 +110,14 @@ impl PeerStateMachine {
                             Retention::Drop
                         }
                     }
+                    Ok(SpecialMessage::Connect(_)) => {
+                        error!("Unexpected Connect from {addr}");
+                        if peer_sender.is_closed() {
+                            Retention::Drop
+                        } else {
+                            Retention::Retain
+                        }
+                    }
                     Ok(SpecialMessage::Ack) => {
                         if peer_sender.is_closed() {
                             Retention::Drop
@@ -154,6 +162,22 @@ impl PeerStateMachine {
                             Retention::Retain
                         }
                     },
+                    Ok(SpecialMessage::Connect(_)) => {
+                        error!("Unexpected Connect from {addr}");
+                        if let AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
+                            client_negotiation_sender,
+                            ..
+                        } = req
+                        {
+                            if client_negotiation_sender.is_closed() {
+                                Retention::Drop
+                            } else {
+                                Retention::Retain
+                            }
+                        } else {
+                            Retention::Retain
+                        }
+                    }
                     Ok(SpecialMessage::Ack) => {
                         if let AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
                             client_negotiation_sender,

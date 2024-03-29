@@ -45,7 +45,7 @@ pub trait Subscription {
     fn filter_map<F, O>(self, map: F) -> FilterMap<Self, F, O>
     where
         Self: Sized,
-        F: FnMut(O) -> Self::Item,
+        F: FnMut(O) -> Option<Self::Item>,
     {
         FilterMap {
             inner: self,
