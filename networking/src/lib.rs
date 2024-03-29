@@ -66,6 +66,10 @@ impl NetworkPeer {
         mut self,
         negotiation: &Negotiation<T>,
     ) -> Result<T::Product, NegotiationError> {
+        let mut map = FxHashMap::default();
+        let negotiation = T::from_peer(&self, &negotiation.channel_ids, &mut map);
+        self.packets_router.send(map).map_err(|_| NegotiationError::ServerDropped)?;
+
         match std::mem::replace(&mut self.quirk, PeerQuirk::ClientSide) {
             PeerQuirk::ServerSide {
                 received_client_negotiation,
@@ -73,10 +77,6 @@ impl NetworkPeer {
 
             PeerQuirk::ClientSide => {}
         }
-
-        let mut map = FxHashMap::default();
-        let negotiation = T::from_peer(&self, &negotiation.channel_ids, &mut map);
-        self.packets_router.send(map).map_err(|_| NegotiationError::ServerDropped)?;
         Ok(negotiation)
     }
 
