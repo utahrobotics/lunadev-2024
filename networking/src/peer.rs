@@ -16,14 +16,18 @@ pub struct NetworkPublisher {
     pub(crate) valid: Box<dyn Fn() -> bool + Send + Sync>,
 }
 
-pub(super) enum NetworkRole {
-    Server,
-    Client,
-}
-
 pub(super) enum AwaitingNegotiationReq {
-    Negotiation(oneshot::Receiver<FxHashMap<NonZeroU8, NetworkPublisher>>),
-    NegotiateResponse(FxHashMap<NonZeroU8, NetworkPublisher>),
+    ServerNegotiation {
+        negotiation_recv: oneshot::Receiver<FxHashMap<NonZeroU8, NetworkPublisher>>,
+        client_negotiation_sender: oneshot::Sender<()>,
+    },
+    ServerAwaitNegotiateResponse {
+        packets_router: FxHashMap<NonZeroU8, NetworkPublisher>,
+        client_negotiation_sender: oneshot::Sender<()>,
+    },
+    ClientNegotiation {
+        negotiation_recv: oneshot::Receiver<FxHashMap<NonZeroU8, NetworkPublisher>>,
+    },
 }
 
 pub(super) enum PeerStateMachine {
@@ -42,7 +46,6 @@ pub(super) enum PeerStateMachine {
     AwaitingNegotiation {
         packets_sub: Subscriber<Packet>,
         req: AwaitingNegotiationReq,
-        role: NetworkRole,
     },
 
     /// Variant on both the client and server side.
@@ -84,10 +87,12 @@ impl PeerStateMachine {
                             packets_router: packets_router_sender,
                             quirk: PeerQuirk::ClientSide,
                         };
+                        let peer_sender = std::mem::replace(peer_sender, oneshot::channel().0);
                         *self = PeerStateMachine::AwaitingNegotiation {
                             packets_sub,
-                            req: AwaitingNegotiationReq::Negotiation(packets_router_recv),
-                            role: NetworkRole::Client,
+                            req: AwaitingNegotiationReq::ClientNegotiation {
+                                negotiation_recv: packets_router_recv,
+                            },
                         };
                         if peer_sender.send(peer).is_ok() {
                             Retention::Retain
@@ -95,38 +100,48 @@ impl PeerStateMachine {
                             Retention::Drop
                         }
                     }
-                    Err(e) => error!("Failed to parse special_msg from {addr}: {e}"),
+                    Err(e) => {
+                        error!("Failed to parse special_msg from {addr}: {e}");
+                        Retention::Retain
+                    }
                 }
             }
 
-            PeerStateMachine::AwaitingNegotiation {
-                req,
-                role,
-                packets_sub,
-            } => match bitcode::decode::<SpecialMessage>(data) {
-                Ok(SpecialMessage::Disconnect) => return Retention::Drop,
-                Ok(SpecialMessage::Negotiate) => match role {
-                    NetworkRole::Server => match req {
-                        AwaitingNegotiationReq::Negotiation(_) => {
-                            warn!("Unexpected Negotiate from {addr}")
+            PeerStateMachine::AwaitingNegotiation { req, packets_sub } => {
+                match bitcode::decode::<SpecialMessage>(data) {
+                    Ok(SpecialMessage::Disconnect) => return Retention::Drop,
+                    Ok(SpecialMessage::Negotiate) => match req {
+                        AwaitingNegotiationReq::ServerNegotiation { .. } => {
+                            warn!("Unexpected Negotiate from {addr}");
+                            Retention::Retain
                         }
-                        AwaitingNegotiationReq::NegotiateResponse(packets_router) => {
+                        AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
+                            packets_router,
+                            client_negotiation_sender,
+                        } => if std::mem::replace(client_negotiation_sender, oneshot::channel().0).send(()).is_ok() {
                             *self = PeerStateMachine::Connected {
                                 packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
                                 packets_router: std::mem::take(packets_router),
                             };
-
+                            Retention::Retain
+                        } else {
+                            Retention::Drop
+                        }
+                        AwaitingNegotiationReq::ClientNegotiation { .. } => {
+                            warn!("Unexpected Negotiate from {addr}");
                             Retention::Retain
                         }
                     },
-                    NetworkRole::Client => warn!("Unexpected Negotiate from {addr}"),
-                },
-                Err(e) => error!("Failed to parse special_msg from {addr}: {e}"),
-            },
+                    Err(e) => {
+                        error!("Failed to parse special_msg from {addr}: {e}");
+                        Retention::Retain
+                    }
+                }
+            }
 
             PeerStateMachine::Connected {
                 packets_router,
-                packets_sub,
+                packets_sub: _,
             } => {
                 let channel = *data.last().unwrap();
                 let data = data.split_at(data.len() - 1).0;
@@ -162,7 +177,7 @@ impl PeerStateMachine {
 
     pub fn poll(
         &mut self,
-        socket: &Socket,
+        socket: &mut Socket,
         addr: SocketAddr,
         context: &RuntimeContext,
     ) -> Retention {
@@ -176,25 +191,12 @@ impl PeerStateMachine {
                     Retention::Retain
                 }
             }
-            PeerStateMachine::AwaitingNegotiation {
-                req,
-                role,
-                packets_sub,
-            } => match req {
-                AwaitingNegotiationReq::Negotiation(recv) => match recv.try_recv() {
+            PeerStateMachine::AwaitingNegotiation { req, packets_sub } => match req {
+                AwaitingNegotiationReq::ServerNegotiation {
+                    negotiation_recv,
+                    client_negotiation_sender,
+                } => match negotiation_recv.try_recv() {
                     Ok(packets_router) => {
-                        match role {
-                            NetworkRole::Server => {
-                                *req = AwaitingNegotiationReq::NegotiateResponse(packets_router)
-                            }
-
-                            NetworkRole::Client => {
-                                *self = PeerStateMachine::Connected {
-                                    packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
-                                    packets_router,
-                                }
-                            }
-                        }
                         if let Err(e) = socket.send(Packet::reliable_ordered(
                             addr,
                             bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
@@ -202,12 +204,45 @@ impl PeerStateMachine {
                         )) {
                             error!("Failed to send Negotiate to {addr}: {e}");
                         }
+
+                        *req = AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
+                            packets_router,
+                            client_negotiation_sender: std::mem::replace(client_negotiation_sender, oneshot::channel().0),
+                        };
+
                         Retention::Retain
                     }
                     Err(TryRecvError::Closed) => Retention::Drop,
                     Err(TryRecvError::Empty) => Retention::Retain,
                 },
-                AwaitingNegotiationReq::NegotiateResponse(_) => todo!(),
+                AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
+                    packets_router: _,
+                    client_negotiation_sender,
+                } => if client_negotiation_sender.is_closed() {
+                    Retention::Drop
+                } else {
+                    Retention::Retain
+                }
+                AwaitingNegotiationReq::ClientNegotiation { negotiation_recv } => match negotiation_recv.try_recv() {
+                    Ok(packets_router) => {
+                        if let Err(e) = socket.send(Packet::reliable_ordered(
+                            addr,
+                            bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
+                            None,
+                        )) {
+                            error!("Failed to send Negotiate to {addr}: {e}");
+                        }
+                        
+                        *self = PeerStateMachine::Connected {
+                            packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
+                            packets_router,
+                        };
+
+                        Retention::Retain
+                    }
+                    Err(TryRecvError::Closed) => Retention::Drop,
+                    Err(TryRecvError::Empty) => Retention::Retain,
+                }
             },
             PeerStateMachine::Connected {
                 packets_router,

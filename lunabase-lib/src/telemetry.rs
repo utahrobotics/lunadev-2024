@@ -12,7 +12,7 @@ use std::{
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
 use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
-use networking::NetworkNode;
+use networking::new_server;
 use unros::{
     default_run_options,
     pubsub::{Publisher, Subscriber},
@@ -66,10 +66,11 @@ impl INode for LunabotConn {
         let shared = self.shared.clone().unwrap();
 
         let main = |mut app: Application| async move {
-            let (network_node, mut peer_receiver, _) = NetworkNode::new_server::<()>(
+            let peer_sub = Subscriber::new(1);
+            let (network_node, _) = new_server::<(), _>(
                 SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM),
-                1,
-            );
+                peer_sub.create_subscription(),
+            )?;
 
             app.add_task(|mut context| async move {
                 context.set_quit_on_drop(true);
@@ -79,7 +80,7 @@ impl INode for LunabotConn {
                 loop {
                     let peer;
                     tokio::select! {
-                        result = peer_receiver.recv() => {
+                        result = peer_sub.recv_or_closed() => {
                             let Some(tmp) = result else { break Ok(()); };
                             peer = tmp.unwrap().1;
                         }
@@ -104,7 +105,8 @@ impl INode for LunabotConn {
                     let mut pinged = false;
                     let mut ffplay: Option<std::process::Child> = None;
 
-                    let Some((important, camera, _odometry, controls, logs)) = peer.negotiate(&negotiation) else {
+                    let Some((important, camera, _odometry, controls, logs)) = peer.negotiate(&negotiation).await else {
+                        error!("Failed to negotiate with lunabot!");
                         continue;
                     };
 

@@ -13,7 +13,7 @@ use bitcode::{Decode, Encode};
 use fxhash::FxHashMap;
 use laminar::{Packet, Socket};
 use negotiation::{FromPeer, Negotiation};
-use peer::{NetworkPublisher, NetworkRole};
+use peer::NetworkPublisher;
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait, asyncify_run,
@@ -135,10 +135,14 @@ pub fn new_client() -> laminar::Result<(NetworkNode, NetworkConnector)> {
     ))
 }
 
-pub fn new_server<T: Decode>(
+pub fn new_server<T, S>(
     bind_address: impl ToSocketAddrs,
-    peer_sub: impl Subscription<Item = Result<(T, NetworkPeer), bitcode::Error>> + Send,
-) -> laminar::Result<(NetworkNode, NetworkConnector)> {
+    peer_sub: S,
+) -> laminar::Result<(NetworkNode, NetworkConnector)>
+where
+    T: Decode,
+    S: Subscription<Item = Result<(T, NetworkPeer), bitcode::Error>> + Send + 'static,
+{
     let (address_sender, address_receiver) = std::sync::mpsc::channel();
     Ok((
         NetworkNode {
@@ -163,14 +167,14 @@ pub fn new_server<T: Decode>(
 impl Node for NetworkNode {
     const DEFAULT_NAME: &'static str = "networking";
 
-    async fn run(self, context: RuntimeContext) -> anyhow::Result<()> {
+    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
         let drop_check = DropCheck::default();
         let _drop_check = drop_check.clone();
         let mut conns: FxHashMap<SocketAddr, PeerStateMachine> = FxHashMap::default();
         let mut socket = DropWrapper::new(self.socket, |_| {});
-        let mut spin_sleeper = SpinSleeper::default();
+        let spin_sleeper = SpinSleeper::default();
         let mut now = Instant::now();
 
         asyncify_run(move || loop {
@@ -183,7 +187,7 @@ impl Node for NetworkNode {
             while let Some(event) = socket.recv() {
                 match event {
                     laminar::SocketEvent::Packet(packet) => match conns.entry(packet.addr()) {
-                        Entry::Occupied(entry) => {
+                        Entry::Occupied(mut entry) => {
                             if Retention::Drop
                                 == entry.get_mut().provide_data(
                                     packet,
@@ -199,17 +203,18 @@ impl Node for NetworkNode {
                                 error!("Received packet from unknown address: {}", packet.addr());
                             } else {
                                 let packets_sub = Subscriber::new(self.peer_buffer_size);
-                                let (packets_router_sender, packets_router_recv) =
+                                let (packets_router_sender, negotiation_recv) =
                                     oneshot::channel();
                                 let (
-                                    received_client_negotiation_sender,
+                                    client_negotiation_sender,
                                     received_client_negotiation_recv,
                                 ) = oneshot::channel();
 
+                                let remote_addr = packet.addr();
                                 self.peer_pub.set((
                                     packet,
                                     NetworkPeer {
-                                        remote_addr: packet.addr(),
+                                        remote_addr,
                                         packets_to_send: packets_sub.create_subscription(),
                                         packets_router: packets_router_sender,
                                         quirk: PeerQuirk::ServerSide {
@@ -220,34 +225,12 @@ impl Node for NetworkNode {
                                 ));
                                 entry.insert(PeerStateMachine::AwaitingNegotiation {
                                     packets_sub: Subscriber::new(self.peer_buffer_size),
-                                    req: peer::AwaitingNegotiationReq::Negotiation(
-                                        packets_router_recv,
-                                    ),
-                                    role: NetworkRole::Server,
+                                    req: peer::AwaitingNegotiationReq::ServerNegotiation { negotiation_recv, client_negotiation_sender }
                                 });
                             }
-                        } // if let Some(peer) =  {
-                          //     match peer.provide_data(packet, &context, self.peer_buffer_size) {
-                          //         ProvideDataResponse::GeneratePeer(peer) => {
-                          //             conns.insert(packet.addr(), PeerStateMachine::Connected { peer });
-                          //         }
-                          //         ProvideDataResponse::Drop => {
-                          //             conns.remove(&packet.addr());
-                          //         }
-                          //         ProvideDataResponse::Retain => {}
-                          //     }
-                          // } else if self.peer_pub.get_sub_count() == 0 {
-                          //     error!("Received packet from unknown address: {}", packet.addr());
-                          // } else if let Err(e) =
-                          //     socket.send(Packet::reliable_sequenced(packet.addr(), vec![], None))
-                          // {
-                          //     error!("Failed to reply to {}: {e}", packet.addr());
-                          // } else {
-                          //     conns.insert(packet.addr(), PeerStateMachine::C)
-                          // }
-                          // continue;
+                        }
                     },
-                    laminar::SocketEvent::Connect(addr) => {
+                    laminar::SocketEvent::Connect(_) => {
                         // todo
                         continue;
                     }
@@ -260,16 +243,17 @@ impl Node for NetworkNode {
                 }
             }
 
-            conns.retain(|addr, peer| match peer.poll(&socket, *addr, &context) {
+            conns.retain(|addr, peer| match peer.poll(&mut socket, *addr, &context) {
                 Retention::Drop => false,
                 Retention::Retain => true,
             });
 
             while let Ok((packet, peer_sender)) = self.address_receiver.try_recv() {
+                let addr = packet.addr();
                 conns.insert(packet.addr(), PeerStateMachine::Connecting { peer_sender });
 
                 if let Err(e) = socket.send(packet) {
-                    error!("Failed to connect to {}: {e}", packet.addr());
+                    error!("Failed to connect to {addr}: {e}");
                 }
             }
 
