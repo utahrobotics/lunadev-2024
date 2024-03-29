@@ -8,7 +8,8 @@ use global_msgs::Steering;
 use image::DynamicImage;
 use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
 use networking::{
-    negotiation::{ChannelNegotiation, Negotiation}, new_client, ConnectionError, NetworkConnector, NetworkNode
+    negotiation::{ChannelNegotiation, Negotiation},
+    new_client, ConnectionError, NetworkConnector, NetworkNode,
 };
 use spin_sleep::SpinSleeper;
 use unros::{
@@ -146,14 +147,13 @@ impl Node for Telemetry {
                     };
                 };
                 let (important, camera, _odometry, controls, logs) =
-                    match peer.negotiate(&self.negotiation).await
-                {
-                    Ok(x) => x,
-                    Err(e) => {
-                        error!("Failed to negotiate with lunabase!: {e:?}");
-                        continue;
-                    }
-                };
+                    match peer.negotiate(&self.negotiation).await {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!("Failed to negotiate with lunabase!: {e:?}");
+                            continue;
+                        }
+                    };
                 info!("Connected to lunabase!");
                 get_log_pub().accept_subscription(logs.create_reliable_subscription());
 

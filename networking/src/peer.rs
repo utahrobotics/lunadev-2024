@@ -18,7 +18,9 @@ pub struct NetworkPublisher {
 
 impl std::fmt::Debug for NetworkPublisher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NetworkPublisher").field("valid", &(self.valid)()).finish()
+        f.debug_struct("NetworkPublisher")
+            .field("valid", &(self.valid)())
+            .finish()
     }
 }
 
@@ -108,10 +110,12 @@ impl PeerStateMachine {
                             Retention::Drop
                         }
                     }
-                    Ok(SpecialMessage::Ack) => if peer_sender.is_closed() {
-                        Retention::Drop
-                    } else {
-                        Retention::Retain
+                    Ok(SpecialMessage::Ack) => {
+                        if peer_sender.is_closed() {
+                            Retention::Drop
+                        } else {
+                            Retention::Retain
+                        }
                     }
                     Err(e) => {
                         error!("Failed to parse special_msg from {addr}: {e}");
@@ -131,29 +135,40 @@ impl PeerStateMachine {
                         AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
                             packets_router,
                             client_negotiation_sender,
-                        } => if std::mem::replace(client_negotiation_sender, oneshot::channel().0).send(()).is_ok() {
-                            *self = PeerStateMachine::Connected {
-                                packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
-                                packets_router: std::mem::take(packets_router),
-                            };
-                            Retention::Retain
-                        } else {
-                            Retention::Drop
+                        } => {
+                            if std::mem::replace(client_negotiation_sender, oneshot::channel().0)
+                                .send(())
+                                .is_ok()
+                            {
+                                *self = PeerStateMachine::Connected {
+                                    packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
+                                    packets_router: std::mem::take(packets_router),
+                                };
+                                Retention::Retain
+                            } else {
+                                Retention::Drop
+                            }
                         }
                         AwaitingNegotiationReq::ClientNegotiation { .. } => {
                             warn!("Unexpected Negotiate from {addr}");
                             Retention::Retain
                         }
                     },
-                    Ok(SpecialMessage::Ack) => if let AwaitingNegotiationReq::ServerAwaitNegotiateResponse { client_negotiation_sender, .. } = req {
-                        if client_negotiation_sender.is_closed() {
-                            Retention::Drop
+                    Ok(SpecialMessage::Ack) => {
+                        if let AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
+                            client_negotiation_sender,
+                            ..
+                        } = req
+                        {
+                            if client_negotiation_sender.is_closed() {
+                                Retention::Drop
+                            } else {
+                                Retention::Retain
+                            }
                         } else {
                             Retention::Retain
                         }
-                    } else {
-                        Retention::Retain
-                    },
+                    }
                     Err(e) => {
                         error!("Failed to parse special_msg from {addr}: {e}");
                         Retention::Retain
@@ -229,7 +244,10 @@ impl PeerStateMachine {
 
                         *req = AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
                             packets_router,
-                            client_negotiation_sender: std::mem::replace(client_negotiation_sender, oneshot::channel().0),
+                            client_negotiation_sender: std::mem::replace(
+                                client_negotiation_sender,
+                                oneshot::channel().0,
+                            ),
                         };
 
                         Retention::Retain
@@ -240,30 +258,34 @@ impl PeerStateMachine {
                 AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
                     packets_router: _,
                     client_negotiation_sender,
-                } => if client_negotiation_sender.is_closed() {
-                    Retention::Drop
-                } else {
-                    Retention::Retain
-                }
-                AwaitingNegotiationReq::ClientNegotiation { negotiation_recv } => match negotiation_recv.try_recv() {
-                    Ok(packets_router) => {
-                        if let Err(e) = socket.send(Packet::reliable_ordered(
-                            addr,
-                            bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
-                            None,
-                        )) {
-                            error!("Failed to send Negotiate to {addr}: {e}");
-                        }
-                        
-                        *self = PeerStateMachine::Connected {
-                            packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
-                            packets_router,
-                        };
-
+                } => {
+                    if client_negotiation_sender.is_closed() {
+                        Retention::Drop
+                    } else {
                         Retention::Retain
                     }
-                    Err(TryRecvError::Closed) => Retention::Drop,
-                    Err(TryRecvError::Empty) => Retention::Retain,
+                }
+                AwaitingNegotiationReq::ClientNegotiation { negotiation_recv } => {
+                    match negotiation_recv.try_recv() {
+                        Ok(packets_router) => {
+                            if let Err(e) = socket.send(Packet::reliable_ordered(
+                                addr,
+                                bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
+                                None,
+                            )) {
+                                error!("Failed to send Negotiate to {addr}: {e}");
+                            }
+
+                            *self = PeerStateMachine::Connected {
+                                packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
+                                packets_router,
+                            };
+
+                            Retention::Retain
+                        }
+                        Err(TryRecvError::Closed) => Retention::Drop,
+                        Err(TryRecvError::Empty) => Retention::Retain,
+                    }
                 }
             },
             PeerStateMachine::Connected {
@@ -275,6 +297,9 @@ impl PeerStateMachine {
                         error!("Failed to send packet to {addr}: {e}");
                     }
                 }
+
+                packets_router.retain(|_, netpub| (netpub.valid)());
+
                 if packets_router.is_empty() && packets_sub.get_pub_count() == 0 {
                     Retention::Drop
                 } else {

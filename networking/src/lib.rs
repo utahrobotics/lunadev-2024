@@ -36,7 +36,7 @@ pub mod peer;
 enum SpecialMessage {
     Disconnect,
     Negotiate,
-    Ack
+    Ack,
 }
 
 #[derive(Debug)]
@@ -58,7 +58,7 @@ pub struct NetworkPeer {
 #[derive(Debug)]
 pub enum NegotiationError {
     ClientDidNotNegotiate,
-    ServerDropped
+    ServerDropped,
 }
 
 impl NetworkPeer {
@@ -68,12 +68,16 @@ impl NetworkPeer {
     ) -> Result<T::Product, NegotiationError> {
         let mut map = FxHashMap::default();
         let negotiation = T::from_peer(&self, &negotiation.channel_ids, &mut map);
-        self.packets_router.send(map).map_err(|_| NegotiationError::ServerDropped)?;
+        self.packets_router
+            .send(map)
+            .map_err(|_| NegotiationError::ServerDropped)?;
 
         match std::mem::replace(&mut self.quirk, PeerQuirk::ClientSide) {
             PeerQuirk::ServerSide {
                 received_client_negotiation,
-            } => received_client_negotiation.await.map_err(|_| NegotiationError::ClientDidNotNegotiate)?,
+            } => received_client_negotiation
+                .await
+                .map_err(|_| NegotiationError::ClientDidNotNegotiate)?,
 
             PeerQuirk::ClientSide => {}
         }
@@ -209,12 +213,9 @@ impl Node for NetworkNode {
                                 error!("Failed to send ack to {}: {e}", packet.addr());
                             } else {
                                 let packets_sub = Subscriber::new(self.peer_buffer_size);
-                                let (packets_router_sender, negotiation_recv) =
+                                let (packets_router_sender, negotiation_recv) = oneshot::channel();
+                                let (client_negotiation_sender, received_client_negotiation_recv) =
                                     oneshot::channel();
-                                let (
-                                    client_negotiation_sender,
-                                    received_client_negotiation_recv,
-                                ) = oneshot::channel();
 
                                 let remote_addr = packet.addr();
                                 self.peer_pub.set((
@@ -231,7 +232,10 @@ impl Node for NetworkNode {
                                 ));
                                 entry.insert(PeerStateMachine::AwaitingNegotiation {
                                     packets_sub: Subscriber::new(self.peer_buffer_size),
-                                    req: AwaitingNegotiationReq::ServerNegotiation { negotiation_recv, client_negotiation_sender }
+                                    req: AwaitingNegotiationReq::ServerNegotiation {
+                                        negotiation_recv,
+                                        client_negotiation_sender,
+                                    },
                                 });
                             }
                         }
