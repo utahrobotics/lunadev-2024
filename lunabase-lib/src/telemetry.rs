@@ -81,12 +81,20 @@ impl INode for LunabotConn {
                     let peer;
                     tokio::select! {
                         result = peer_sub.recv_or_closed() => {
-                            let Some(tmp) = result else {
+                            let Some(result) = result else {
                                 error!("Server closed itself");
                                 godot_error!("Server closed itself");
                                 break Ok(());
                             };
-                            peer = tmp.unwrap().1;
+                            
+                            peer = match result {
+                                Ok((_, x)) => x,
+                                Err(e) => {
+                                    error!("Invalid init data: {e}");
+                                    godot_error!("Invalid init data: {e}");
+                                    continue;
+                                }
+                            }
                         }
                         _ = async {
                             loop {
