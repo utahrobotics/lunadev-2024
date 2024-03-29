@@ -67,7 +67,7 @@ impl INode for LunabotConn {
 
         let main = |mut app: Application| async move {
             let peer_sub = Subscriber::new(1);
-            let (network_node, _) = new_server::<(), _>(
+            let (network_node, _) = new_server::<u8, _>(
                 SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM),
                 peer_sub.create_subscription(),
             )?;
@@ -81,7 +81,10 @@ impl INode for LunabotConn {
                     let peer;
                     tokio::select! {
                         result = peer_sub.recv_or_closed() => {
-                            let Some(tmp) = result else { break Ok(()); };
+                            let Some(tmp) = result else {
+                                error!("Server closed itself");
+                                break Ok(());
+                            };
                             peer = tmp.unwrap().1;
                         }
                         _ = async {

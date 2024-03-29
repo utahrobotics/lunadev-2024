@@ -124,6 +124,7 @@ pub struct MonoPublisher<T, S: Subscription<Item = T> = BoxedSubscription<T>> {
 
 impl<T, S: Subscription<Item = T>> From<S> for MonoPublisher<T, S> {
     fn from(sub: S) -> Self {
+        sub.increment_publishers(PublisherToken(PhantomData));
         Self { sub: Some(sub) }
     }
 }
