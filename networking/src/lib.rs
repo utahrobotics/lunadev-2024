@@ -108,7 +108,7 @@ impl NetworkConnector {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.address_sender
             .send((
-                Packet::reliable_ordered(addr, bitcode::encode(init_data).unwrap(), None),
+                Packet::reliable_ordered(addr, bitcode::encode(&SpecialMessage::Connect(bitcode::encode(init_data).unwrap())).unwrap(), None),
                 sender,
             ))
             .map_err(|_| ConnectionError::ServerDropped)?;
