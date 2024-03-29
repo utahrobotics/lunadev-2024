@@ -140,7 +140,7 @@ impl<T, S: Subscription<Item = T>> MonoPublisher<T, S> {
         }
     }
 
-    pub fn get_pub_count(&self) -> usize {
+    pub fn get_sub_count(&self) -> usize {
         if self.sub.is_some() {
             1
         } else {
@@ -225,6 +225,9 @@ pub struct Subscriber<T> {
 
 impl<T: Send + 'static> Subscriber<T> {
     /// Creates a new `Subscriber` that can store at most `size` elements inside.
+    ///
+    /// # Panics
+    /// Panics if `size` is 0.
     #[must_use]
     pub fn new(size: usize) -> Self {
         Self {

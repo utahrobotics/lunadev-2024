@@ -1,53 +1,83 @@
 #![feature(hasher_prefixfree_extras)]
 
 use std::{
+    collections::hash_map::Entry,
     net::{SocketAddr, ToSocketAddrs},
-    sync::{
-        mpsc::{Receiver, Sender},
-        Arc, OnceLock, Weak,
-    },
+    num::NonZeroU8,
+    sync::mpsc::{Receiver, Sender},
     time::{Duration, Instant},
 };
 
 pub use bitcode;
 use bitcode::{Decode, Encode};
-use crossbeam::queue::SegQueue;
 use fxhash::FxHashMap;
 use laminar::{Packet, Socket};
 use negotiation::{FromPeer, Negotiation};
-use peer::NetworkPublisher;
+use peer::{NetworkPublisher, NetworkRole};
 use spin_sleep::SpinSleeper;
 use unros::{
-    anyhow, async_trait, asyncify_run, pubsub::{
-        subs::Subscription,
-        MonoPublisher,
+    anyhow, async_trait, asyncify_run,
+    pubsub::{
+        subs::{DirectSubscription, Subscription},
+        MonoPublisher, Subscriber,
     },
-    setup_logging, tokio,
+    setup_logging,
+    tokio::{self, sync::oneshot},
     utils::DropWrapper,
     DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
-use crate::peer::Peer;
+use crate::peer::{PeerStateMachine, Retention};
 
 pub mod negotiation;
 pub mod peer;
 
+#[derive(Encode, Decode, PartialEq, Eq, Debug)]
+enum SpecialMessage {
+    Disconnect,
+    Negotiate,
+}
+
+enum PeerQuirk {
+    ServerSide {
+        received_client_negotiation: oneshot::Receiver<()>,
+    },
+    ClientSide,
+}
+
 pub struct NetworkPeer {
     remote_addr: SocketAddr,
-    packets_to_send: Weak<SegQueue<Packet>>,
-    packets_router: Weak<OnceLock<FxHashMap<u8, NetworkPublisher>>>,
+    packets_to_send: DirectSubscription<Packet>,
+    packets_router: oneshot::Sender<FxHashMap<NonZeroU8, NetworkPublisher>>,
+    quirk: PeerQuirk,
 }
 
 impl NetworkPeer {
-    pub fn negotiate<T: FromPeer>(self, negotiation: &Negotiation<T>) -> Option<T::Product> {
-        let mut map = FxHashMap::default();
-        let negotation = T::from_peer(&self, &negotiation.channel_ids, &mut map);
-        if let Some(packets_router) = self.packets_router.upgrade() {
-            assert!(packets_router.set(map).is_ok());
-            Some(negotation)
-        } else {
-            None
+    pub async fn negotiate<T: FromPeer>(
+        mut self,
+        negotiation: &Negotiation<T>,
+    ) -> Option<T::Product> {
+        match self.quirk {
+            PeerQuirk::ServerSide {
+                received_client_negotiation,
+            } => received_client_negotiation.await.ok()?,
+
+            PeerQuirk::ClientSide => {
+                let mut pubber = MonoPublisher::from(self.packets_to_send.clone());
+                pubber.set(Packet::reliable_ordered(
+                    self.remote_addr,
+                    bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
+                    None,
+                ));
+            }
         }
+
+        self.quirk = PeerQuirk::ClientSide;
+
+        let mut map = FxHashMap::default();
+        let negotiation = T::from_peer(&self, &negotiation.channel_ids, &mut map);
+        self.packets_router.send(map).ok()?;
+        Some(negotiation)
     }
 
     pub fn get_remote_addr(&self) -> SocketAddr {
@@ -138,97 +168,112 @@ impl Node for NetworkNode {
 
         let drop_check = DropCheck::default();
         let _drop_check = drop_check.clone();
-        let mut conns: FxHashMap<SocketAddr, Peer> = FxHashMap::default();
-        let packet_queue = Arc::new(SegQueue::new());
+        let mut conns: FxHashMap<SocketAddr, PeerStateMachine> = FxHashMap::default();
         let mut socket = DropWrapper::new(self.socket, |_| {});
         let mut spin_sleeper = SpinSleeper::default();
         let mut now = Instant::now();
 
         asyncify_run(move || loop {
+            now += now.elapsed();
             socket.manual_poll(now);
             if drop_check.has_dropped() {
                 break Ok(());
             }
 
             while let Some(event) = socket.recv() {
-                let dc_addr = match event {
-                    laminar::SocketEvent::Packet(packet) => {
-                        if let Some(peer) = conns.get(&packet.addr()) {
-                            match peer {
-                                Peer::Connecting { peer_sender } => {
-                                    let packets_router: Arc<
-                                        OnceLock<FxHashMap<u8, NetworkPublisher>>,
-                                    > = Arc::default();
-                                    let peer = NetworkPeer {
-                                        remote_addr: packet.addr(),
-                                        packets_to_send: Arc::downgrade(&packet_queue),
-                                        packets_router: Arc::downgrade(&packets_router),
-                                    };
-                                    let _ = peer_sender.send(peer);
-                                }
-                                Peer::Connected { packets_router } => {
-                                    let channel = *packet.payload().last().unwrap();
-                                    let data = packet
-                                        .payload()
-                                        .split_at(packet.payload().len() - 1)
-                                        .0
-                                        .to_vec()
-                                        .into_boxed_slice();
-
-                                    let Some(netpub) =
-                                        packets_router.get().map(|x| x.get(&channel)).flatten()
-                                    else {
-                                        error!(
-                                            "[{}] Unrecognized channel: {channel}",
-                                            packet.addr()
-                                        );
-                                        continue;
-                                    };
-                                    (netpub.setter)(data);
-                                }
+                match event {
+                    laminar::SocketEvent::Packet(packet) => match conns.entry(packet.addr()) {
+                        Entry::Occupied(entry) => {
+                            if Retention::Drop
+                                == entry.get_mut().provide_data(
+                                    packet,
+                                    &context,
+                                    self.peer_buffer_size,
+                                )
+                            {
+                                entry.remove();
                             }
-                        } else if let Err(e) =
-                            socket.send(Packet::reliable_sequenced(packet.addr(), vec![], None))
-                        {
-                            error!("Failed to reply to {}: {e}", packet.addr());
                         }
-                        continue;
-                    }
+                        Entry::Vacant(entry) => {
+                            if self.peer_pub.get_sub_count() == 0 {
+                                error!("Received packet from unknown address: {}", packet.addr());
+                            } else {
+                                let packets_sub = Subscriber::new(self.peer_buffer_size);
+                                let (packets_router_sender, packets_router_recv) =
+                                    oneshot::channel();
+                                let (
+                                    received_client_negotiation_sender,
+                                    received_client_negotiation_recv,
+                                ) = oneshot::channel();
+
+                                self.peer_pub.set((
+                                    packet,
+                                    NetworkPeer {
+                                        remote_addr: packet.addr(),
+                                        packets_to_send: packets_sub.create_subscription(),
+                                        packets_router: packets_router_sender,
+                                        quirk: PeerQuirk::ServerSide {
+                                            received_client_negotiation:
+                                                received_client_negotiation_recv,
+                                        },
+                                    },
+                                ));
+                                entry.insert(PeerStateMachine::AwaitingNegotiation {
+                                    packets_sub: Subscriber::new(self.peer_buffer_size),
+                                    req: peer::AwaitingNegotiationReq::Negotiation(
+                                        packets_router_recv,
+                                    ),
+                                    role: NetworkRole::Server,
+                                });
+                            }
+                        } // if let Some(peer) =  {
+                          //     match peer.provide_data(packet, &context, self.peer_buffer_size) {
+                          //         ProvideDataResponse::GeneratePeer(peer) => {
+                          //             conns.insert(packet.addr(), PeerStateMachine::Connected { peer });
+                          //         }
+                          //         ProvideDataResponse::Drop => {
+                          //             conns.remove(&packet.addr());
+                          //         }
+                          //         ProvideDataResponse::Retain => {}
+                          //     }
+                          // } else if self.peer_pub.get_sub_count() == 0 {
+                          //     error!("Received packet from unknown address: {}", packet.addr());
+                          // } else if let Err(e) =
+                          //     socket.send(Packet::reliable_sequenced(packet.addr(), vec![], None))
+                          // {
+                          //     error!("Failed to reply to {}: {e}", packet.addr());
+                          // } else {
+                          //     conns.insert(packet.addr(), PeerStateMachine::C)
+                          // }
+                          // continue;
+                    },
                     laminar::SocketEvent::Connect(addr) => {
+                        // todo
                         continue;
                     }
-                    laminar::SocketEvent::Timeout(addr) => addr,
-                    laminar::SocketEvent::Disconnect(addr) => addr,
-                };
+                    laminar::SocketEvent::Timeout(addr) => {
+                        conns.remove(&addr);
+                    }
+                    laminar::SocketEvent::Disconnect(addr) => {
+                        conns.remove(&addr);
+                    }
+                }
             }
 
+            conns.retain(|addr, peer| match peer.poll(&socket, *addr, &context) {
+                Retention::Drop => false,
+                Retention::Retain => true,
+            });
+
             while let Ok((packet, peer_sender)) = self.address_receiver.try_recv() {
-                conns.insert(packet.addr(), Peer::Connecting { peer_sender });
+                conns.insert(packet.addr(), PeerStateMachine::Connecting { peer_sender });
 
                 if let Err(e) = socket.send(packet) {
                     error!("Failed to connect to {}: {e}", packet.addr());
                 }
             }
 
-            conns.retain(|addr, peer| {
-                let retain = match peer {
-                    Peer::Connecting { peer_sender } => !peer_sender.is_closed(),
-                    Peer::Connected { packets_router } => {
-                        Some(true)
-                            == packets_router.get().map(|packets_router| {
-                                packets_router.iter().any(|(_, netpub)| (netpub.valid)())
-                            })
-                    }
-                };
-
-                if !retain {
-                    // disconnect
-                }
-
-                retain
-            });
             spin_sleeper.sleep(self.service_duration.saturating_sub(now.elapsed()));
-            now += now.elapsed();
         })
         .await
     }

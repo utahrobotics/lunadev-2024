@@ -10,7 +10,7 @@ unros = { path = "../unros" }
 laminar = "0.5"
 fxhash = { workspace = true }
 serde = { workspace = true }
-crossbeam = { workspace = true }
+# crossbeam = { workspace = true }
 spin_sleep = { workspace = true }
 bitcode = "0.5"
 # bimap = "0.6"

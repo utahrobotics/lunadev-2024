@@ -1,7 +1,10 @@
-use std::{borrow::Cow, hash::Hasher, marker::PhantomData, sync::Arc};
+use std::{
+    borrow::Cow, hash::Hasher, marker::PhantomData, net::SocketAddr, num::NonZeroU8, sync::Arc,
+};
 
 use bitcode::{Decode, Encode};
 use fxhash::{FxHashMap, FxHasher};
+use laminar::Packet;
 use unros::pubsub::{
     subs::{DirectSubscription, Subscription},
     Publisher, PublisherRef,
@@ -10,14 +13,16 @@ use unros::pubsub::{
 use crate::{peer::NetworkPublisher, NetworkPeer};
 
 pub struct Channel<T> {
-    channel_id: u8,
+    channel_id: NonZeroU8,
+    remote_addr: SocketAddr,
     received_packets: PublisherRef<Result<T, Arc<bitcode::Error>>>,
-    packets_to_send: DirectSubscription<(Box<[u8]>, PacketMode)>,
+    packets_to_send: DirectSubscription<Packet>,
 }
 
 impl<T> Clone for Channel<T> {
     fn clone(&self) -> Self {
         Self {
+            remote_addr: self.remote_addr,
             channel_id: self.channel_id,
             received_packets: self.received_packets.clone(),
             packets_to_send: self.packets_to_send.clone(),
@@ -43,20 +48,22 @@ impl<T: Decode + Send + 'static> Channel<T> {
 
 impl<T: Encode> Channel<T> {
     pub fn create_reliable_subscription(&self) -> impl Subscription<Item = T> {
-        let channel_id = self.channel_id;
+        let channel_id = self.channel_id.get();
+        let addr = self.remote_addr;
         self.packets_to_send.clone().map(move |value| {
             let mut data = bitcode::encode(&value).expect("Failed to serialize value");
             data.push(channel_id);
-            (data.into(), PacketMode::ReliableSequenced)
+            Packet::reliable_unordered(addr, data)
         })
     }
 
     pub fn create_unreliable_subscription(&self) -> impl Subscription<Item = T> {
-        let channel_id = self.channel_id;
+        let channel_id = self.channel_id.get();
+        let addr = self.remote_addr;
         self.packets_to_send.clone().map(move |value| {
             let mut data = bitcode::encode(&value).expect("Failed to serialize value");
             data.push(channel_id);
-            (data.into(), PacketMode::UnreliableUnsequenced)
+            Packet::unreliable(addr, data)
         })
     }
 }
@@ -106,12 +113,12 @@ pub trait FromPeer {
     fn from_peer(
         peer: &NetworkPeer,
         ids: &Self::Ids,
-        pubs: &mut FxHashMap<u8, NetworkPublisher>,
+        pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
     ) -> Self::Product;
     fn get_ids(
         &self,
         seed: usize,
-        seen: &mut FxHashMap<u8, Cow<'static, str>>,
+        seen: &mut FxHashMap<NonZeroU8, Cow<'static, str>>,
     ) -> Result<Self::Ids, NegotiationError>;
 }
 
@@ -130,13 +137,13 @@ impl<T> ChannelNegotiation<T> {
 }
 
 impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
-    type Ids = u8;
+    type Ids = NonZeroU8;
     type Product = Channel<T>;
 
     fn from_peer(
         peer: &NetworkPeer,
         ids: &Self::Ids,
-        pubs: &mut FxHashMap<u8, NetworkPublisher>,
+        pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
     ) -> Self::Product {
         let pub_received_packets = Publisher::default();
         let recv_packets_sub = pub_received_packets.get_ref();
@@ -154,6 +161,7 @@ impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
         );
 
         Channel {
+            remote_addr: peer.remote_addr,
             channel_id: *ids,
             received_packets: recv_packets_sub,
             packets_to_send: peer.packets_to_send.clone(),
@@ -163,12 +171,13 @@ impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
     fn get_ids(
         &self,
         seed: usize,
-        seen: &mut FxHashMap<u8, Cow<'static, str>>,
-    ) -> Result<u8, NegotiationError> {
+        seen: &mut FxHashMap<NonZeroU8, Cow<'static, str>>,
+    ) -> Result<NonZeroU8, NegotiationError> {
         let mut hasher = FxHasher::default();
         hasher.write_usize(seed);
         hasher.write_str(&self.name);
-        let channel = (hasher.finish() % u8::MAX as u64) as u8;
+        let channel = (hasher.finish() % (u8::MAX - 1) as u64) as u8;
+        let channel = NonZeroU8::new(channel + 1).unwrap();
 
         if let Some(old) = seen.insert(channel, self.name.clone()) {
             Err(NegotiationError {
@@ -188,7 +197,7 @@ impl<A0: FromPeer, A1: FromPeer> FromPeer for (A0, A1) {
     fn from_peer(
         peer: &NetworkPeer,
         ids: &Self::Ids,
-        pubs: &mut FxHashMap<u8, NetworkPublisher>,
+        pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
     ) -> Self::Product {
         (
             A0::from_peer(peer, &ids.0, pubs),
@@ -199,7 +208,7 @@ impl<A0: FromPeer, A1: FromPeer> FromPeer for (A0, A1) {
     fn get_ids(
         &self,
         seed: usize,
-        seen: &mut FxHashMap<u8, Cow<'static, str>>,
+        seen: &mut FxHashMap<NonZeroU8, Cow<'static, str>>,
     ) -> Result<Self::Ids, NegotiationError> {
         Ok((self.0.get_ids(seed, seen)?, self.1.get_ids(seed, seen)?))
     }
@@ -212,7 +221,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer> FromPeer for (A0, A1, A2) {
     fn from_peer(
         peer: &NetworkPeer,
         ids: &Self::Ids,
-        pubs: &mut FxHashMap<u8, NetworkPublisher>,
+        pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
     ) -> Self::Product {
         (
             A0::from_peer(peer, &ids.0, pubs),
@@ -224,7 +233,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer> FromPeer for (A0, A1, A2) {
     fn get_ids(
         &self,
         seed: usize,
-        seen: &mut FxHashMap<u8, Cow<'static, str>>,
+        seen: &mut FxHashMap<NonZeroU8, Cow<'static, str>>,
     ) -> Result<Self::Ids, NegotiationError> {
         Ok((
             self.0.get_ids(seed, seen)?,
@@ -241,7 +250,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer> FromPeer for (A0, A
     fn from_peer(
         peer: &NetworkPeer,
         ids: &Self::Ids,
-        pubs: &mut FxHashMap<u8, NetworkPublisher>,
+        pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
     ) -> Self::Product {
         (
             A0::from_peer(peer, &ids.0, pubs),
@@ -254,7 +263,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer> FromPeer for (A0, A
     fn get_ids(
         &self,
         seed: usize,
-        seen: &mut FxHashMap<u8, Cow<'static, str>>,
+        seen: &mut FxHashMap<NonZeroU8, Cow<'static, str>>,
     ) -> Result<Self::Ids, NegotiationError> {
         Ok((
             self.0.get_ids(seed, seen)?,
@@ -280,7 +289,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer, A4: FromPeer> FromP
     fn from_peer(
         peer: &NetworkPeer,
         ids: &Self::Ids,
-        pubs: &mut FxHashMap<u8, NetworkPublisher>,
+        pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
     ) -> Self::Product {
         (
             A0::from_peer(peer, &ids.0, pubs),
@@ -294,7 +303,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer, A4: FromPeer> FromP
     fn get_ids(
         &self,
         seed: usize,
-        seen: &mut FxHashMap<u8, Cow<'static, str>>,
+        seen: &mut FxHashMap<NonZeroU8, Cow<'static, str>>,
     ) -> Result<Self::Ids, NegotiationError> {
         Ok((
             self.0.get_ids(seed, seen)?,

@@ -2268,7 +2268,6 @@ name = "networking"
 version = "0.1.0"
 dependencies = [
  "bitcode",
- "crossbeam",
  "fxhash",
  "laminar",
  "serde",
