@@ -36,6 +36,7 @@ pub mod peer;
 enum SpecialMessage {
     Disconnect,
     Negotiate,
+    Ack
 }
 
 enum PeerQuirk {
@@ -198,6 +199,12 @@ impl Node for NetworkNode {
                         Entry::Vacant(entry) => {
                             if self.peer_pub.get_sub_count() == 0 {
                                 error!("Received packet from unknown address: {}", packet.addr());
+                            } else if let Err(e) = socket.send(Packet::reliable_ordered(
+                                packet.addr(),
+                                bitcode::encode(&SpecialMessage::Ack).unwrap(),
+                                None,
+                            )) {
+                                error!("Failed to send ack to {}: {e}", packet.addr());
                             } else {
                                 let packets_sub = Subscriber::new(self.peer_buffer_size);
                                 let (packets_router_sender, negotiation_recv) =
