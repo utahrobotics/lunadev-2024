@@ -60,17 +60,22 @@ pub struct NetworkConnector {
     )>,
 }
 
+pub enum ConnectionError {
+    Timeout,
+    ServerDropped
+}
+
 impl NetworkConnector {
     pub async fn connect_to<T: Encode>(
         &mut self,
         addr: SocketAddrV4,
         init_data: &T,
-    ) -> Option<NetworkPeer> {
+    ) -> Result<NetworkPeer, ConnectionError> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.address_sender
             .send((addr, sender, bitcode::encode(init_data).unwrap().into()))
-            .ok()?;
-        receiver.await.ok()
+            .map_err(|_| ConnectionError::ServerDropped)?;
+        receiver.await.map_err(|_| ConnectionError::Timeout)
     }
 }
 
@@ -208,20 +213,29 @@ impl Node for NetworkNode {
         let mut reliable_round_robin = 0u8;
 
         asyncify_run(move || {
-            let tmp_host = enet.create_host::<()>(
-                self.binding
-                    .as_ref()
-                    .map(|(x, _)| Address::from(*x))
-                    .as_ref(),
-                self.max_peer_count,
-                ChannelLimit::Limited(self.reliable_lanes as usize + 1),
-                BandwidthLimit::Unlimited,
-                if self.bandwidth_limit == 0 {
-                    BandwidthLimit::Unlimited
-                } else {
-                    BandwidthLimit::Limited(self.bandwidth_limit)
-                },
-            )?;
+            let tmp_host = loop {
+                let result = enet.create_host::<()>(
+                    self.binding
+                        .as_ref()
+                        .map(|(x, _)| Address::from(*x))
+                        .as_ref(),
+                    self.max_peer_count,
+                    ChannelLimit::Limited(self.reliable_lanes as usize + 1),
+                    BandwidthLimit::Unlimited,
+                    if self.bandwidth_limit == 0 {
+                        BandwidthLimit::Unlimited
+                    } else {
+                        BandwidthLimit::Limited(self.bandwidth_limit)
+                    },
+                );
+                match result {
+                    Ok(x) => break x,
+                    Err(e) => {
+                        error!("Failed to create ENet host: {e}");
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                    }
+                }
+            };
             let mut host = HostWrapper(tmp_host);
             loop {
                 {
@@ -286,7 +300,7 @@ impl Node for NetworkNode {
                                     let _ = self.binding.as_ref().unwrap().1.send(peer);
                                 }
                             } else {
-                                error!("[{addr}] Received data from a peer we are not connected to!")
+                                error!("[{addr}] Received data from a peer we are not connected to!");
                             }
                         }
                         None => {}
@@ -295,7 +309,9 @@ impl Node for NetworkNode {
 
                 while let Ok((addr, peer_sender, init_data)) = self.address_receiver.try_recv() {
                     conns.insert(addr, ENetPeer::Connecting { peer_sender, init_data });
-                    host.connect(&addr.into(), self.reliable_lanes as usize + 1, 0)?;
+                    if let Err(e) = host.connect(&addr.into(), self.reliable_lanes as usize + 1, 0) {
+                        error!("Failed to connect to {addr}: {e}");
+                    }
                 }
 
                 let mut peers: FxHashMap<SocketAddrV4, Peer<()>> = host
