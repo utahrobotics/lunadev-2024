@@ -84,6 +84,7 @@ impl PeerStateMachine {
 
         match self {
             PeerStateMachine::Connecting { peer_sender } => {
+                println!("{:?}", bitcode::decode::<SpecialMessage>(data));
                 match bitcode::decode::<SpecialMessage>(data) {
                     Ok(SpecialMessage::Disconnect) => return Retention::Drop,
                     Ok(SpecialMessage::Negotiate) => {

@@ -189,6 +189,7 @@ impl Node for NetworkNode {
                 match event {
                     laminar::SocketEvent::Packet(packet) => match conns.entry(packet.addr()) {
                         Entry::Occupied(mut entry) => {
+                            println!("{:?}", entry.get());
                             if Retention::Drop
                                 == entry.get_mut().provide_data(
                                     packet,
