@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use enet::PacketMode;
 use fxhash::FxHashMap;
 use unros::{log::error, pubsub::Subscriber, tokio::sync::oneshot};
 
@@ -14,19 +13,16 @@ pub struct NetworkPublisher {
     pub(crate) valid: Box<dyn Fn() -> bool + Send + Sync>,
 }
 
-pub(super) enum ENetPeer {
+pub(super) enum Peer {
     Connecting {
         peer_sender: oneshot::Sender<NetworkPeer>,
-        init_data: Box<[u8]>,
     },
-    AwaitingInitData,
     Connected {
-        to_remote: Subscriber<(Box<[u8]>, PacketMode)>,
         packets_router: Arc<OnceLock<FxHashMap<u8, NetworkPublisher>>>,
     },
 }
 
-impl ENetPeer {
+impl Peer {
     pub(super) fn put_data(
         &mut self,
         addr: SocketAddrV4,
@@ -35,7 +31,7 @@ impl ENetPeer {
         peer_buffer_size: usize,
     ) -> Option<(Box<[u8]>, NetworkPeer)> {
         match self {
-            ENetPeer::Connected { packets_router, .. } => {
+            Peer::Connected { packets_router, .. } => {
                 let Some(netpub) = packets_router.get().map(|x| x.get(&channel)).flatten() else {
                     error!("[{addr}] Unrecognized channel: {channel}");
                     return None;
@@ -43,7 +39,7 @@ impl ENetPeer {
                 (netpub.setter)(data);
                 None
             }
-            ENetPeer::AwaitingInitData => {
+            Peer::AwaitingInitData => {
                 let to_remote = Subscriber::new(peer_buffer_size);
                 let packets_to_send = to_remote.create_subscription();
                 let packets_router: Arc<OnceLock<FxHashMap<u8, NetworkPublisher>>> = Arc::default();
@@ -52,7 +48,7 @@ impl ENetPeer {
                     packets_to_send,
                     packets_router: Arc::downgrade(&packets_router),
                 };
-                *self = ENetPeer::Connected {
+                *self = Peer::Connected {
                     to_remote,
                     packets_router,
                 };
@@ -65,17 +61,17 @@ impl ENetPeer {
 
     pub(super) fn get_data(&self) -> Option<(Box<[u8]>, PacketMode)> {
         match self {
-            ENetPeer::Connecting { .. } => None,
-            ENetPeer::AwaitingInitData => None,
-            ENetPeer::Connected { to_remote, .. } => to_remote.try_recv(),
+            Peer::Connecting { .. } => None,
+            Peer::AwaitingInitData => None,
+            Peer::Connected { to_remote, .. } => to_remote.try_recv(),
         }
     }
 
     pub(super) fn retain(&mut self) -> bool {
         match self {
-            ENetPeer::Connecting { peer_sender, .. } => !peer_sender.is_closed(),
-            ENetPeer::AwaitingInitData => true,
-            ENetPeer::Connected {
+            Peer::Connecting { peer_sender, .. } => !peer_sender.is_closed(),
+            Peer::AwaitingInitData => true,
+            Peer::Connected {
                 to_remote,
                 packets_router,
             } => {

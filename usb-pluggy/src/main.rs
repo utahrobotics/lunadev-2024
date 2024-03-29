@@ -16,14 +16,14 @@ fn main() {
                 eprintln!("This program must be run as root.");
                 return;
             }
-        }
+        },
     }
 
     let output = Command::new("dmesg")
-            .arg("-C")
-            .output()
-            .expect("Failed to clear dmesg");
-    
+        .arg("-C")
+        .output()
+        .expect("Failed to clear dmesg");
+
     if !output.status.success() {
         eprintln!("Failed to clear dmesg");
         return;
@@ -35,7 +35,7 @@ fn main() {
         let output = Command::new("dmesg")
             .output()
             .expect("Failed to execute dmesg");
-    
+
         if !output.status.success() {
             eprintln!("Failed to execute dmesg");
             return;
@@ -45,7 +45,7 @@ fn main() {
             .arg("-C")
             .output()
             .expect("Failed to clear dmesg");
-    
+
         if !clear_output.status.success() {
             eprintln!("Failed to clear dmesg");
             return;
@@ -77,17 +77,24 @@ fn main() {
         for line in lines.iter().copied() {
             if line.contains("Product: ") {
                 product = Some(line.split_at(line.find("Product: ").unwrap() + 8).1);
-
             } else if line.contains("Manufacturer: ") {
                 manufacturer = Some(line.split_at(line.find("Manufacturer: ").unwrap() + 13).1);
-
             } else if line.contains("SerialNumber: ") {
                 serial_no = Some(line.split_at(line.find("SerialNumber: ").unwrap() + 14).1);
-
             } else if line.contains("idVendor=") {
-                id_vendor = Some(line.split_at(line.find("idVendor=").unwrap() + 9).1.split_at(4).0);
+                id_vendor = Some(
+                    line.split_at(line.find("idVendor=").unwrap() + 9)
+                        .1
+                        .split_at(4)
+                        .0,
+                );
                 if line.contains("idProduct=") {
-                    id_product = Some(line.split_at(line.find("idProduct=").unwrap() + 10).1.split_at(4).0);
+                    id_product = Some(
+                        line.split_at(line.find("idProduct=").unwrap() + 10)
+                            .1
+                            .split_at(4)
+                            .0,
+                    );
                 }
             }
         }
@@ -121,14 +128,18 @@ fn main() {
         println!("Would you like to generate a udev rule for this? (y/n)");
 
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input).expect("Failed to read input");
+        std::io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read input");
         input = input.to_ascii_lowercase();
         let ans = input.trim();
 
         if ans == "y" || ans == "yes" {
             println!("What would you like the symlink to be named?");
             input.clear();
-            std::io::stdin().read_line(&mut input).expect("Failed to read input");
+            std::io::stdin()
+                .read_line(&mut input)
+                .expect("Failed to read input");
             let name = input.trim();
 
             let mut rule = format!("SUBSYSTEM==\"usb\", KERNEL==\"{usb_path}\", ");
@@ -143,7 +154,9 @@ fn main() {
             }
             rule.push_str(&format!("MODE=\"0666\", SYMLINK+=\"{name}\""));
             println!("\n{rule}");
-            println!("This should be added to a file in /etc/udev/rules.d/ with a .rules extension.");
+            println!(
+                "This should be added to a file in /etc/udev/rules.d/ with a .rules extension."
+            );
             break;
         }
         println!();

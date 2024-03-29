@@ -1,7 +1,6 @@
 use std::{borrow::Cow, hash::Hasher, marker::PhantomData, sync::Arc};
 
 use bitcode::{Decode, Encode};
-use enet::PacketMode;
 use fxhash::{FxHashMap, FxHasher};
 use unros::pubsub::{
     subs::{DirectSubscription, Subscription},
@@ -153,7 +152,7 @@ impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
                 valid: Box::new(move || pub_received_packets2.get_sub_count() > 0),
             },
         );
-        
+
         Channel {
             channel_id: *ids,
             received_packets: recv_packets_sub,

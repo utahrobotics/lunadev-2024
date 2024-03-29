@@ -25,7 +25,7 @@ pub mod subs;
 
 use crate::logging::{dump::DataDump, START_TIME};
 
-use self::subs::{DirectSubscription, PublisherToken, Subscription};
+use self::subs::{BoxedSubscription, DirectSubscription, PublisherToken, Subscription};
 
 /// An essential component that promotes separation of concerns, and is
 /// an intrinsic element of the ROS framework.
@@ -118,7 +118,7 @@ impl<T> Drop for Publisher<T> {
 ///
 /// As such, MonoPublishers must be created directly from Subscriptions using `From`
 /// and `Into`.
-pub struct MonoPublisher<T, S: Subscription<Item = T>> {
+pub struct MonoPublisher<T, S: Subscription<Item = T> = BoxedSubscription<T>> {
     sub: Option<S>,
 }
 
@@ -146,6 +146,15 @@ impl<T, S: Subscription<Item = T>> MonoPublisher<T, S> {
         } else {
             0
         }
+    }
+
+    /// Creates a new `MonoPublisher` that is not connected to any `Subscriber`.
+    ///
+    /// Since `MonoPublishers` cannot accept new subscriptions, this `MonoPublisher` will
+    /// never publish any values ever. This can be used in scenarios where you have a `Option<MonoPublisher>`
+    /// but would rather work with just a `MonoPublisher`.
+    pub fn new() -> Self {
+        Self { sub: None }
     }
 }
 

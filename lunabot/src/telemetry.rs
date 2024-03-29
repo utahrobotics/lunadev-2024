@@ -8,7 +8,8 @@ use global_msgs::Steering;
 use image::DynamicImage;
 use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
 use networking::{
-    negotiation::{ChannelNegotiation, Negotiation}, ConnectionError, NetworkConnector, NetworkNode
+    negotiation::{ChannelNegotiation, Negotiation},
+    ConnectionError, NetworkConnector, NetworkNode,
 };
 use spin_sleep::SpinSleeper;
 use unros::{
