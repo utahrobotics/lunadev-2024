@@ -35,7 +35,8 @@ pub mod peer;
 #[derive(Encode, Decode, PartialEq, Eq, Debug)]
 enum SpecialMessage {
     Disconnect,
-    Negotiate
+    Negotiate,
+    Ack
 }
 
 #[derive(Debug)]
@@ -203,7 +204,7 @@ impl Node for NetworkNode {
                                 error!("Received packet from unknown address: {}", packet.addr());
                             } else if let Err(e) = socket.send(Packet::reliable_ordered(
                                 packet.addr(),
-                                bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
+                                bitcode::encode(&SpecialMessage::Ack).unwrap(),
                                 None,
                             )) {
                                 error!("Failed to send ack to {}: {e}", packet.addr());

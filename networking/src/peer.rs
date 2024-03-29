@@ -96,7 +96,6 @@ impl PeerStateMachine {
                             quirk: PeerQuirk::ClientSide,
                         };
                         let peer_sender = std::mem::replace(peer_sender, oneshot::channel().0);
-                        println!("BB");
                         *self = PeerStateMachine::AwaitingNegotiation {
                             packets_sub,
                             req: AwaitingNegotiationReq::ClientNegotiation {
@@ -109,11 +108,11 @@ impl PeerStateMachine {
                             Retention::Drop
                         }
                     }
-                    // Ok(SpecialMessage::Ack) => if peer_sender.is_closed() {
-                    //     Retention::Drop
-                    // } else {
-                    //     Retention::Retain
-                    // }
+                    Ok(SpecialMessage::Ack) => if peer_sender.is_closed() {
+                        Retention::Drop
+                    } else {
+                        Retention::Retain
+                    }
                     Err(e) => {
                         error!("Failed to parse special_msg from {addr}: {e}");
                         Retention::Retain
@@ -146,15 +145,15 @@ impl PeerStateMachine {
                             Retention::Retain
                         }
                     },
-                    // Ok(SpecialMessage::Ack) => if let AwaitingNegotiationReq::ServerAwaitNegotiateResponse { client_negotiation_sender, .. } = req {
-                    //     if client_negotiation_sender.is_closed() {
-                    //         Retention::Drop
-                    //     } else {
-                    //         Retention::Retain
-                    //     }
-                    // } else {
-                    //     Retention::Retain
-                    // },
+                    Ok(SpecialMessage::Ack) => if let AwaitingNegotiationReq::ServerAwaitNegotiateResponse { client_negotiation_sender, .. } = req {
+                        if client_negotiation_sender.is_closed() {
+                            Retention::Drop
+                        } else {
+                            Retention::Retain
+                        }
+                    } else {
+                        Retention::Retain
+                    },
                     Err(e) => {
                         error!("Failed to parse special_msg from {addr}: {e}");
                         Retention::Retain
@@ -255,7 +254,6 @@ impl PeerStateMachine {
                         )) {
                             error!("Failed to send Negotiate to {addr}: {e}");
                         }
-                        println!("Aa");
                         
                         *self = PeerStateMachine::Connected {
                             packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
