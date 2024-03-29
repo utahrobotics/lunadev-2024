@@ -94,7 +94,7 @@ impl INode for LunabotConn {
                                     godot_error!("Invalid init data: {e}");
                                     continue;
                                 }
-                            }
+                            };
                         }
                         _ = async {
                             loop {
