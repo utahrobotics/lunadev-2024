@@ -13,7 +13,7 @@ use bitcode::{Decode, Encode};
 use fxhash::FxHashMap;
 use laminar::{Packet, Socket};
 use negotiation::{FromPeer, Negotiation};
-use peer::NetworkPublisher;
+use peer::{AwaitingNegotiationReq, NetworkPublisher};
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait, asyncify_run,
@@ -35,8 +35,7 @@ pub mod peer;
 #[derive(Encode, Decode, PartialEq, Eq, Debug)]
 enum SpecialMessage {
     Disconnect,
-    Negotiate,
-    Ack
+    Negotiate
 }
 
 #[derive(Debug)]
@@ -204,7 +203,7 @@ impl Node for NetworkNode {
                                 error!("Received packet from unknown address: {}", packet.addr());
                             } else if let Err(e) = socket.send(Packet::reliable_ordered(
                                 packet.addr(),
-                                bitcode::encode(&SpecialMessage::Ack).unwrap(),
+                                bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
                                 None,
                             )) {
                                 error!("Failed to send ack to {}: {e}", packet.addr());
@@ -232,7 +231,7 @@ impl Node for NetworkNode {
                                 ));
                                 entry.insert(PeerStateMachine::AwaitingNegotiation {
                                     packets_sub: Subscriber::new(self.peer_buffer_size),
-                                    req: peer::AwaitingNegotiationReq::ServerNegotiation { negotiation_recv, client_negotiation_sender }
+                                    req: AwaitingNegotiationReq::ServerNegotiation { negotiation_recv, client_negotiation_sender }
                                 });
                             }
                         }
