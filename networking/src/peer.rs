@@ -206,7 +206,7 @@ impl PeerStateMachine {
 
             PeerStateMachine::Connected {
                 packets_router,
-                channel_count: _,
+                channel_count,
                 packets_sub: _,
             } => {
                 let channel = *data.last().unwrap();
@@ -217,7 +217,9 @@ impl PeerStateMachine {
                         Ok(SpecialMessage::Disconnect) => return Retention::Drop,
 
                         Ok(x) => error!("Unexpected special_msg from {addr}: {x:?}"),
-                        Err(e) => error!("Failed to parse special_msg from {addr} while connected: {e}"),
+                        Err(e) => {
+                            error!("Failed to parse special_msg from {addr} while connected: {e}")
+                        }
                     }
                     return Retention::Retain;
                 };
@@ -227,7 +229,7 @@ impl PeerStateMachine {
                         let publisher = entry.get();
                         if (publisher.valid)() {
                             (publisher.setter)(data.into());
-                        } else {
+                        } else if channel_count.strong_count() == 0 {
                             entry.remove();
                         }
                     }
@@ -286,7 +288,7 @@ impl PeerStateMachine {
                     Err(TryRecvError::Closed) => {
                         debug!("{addr} dropped while awaiting server negotiation");
                         Retention::Drop
-                    },
+                    }
                     Err(TryRecvError::Empty) => Retention::Retain,
                 },
                 AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
@@ -339,16 +341,22 @@ impl PeerStateMachine {
                     }
                 }
 
-                packets_router.retain(|_, netpub| (netpub.valid)());
+                if channel_count.strong_count() == 0 {
+                    packets_router.retain(|_, netpub| (netpub.valid)());
 
-                if channel_count.strong_count() == 0 && packets_router.is_empty() && packets_sub.get_pub_count() == 0 {
-                    let mut payload = bitcode::encode(&SpecialMessage::Disconnect).unwrap();
-                    payload.push(0);
-                    if let Err(e) = socket.send(Packet::reliable_ordered(addr, payload, None)) {
-                        error!("Failed to send disconnect packet to {addr}: {e}");
+                    if packets_router.is_empty()
+                        && packets_sub.get_pub_count() == 0
+                    {
+                        let mut payload = bitcode::encode(&SpecialMessage::Disconnect).unwrap();
+                        payload.push(0);
+                        if let Err(e) = socket.send(Packet::reliable_ordered(addr, payload, None)) {
+                            error!("Failed to send disconnect packet to {addr}: {e}");
+                        }
+                        debug!("Disconnected from {addr} as pubsub are dropped");
+                        Retention::Drop
+                    } else {
+                        Retention::Retain
                     }
-                    debug!("Disconnected from {addr} as pubsub are dropped");
-                    Retention::Drop
                 } else {
                     Retention::Retain
                 }

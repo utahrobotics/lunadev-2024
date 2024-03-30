@@ -86,7 +86,7 @@ impl INode for LunabotConn {
                                 godot_error!("Server closed itself");
                                 break Ok(());
                             };
-                            
+
                             peer = match result {
                                 Ok((_, x)) => x,
                                 Err(e) => {
@@ -156,7 +156,11 @@ impl INode for LunabotConn {
                         }
                         tokio::select! {
                             result = important_sub.recv_or_closed() => {
-                                let Some(result) = result else { break; };
+                                let Some(result) = result else {
+                                    godot_error!("important_sub closed");
+                                    error!("important_sub closed");
+                                    break;
+                                };
                                 received!();
 
                                 let msg = match result {
@@ -173,7 +177,11 @@ impl INode for LunabotConn {
                                 }
                             }
                             result = logs_sub.recv_or_closed() => {
-                                let Some(result) = result else { break; };
+                                let Some(result) = result else {
+                                    godot_error!("logs_sub closed");
+                                    error!("logs_sub closed");
+                                    break;
+                                };
                                 received!();
 
                                 let log = match result {
@@ -187,13 +195,18 @@ impl INode for LunabotConn {
                                 godot_print!("{log}");
                             }
                             result = camera_sub.recv_or_closed() => {
-                                let Some(result) = result else { break; };
+                                let Some(result) = result else {
+                                    godot_error!("camera_sub closed");
+                                    error!("camera_sub closed");
+                                    break;
+                                };
                                 received!();
 
                                 let sdp = match result {
                                     Ok(x) => x,
                                     Err(e) => {
                                         godot_error!("Failed to parse incoming sdp: {e}");
+                                        error!("Failed to parse incoming sdp: {e}");
                                         continue;
                                     }
                                 };
@@ -242,7 +255,11 @@ impl INode for LunabotConn {
                                 });
                             }
                             result = controls_sub.recv_or_closed() => {
-                                let Some(result) = result else { break; };
+                                let Some(result) = result else {
+                                    godot_error!("controls_sub closed");
+                                    error!("controls_sub closed");
+                                    break;
+                                };
                                 received!();
 
                                 let controls = match result {

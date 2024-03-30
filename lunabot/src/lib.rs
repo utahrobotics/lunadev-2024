@@ -30,7 +30,7 @@ pub fn make_negotiation() -> Negotiation<(
     .unwrap()
 }
 
-#[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Default, Debug)]
 pub struct ControlsPacket {
     pub drive: i8,
     pub steering: i8,

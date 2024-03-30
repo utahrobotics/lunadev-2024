@@ -12,6 +12,7 @@ use unros::pubsub::{
 
 use crate::{peer::NetworkPublisher, NetworkPeer};
 
+#[derive(Debug)]
 pub struct Channel<T> {
     channel_id: NonZeroU8,
     remote_addr: SocketAddr,
@@ -31,6 +32,7 @@ impl<T> Clone for Channel<T> {
         }
     }
 }
+
 
 impl<T: Decode + Send + 'static> Channel<T> {
     pub fn accept_subscription(

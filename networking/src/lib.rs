@@ -4,7 +4,10 @@ use std::{
     collections::hash_map::Entry,
     net::{SocketAddr, ToSocketAddrs},
     num::NonZeroU8,
-    sync::{mpsc::{Receiver, Sender}, Arc, Weak},
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc, Weak,
+    },
     time::{Duration, Instant},
 };
 
@@ -110,7 +113,14 @@ impl NetworkConnector {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.address_sender
             .send((
-                Packet::reliable_ordered(addr, bitcode::encode(&SpecialMessage::Connect(bitcode::encode(init_data).unwrap())).unwrap(), None),
+                Packet::reliable_ordered(
+                    addr,
+                    bitcode::encode(&SpecialMessage::Connect(
+                        bitcode::encode(init_data).unwrap(),
+                    ))
+                    .unwrap(),
+                    None,
+                ),
                 sender,
             ))
             .map_err(|_| ConnectionError::ServerDropped)?;
@@ -161,12 +171,12 @@ where
                     .filter_map(|(packet, peer): (Packet, NetworkPeer)| {
                         let msg: SpecialMessage = match bitcode::decode(packet.payload()) {
                             Ok(x) => x,
-                            Err(e) => return Some(Err(e))
+                            Err(e) => return Some(Err(e)),
                         };
-                        let SpecialMessage::Connect(data) = msg else { return None; };
-                        Some(
-                            bitcode::decode(&data).map(|data| (data, peer))
-                        )
+                        let SpecialMessage::Connect(data) = msg else {
+                            return None;
+                        };
+                        Some(bitcode::decode(&data).map(|data| (data, peer)))
                     })
                     .boxed(),
             ),
