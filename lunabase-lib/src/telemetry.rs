@@ -15,7 +15,7 @@ use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
 use networking::new_server;
 use unros::{
     default_run_options,
-    pubsub::{subs::Subscription, MonoPublisher, Subscriber},
+    pubsub::{MonoPublisher, Subscriber},
     setup_logging, start_unros_runtime, tokio, Application,
 };
 

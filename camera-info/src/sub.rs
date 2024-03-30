@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 use opencv::{
@@ -82,7 +82,7 @@ impl<I: Subscription<Item = Arc<DynamicImage>>> Subscription for Undistorter<I> 
         self.inner.push(Arc::new(img.into()), token)
     }
 
-    fn set_name_mut(&mut self, name: Box<str>) {
+    fn set_name_mut(&mut self, name: Cow<'static, str>) {
         self.inner.set_name_mut(name);
     }
 
