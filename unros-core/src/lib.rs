@@ -17,10 +17,16 @@
 #![feature(once_cell_try, result_flattening, div_duration)]
 
 use std::{
-    backtrace::Backtrace, future::Future, marker::PhantomData, path::Path, sync::{
+    backtrace::Backtrace,
+    future::Future,
+    marker::PhantomData,
+    path::Path,
+    sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock, Weak,
-    }, thread::{panicking, JoinHandle}, time::{Duration, Instant}
+    },
+    thread::{panicking, JoinHandle},
+    time::{Duration, Instant},
 };
 
 pub mod logging;
@@ -549,21 +555,15 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Deserialize environment variables and the default config file into the given generic type.
 pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
-    let mut config = Config::builder()
-        .add_source(config::Environment::with_prefix(""));
+    let mut config = Config::builder().add_source(config::Environment::with_prefix(""));
     if Path::new("settings.toml").exists() {
-        config = config
-        .add_source(config::File::with_name("settings.toml"));
+        config = config.add_source(config::File::with_name("settings.toml"));
     }
     if Path::new(".env").exists() {
-        config = config
-        .add_source(config::File::with_name(".env"));
+        config = config.add_source(config::File::with_name(".env"));
     }
     CONFIG
-        .get_or_try_init(|| {
-            config
-                .build()
-        })?
+        .get_or_try_init(|| config.build())?
         .clone()
         .try_deserialize()
         .map_err(Into::into)

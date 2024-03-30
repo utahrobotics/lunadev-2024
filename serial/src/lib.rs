@@ -231,7 +231,10 @@ impl Node for VescConnection {
 
             let mut stream = vesc_comm::VescConnection::new(stream);
 
-            if let Err(e) = stream.set_duty(u32::from_ne_bytes(0i32.to_ne_bytes())).await {
+            if let Err(e) = stream
+                .set_duty(u32::from_ne_bytes(0i32.to_ne_bytes()))
+                .await
+            {
                 if self.serial.tolerate_error {
                     error!(
                         "Encountered the following error while communicating with: {}: {e}",
