@@ -17,6 +17,7 @@ pub struct Channel<T> {
     remote_addr: SocketAddr,
     received_packets: PublisherRef<Result<T, Arc<bitcode::Error>>>,
     packets_to_send: DirectSubscription<Packet>,
+    channel_count: Arc<()>
 }
 
 impl<T> Clone for Channel<T> {
@@ -26,6 +27,7 @@ impl<T> Clone for Channel<T> {
             channel_id: self.channel_id,
             received_packets: self.received_packets.clone(),
             packets_to_send: self.packets_to_send.clone(),
+            channel_count: self.channel_count.clone()
         }
     }
 }
@@ -114,6 +116,7 @@ pub trait FromPeer {
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
+        channel_count: Arc<()>
     ) -> Self::Product;
     fn get_ids(
         &self,
@@ -144,6 +147,7 @@ impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
+        channel_count: Arc<()>
     ) -> Self::Product {
         let pub_received_packets = Publisher::default();
         let recv_packets_sub = pub_received_packets.get_ref();
@@ -165,6 +169,7 @@ impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
             channel_id: *ids,
             received_packets: recv_packets_sub,
             packets_to_send: peer.packets_to_send.clone(),
+            channel_count
         }
     }
 
@@ -198,10 +203,11 @@ impl<A0: FromPeer, A1: FromPeer> FromPeer for (A0, A1) {
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
+        channel_count: Arc<()>
     ) -> Self::Product {
         (
-            A0::from_peer(peer, &ids.0, pubs),
-            A1::from_peer(peer, &ids.1, pubs),
+            A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),
+            A1::from_peer(peer, &ids.1, pubs, channel_count),
         )
     }
 
@@ -222,11 +228,12 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer> FromPeer for (A0, A1, A2) {
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
+        channel_count: Arc<()>
     ) -> Self::Product {
         (
-            A0::from_peer(peer, &ids.0, pubs),
-            A1::from_peer(peer, &ids.1, pubs),
-            A2::from_peer(peer, &ids.2, pubs),
+            A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),
+            A1::from_peer(peer, &ids.1, pubs, channel_count.clone()),
+            A2::from_peer(peer, &ids.2, pubs, channel_count),
         )
     }
 
@@ -251,12 +258,13 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer> FromPeer for (A0, A
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
+        channel_count: Arc<()>
     ) -> Self::Product {
         (
-            A0::from_peer(peer, &ids.0, pubs),
-            A1::from_peer(peer, &ids.1, pubs),
-            A2::from_peer(peer, &ids.2, pubs),
-            A3::from_peer(peer, &ids.3, pubs),
+            A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),
+            A1::from_peer(peer, &ids.1, pubs, channel_count.clone()),
+            A2::from_peer(peer, &ids.2, pubs, channel_count.clone()),
+            A3::from_peer(peer, &ids.3, pubs, channel_count),
         )
     }
 
@@ -290,13 +298,14 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer, A4: FromPeer> FromP
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
+        channel_count: Arc<()>
     ) -> Self::Product {
         (
-            A0::from_peer(peer, &ids.0, pubs),
-            A1::from_peer(peer, &ids.1, pubs),
-            A2::from_peer(peer, &ids.2, pubs),
-            A3::from_peer(peer, &ids.3, pubs),
-            A4::from_peer(peer, &ids.4, pubs),
+            A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),
+            A1::from_peer(peer, &ids.1, pubs, channel_count.clone()),
+            A2::from_peer(peer, &ids.2, pubs, channel_count.clone()),
+            A3::from_peer(peer, &ids.3, pubs, channel_count.clone()),
+            A4::from_peer(peer, &ids.4, pubs, channel_count),
         )
     }
 

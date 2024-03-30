@@ -4,7 +4,7 @@ use std::{
     collections::hash_map::Entry,
     net::{SocketAddr, ToSocketAddrs},
     num::NonZeroU8,
-    sync::mpsc::{Receiver, Sender},
+    sync::{mpsc::{Receiver, Sender}, Arc, Weak},
     time::{Duration, Instant},
 };
 
@@ -52,7 +52,7 @@ enum PeerQuirk {
 pub struct NetworkPeer {
     remote_addr: SocketAddr,
     packets_to_send: DirectSubscription<Packet>,
-    packets_router: oneshot::Sender<FxHashMap<NonZeroU8, NetworkPublisher>>,
+    packets_router: oneshot::Sender<(FxHashMap<NonZeroU8, NetworkPublisher>, Weak<()>)>,
     quirk: PeerQuirk,
 }
 
@@ -68,9 +68,11 @@ impl NetworkPeer {
         negotiation: &Negotiation<T>,
     ) -> Result<T::Product, NegotiationError> {
         let mut map = FxHashMap::default();
-        let negotiation = T::from_peer(&self, &negotiation.channel_ids, &mut map);
+        let channel_count = Arc::new(());
+        let channel_count_weak = Arc::downgrade(&channel_count);
+        let negotiation = T::from_peer(&self, &negotiation.channel_ids, &mut map, channel_count);
         self.packets_router
-            .send(map)
+            .send((map, channel_count_weak))
             .map_err(|_| NegotiationError::ServerDropped)?;
 
         match std::mem::replace(&mut self.quirk, PeerQuirk::ClientSide) {

@@ -1,4 +1,4 @@
-use std::{collections::hash_map::Entry, net::SocketAddr, num::NonZeroU8};
+use std::{collections::hash_map::Entry, net::SocketAddr, num::NonZeroU8, sync::Weak};
 
 use fxhash::FxHashMap;
 use laminar::{Packet, Socket};
@@ -27,15 +27,16 @@ impl std::fmt::Debug for NetworkPublisher {
 #[derive(Debug)]
 pub(super) enum AwaitingNegotiationReq {
     ServerNegotiation {
-        negotiation_recv: oneshot::Receiver<FxHashMap<NonZeroU8, NetworkPublisher>>,
+        negotiation_recv: oneshot::Receiver<(FxHashMap<NonZeroU8, NetworkPublisher>, Weak<()>)>,
         client_negotiation_sender: oneshot::Sender<()>,
     },
     ServerAwaitNegotiateResponse {
         packets_router: FxHashMap<NonZeroU8, NetworkPublisher>,
+        channel_count: Weak<()>,
         client_negotiation_sender: oneshot::Sender<()>,
     },
     ClientNegotiation {
-        negotiation_recv: oneshot::Receiver<FxHashMap<NonZeroU8, NetworkPublisher>>,
+        negotiation_recv: oneshot::Receiver<(FxHashMap<NonZeroU8, NetworkPublisher>, Weak<()>)>,
     },
 }
 
@@ -63,6 +64,7 @@ pub(super) enum PeerStateMachine {
     /// Channels have been negotiated so it is safe to send and receive packets.
     Connected {
         packets_sub: Subscriber<Packet>,
+        channel_count: Weak<()>,
         packets_router: FxHashMap<NonZeroU8, NetworkPublisher>,
     },
 }
@@ -142,6 +144,7 @@ impl PeerStateMachine {
                         }
                         AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
                             packets_router,
+                            channel_count,
                             client_negotiation_sender,
                         } => {
                             if std::mem::replace(client_negotiation_sender, oneshot::channel().0)
@@ -150,6 +153,7 @@ impl PeerStateMachine {
                             {
                                 *self = PeerStateMachine::Connected {
                                     packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
+                                    channel_count: std::mem::take(channel_count),
                                     packets_router: std::mem::take(packets_router),
                                 };
                                 Retention::Retain
@@ -202,6 +206,7 @@ impl PeerStateMachine {
 
             PeerStateMachine::Connected {
                 packets_router,
+                channel_count: _,
                 packets_sub: _,
             } => {
                 let channel = *data.last().unwrap();
@@ -258,7 +263,7 @@ impl PeerStateMachine {
                     negotiation_recv,
                     client_negotiation_sender,
                 } => match negotiation_recv.try_recv() {
-                    Ok(packets_router) => {
+                    Ok((packets_router, channel_count)) => {
                         if let Err(e) = socket.send(Packet::reliable_ordered(
                             addr,
                             bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
@@ -269,6 +274,7 @@ impl PeerStateMachine {
 
                         *req = AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
                             packets_router,
+                            channel_count,
                             client_negotiation_sender: std::mem::replace(
                                 client_negotiation_sender,
                                 oneshot::channel().0,
@@ -285,6 +291,7 @@ impl PeerStateMachine {
                 },
                 AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
                     packets_router: _,
+                    channel_count: _,
                     client_negotiation_sender,
                 } => {
                     if client_negotiation_sender.is_closed() {
@@ -296,7 +303,7 @@ impl PeerStateMachine {
                 }
                 AwaitingNegotiationReq::ClientNegotiation { negotiation_recv } => {
                     match negotiation_recv.try_recv() {
-                        Ok(packets_router) => {
+                        Ok((packets_router, channel_count)) => {
                             if let Err(e) = socket.send(Packet::reliable_ordered(
                                 addr,
                                 bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
@@ -307,6 +314,7 @@ impl PeerStateMachine {
 
                             *self = PeerStateMachine::Connected {
                                 packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
+                                channel_count,
                                 packets_router,
                             };
 
@@ -322,6 +330,7 @@ impl PeerStateMachine {
             },
             PeerStateMachine::Connected {
                 packets_router,
+                channel_count,
                 packets_sub,
             } => {
                 while let Some(packet) = packets_sub.try_recv() {
@@ -332,7 +341,7 @@ impl PeerStateMachine {
 
                 packets_router.retain(|_, netpub| (netpub.valid)());
 
-                if packets_router.is_empty() && packets_sub.get_pub_count() == 0 {
+                if channel_count.strong_count() == 0 && packets_router.is_empty() && packets_sub.get_pub_count() == 0 {
                     let mut payload = bitcode::encode(&SpecialMessage::Disconnect).unwrap();
                     payload.push(0);
                     if let Err(e) = socket.send(Packet::reliable_ordered(addr, payload, None)) {
