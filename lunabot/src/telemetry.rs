@@ -40,14 +40,6 @@ pub struct Telemetry {
         ChannelNegotiation<Arc<str>>,
     )>,
 }
-// #[derive(Clone)]
-// pub struct Channels {
-//     pub important: Channel<ImportantMessage>,
-//     pub camera: Channel<Arc<str>>,
-//     pub odometry: Channel<u8>,
-//     pub controls: Channel<ControlsPacket>,
-//     pub logs: Channel<Arc<str>>,
-// }
 
 impl Telemetry {
     pub async fn new(

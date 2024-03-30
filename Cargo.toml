@@ -57,5 +57,8 @@ opt-level = 3
 [profile.dev.package.lunabot]
 opt-level = 3
 
+[profile.release.package.lunabot]
+debug = 2
+
 [profile.release.package.lunabase-lib]
 debug = 2
