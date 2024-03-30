@@ -11,7 +11,7 @@ use std::{
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
-use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
+use lunabot::{make_negotiation, ControlsPacket};
 use networking::new_server;
 use unros::{
     default_run_options,
@@ -123,7 +123,6 @@ impl INode for LunabotConn {
                     shared.echo_controls.store(false, Ordering::Relaxed);
                     shared.connected.store(true, Ordering::Relaxed);
                     let mut last_receive_time = Instant::now();
-                    let mut pinged = false;
                     let mut ffplay: Option<std::process::Child> = None;
 
                     let logs_sub = Subscriber::new(32);
@@ -136,17 +135,15 @@ impl INode for LunabotConn {
                     let controls_sub = Subscriber::new(1);
                     controls.accept_subscription(controls_sub.create_subscription());
 
-                    let mut important_pub = MonoPublisher::from(important.create_reliable_subscription());
+                    let mut _important_pub = MonoPublisher::from(important.create_reliable_subscription());
                     let important_sub = Subscriber::new(8);
                     important.accept_subscription(important_sub.create_subscription());
 
                     loop {
-                        let elapsed;
                         macro_rules! received {
                             () => {{
                                 let tmp = last_receive_time.elapsed();
                                 last_receive_time += tmp;
-                                elapsed = tmp;
                                 shared.base_mut_queue.push(Box::new(|mut base| {
                                     base.emit_signal("something_received".into(), &[]);
                                 }));
@@ -170,7 +167,6 @@ impl INode for LunabotConn {
                                 };
 
                                 match msg {
-                                    ImportantMessage::Ping => pinged = false,
                                     _ => {}
                                 }
                             }
@@ -270,9 +266,7 @@ impl INode for LunabotConn {
 
                                 shared.echo_controls.store(controls != shared.controls_data.load(), Ordering::Relaxed);
                             }
-                            _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                                elapsed = last_receive_time.elapsed();
-                            }
+                            _ = tokio::time::sleep(Duration::from_millis(50)) => {}
                         }
 
                         if Arc::strong_count(&shared) == 1 {
@@ -286,11 +280,6 @@ impl INode for LunabotConn {
                                 }
                             }
                             return Ok(());
-                        }
-
-                        if !pinged && elapsed.as_secs() >= 3 {
-                            pinged = true;
-                            important_pub.set(ImportantMessage::Ping);
                         }
 
                         if shared.echo_controls.load(Ordering::Relaxed) {

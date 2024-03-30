@@ -40,6 +40,7 @@ enum SpecialMessage {
     Disconnect,
     Negotiate,
     Ack,
+    Ping,
 }
 
 #[derive(Debug)]
@@ -227,6 +228,7 @@ impl Node for NetworkNode {
                                     packet,
                                     &context,
                                     self.peer_buffer_size,
+                                    &mut socket,
                                 )
                             {
                                 debug!("Received disconnect from {}", addr);

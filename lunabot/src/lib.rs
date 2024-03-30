@@ -42,7 +42,6 @@ pub struct ControlsPacket {
 pub enum ImportantMessage {
     EnableCamera,
     DisableCamera,
-    Ping,
 }
 
 pub async fn open_imu(

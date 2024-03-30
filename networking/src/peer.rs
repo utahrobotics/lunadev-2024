@@ -1,4 +1,6 @@
-use std::{collections::hash_map::Entry, net::SocketAddr, num::NonZeroU8, sync::Weak};
+use std::{
+    collections::hash_map::Entry, net::SocketAddr, num::NonZeroU8, sync::Weak, time::Instant,
+};
 
 use fxhash::FxHashMap;
 use laminar::{Packet, Socket};
@@ -66,6 +68,7 @@ pub(super) enum PeerStateMachine {
         packets_sub: Subscriber<Packet>,
         channel_count: Weak<()>,
         packets_router: FxHashMap<NonZeroU8, NetworkPublisher>,
+        last_received: Instant,
     },
 }
 
@@ -81,6 +84,7 @@ impl PeerStateMachine {
         packet: Packet,
         context: &RuntimeContext,
         peer_buffer_size: usize,
+        socket: &mut Socket,
     ) -> Retention {
         let data = packet.payload();
         let addr = packet.addr();
@@ -112,15 +116,10 @@ impl PeerStateMachine {
                             Retention::Drop
                         }
                     }
-                    Ok(SpecialMessage::Connect(_)) => {
-                        error!("Unexpected Connect from {addr}");
-                        if peer_sender.is_closed() {
-                            Retention::Drop
-                        } else {
-                            Retention::Retain
+                    Ok(x) => {
+                        if let SpecialMessage::Connect(_) = x {
+                            error!("Unexpected Connect from {addr}");
                         }
-                    }
-                    Ok(SpecialMessage::Ack) => {
                         if peer_sender.is_closed() {
                             Retention::Drop
                         } else {
@@ -155,6 +154,7 @@ impl PeerStateMachine {
                                     packets_sub: std::mem::take(packets_sub).unwrap(),
                                     channel_count: std::mem::take(channel_count),
                                     packets_router: std::mem::take(packets_router),
+                                    last_received: Instant::now(),
                                 };
                                 Retention::Retain
                             } else {
@@ -166,23 +166,10 @@ impl PeerStateMachine {
                             Retention::Retain
                         }
                     },
-                    Ok(SpecialMessage::Connect(_)) => {
-                        error!("Unexpected Connect from {addr}");
-                        if let AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
-                            client_negotiation_sender,
-                            ..
-                        } = req
-                        {
-                            if client_negotiation_sender.is_closed() {
-                                Retention::Drop
-                            } else {
-                                Retention::Retain
-                            }
-                        } else {
-                            Retention::Retain
+                    Ok(x) => {
+                        if let SpecialMessage::Connect(_) = x {
+                            error!("Unexpected Connect from {addr}");
                         }
-                    }
-                    Ok(SpecialMessage::Ack) => {
                         if let AwaitingNegotiationReq::ServerAwaitNegotiateResponse {
                             client_negotiation_sender,
                             ..
@@ -208,7 +195,9 @@ impl PeerStateMachine {
                 packets_router,
                 channel_count,
                 packets_sub: _,
+                last_received,
             } => {
+                *last_received += last_received.elapsed();
                 let channel = *data.last().unwrap();
                 let data = data.split_at(data.len() - 1).0;
 
@@ -216,6 +205,13 @@ impl PeerStateMachine {
                     match bitcode::decode::<SpecialMessage>(data) {
                         Ok(SpecialMessage::Disconnect) => return Retention::Drop,
                         Ok(SpecialMessage::Ack) => {}
+                        Ok(SpecialMessage::Ping) => {
+                            let mut payload = bitcode::encode(&SpecialMessage::Ping).unwrap();
+                            payload.push(0);
+                            if let Err(e) = socket.send(Packet::reliable_unordered(addr, payload)) {
+                                error!("Failed to send ack packet to {addr}: {e}");
+                            }
+                        }
 
                         Ok(x) => error!("Unexpected special_msg from {addr}: {x:?}"),
                         Err(e) => {
@@ -269,10 +265,9 @@ impl PeerStateMachine {
                     client_negotiation_sender,
                 } => match negotiation_recv.try_recv() {
                     Ok((packets_router, channel_count)) => {
-                        if let Err(e) = socket.send(Packet::reliable_ordered(
+                        if let Err(e) = socket.send(Packet::reliable_unordered(
                             addr,
                             bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
-                            None,
                         )) {
                             error!("Failed to send Negotiate to {addr}: {e}");
                         }
@@ -309,10 +304,9 @@ impl PeerStateMachine {
                 AwaitingNegotiationReq::ClientNegotiation { negotiation_recv } => {
                     match negotiation_recv.try_recv() {
                         Ok((packets_router, channel_count)) => {
-                            if let Err(e) = socket.send(Packet::reliable_ordered(
+                            if let Err(e) = socket.send(Packet::reliable_unordered(
                                 addr,
                                 bitcode::encode(&SpecialMessage::Negotiate).unwrap(),
-                                None,
                             )) {
                                 error!("Failed to send Negotiate to {addr}: {e}");
                             }
@@ -321,6 +315,7 @@ impl PeerStateMachine {
                                 packets_sub: std::mem::take(packets_sub).unwrap(),
                                 channel_count,
                                 packets_router,
+                                last_received: Instant::now(),
                             };
 
                             Retention::Retain
@@ -337,11 +332,22 @@ impl PeerStateMachine {
                 packets_router,
                 channel_count,
                 packets_sub,
+                last_received,
             } => {
                 while let Some(packet) = packets_sub.try_recv() {
                     if let Err(e) = socket.send(packet) {
                         error!("Failed to send packet to {addr}: {e}");
                     }
+                }
+
+                let elapsed = last_received.elapsed();
+                if elapsed.as_millis() >= 3000 {
+                    let mut payload = bitcode::encode(&SpecialMessage::Ping).unwrap();
+                    payload.push(0);
+                    if let Err(e) = socket.send(Packet::reliable_unordered(addr, payload)) {
+                        error!("Failed to send ack packet to {addr}: {e}");
+                    }
+                    *last_received += elapsed;
                 }
 
                 if channel_count.strong_count() == 0 {
@@ -350,7 +356,7 @@ impl PeerStateMachine {
                     if packets_router.is_empty() && packets_sub.get_pub_count() == 0 {
                         let mut payload = bitcode::encode(&SpecialMessage::Disconnect).unwrap();
                         payload.push(0);
-                        if let Err(e) = socket.send(Packet::reliable_ordered(addr, payload, None)) {
+                        if let Err(e) = socket.send(Packet::reliable_unordered(addr, payload)) {
                             error!("Failed to send disconnect packet to {addr}: {e}");
                         }
                         debug!("Disconnected from {addr} as pubsub are dropped");

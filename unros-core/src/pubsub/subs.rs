@@ -3,7 +3,10 @@
 //! type, allowing Subscriptions and Publishers with different generic types to connect.
 
 use std::{
-    borrow::Cow, marker::PhantomData, ops::{Deref, DerefMut}, sync::{atomic::Ordering, Weak}
+    borrow::Cow,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    sync::{atomic::Ordering, Weak},
 };
 
 use log::warn;

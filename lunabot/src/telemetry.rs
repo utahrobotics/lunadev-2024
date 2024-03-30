@@ -177,9 +177,6 @@ impl Node for Telemetry {
                         match msg {
                             ImportantMessage::EnableCamera => todo!(),
                             ImportantMessage::DisableCamera => todo!(),
-                            ImportantMessage::Ping => {
-                                important_pub.set(ImportantMessage::Ping);
-                            }
                         }
                     }
                 };
