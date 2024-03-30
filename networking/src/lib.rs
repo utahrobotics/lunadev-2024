@@ -253,7 +253,7 @@ impl Node for NetworkNode {
                                     },
                                 ));
                                 entry.insert(PeerStateMachine::AwaitingNegotiation {
-                                    packets_sub: Subscriber::new(self.peer_buffer_size),
+                                    packets_sub: Some(packets_sub),
                                     req: AwaitingNegotiationReq::ServerNegotiation {
                                         negotiation_recv,
                                         client_negotiation_sender,
