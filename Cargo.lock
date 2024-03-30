@@ -1418,13 +1418,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
-name = "global-msgs"
-version = "0.1.0"
-dependencies = [
- "ordered-float",
-]
-
-[[package]]
 name = "godot"
 version = "0.1.0"
 source = "git+https://github.com/godot-rust/gdext?branch=master#fe5b02ba6abec0ba2d8fff612368a9c896872810"
@@ -2004,7 +1997,6 @@ dependencies = [
  "camera-info",
  "costmap",
  "fxhash",
- "global-msgs",
  "image",
  "localization",
  "nalgebra",
@@ -2253,7 +2245,6 @@ version = "0.1.0"
 dependencies = [
  "costmap",
  "fxhash",
- "global-msgs",
  "indexmap 2.2.6",
  "nalgebra",
  "ordered-float",

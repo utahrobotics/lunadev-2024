@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 unros = { path = "../unros" }
-# telemetry = { path = "../telemetry" }
 networking = { path = "../networking" }
 camera = { path = "../camera" }
 navigator = { path = "../navigator" }
@@ -23,7 +22,6 @@ costmap = { path = "../costmap" }
 camera-info = { path = "../camera-info" }
 spin_sleep = { workspace = true }
 image = { workspace = true }
-global-msgs = { path = "../global-msgs" }
 
 [target.'cfg(unix)'.dependencies]
 realsense = { path = "../realsense" }

@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "unros-core",
-    "global-msgs",
     "lunabot",
     "camera",
     "apriltag",

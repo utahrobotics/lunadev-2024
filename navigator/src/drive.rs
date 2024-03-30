@@ -1,7 +1,3 @@
-//! Messages that are used throughout `lunadev-2024`.
-
-#![no_std]
-
 use core::{fmt::Debug, ops::Deref};
 
 use ordered_float::NotNan;

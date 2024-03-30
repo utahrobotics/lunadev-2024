@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 # crossbeam = { workspace = true }
 unros = { path = "../unros" }
-global-msgs = { path = "../global-msgs" }
 rig = { path = "../rig" }
 nalgebra = { workspace = true }
 ordered-float = { workspace = true }

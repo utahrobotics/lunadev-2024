@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use global_msgs::Steering;
+use navigator::drive::Steering;
 use image::DynamicImage;
 use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
 use networking::{
