@@ -338,11 +338,6 @@ impl PeerStateMachine {
                 channel_count,
                 packets_sub,
             } => {
-                let mut ack = bitcode::encode(&SpecialMessage::Ack).unwrap();
-                ack.push(0);
-                if let Err(e) = socket.send(Packet::reliable_ordered(addr, ack, None)) {
-                    error!("Failed to send packet to {addr}: {e}");
-                }
                 while let Some(packet) = packets_sub.try_recv() {
                     if let Err(e) = socket.send(packet) {
                         error!("Failed to send packet to {addr}: {e}");

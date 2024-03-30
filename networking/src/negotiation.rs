@@ -56,7 +56,6 @@ impl<T: Encode + std::fmt::Debug> Channel<T> {
         self.packets_to_send.clone().map(move |value| {
             let mut data = bitcode::encode(&value).expect("Failed to serialize value");
             data.push(channel_id);
-            unros::log::info!("Sent {value:?}");
             Packet::reliable_unordered(addr, data)
         })
     }
