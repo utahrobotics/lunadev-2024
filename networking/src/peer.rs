@@ -342,7 +342,6 @@ impl PeerStateMachine {
                     if let Err(e) = socket.send(packet) {
                         error!("Failed to send packet to {addr}: {e}");
                     }
-                    info!("Sent packet");
                 }
 
                 if channel_count.strong_count() == 0 {
