@@ -557,7 +557,7 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
     CONFIG
         .get_or_try_init(|| {
             Config::builder()
-                // Add in `./Settings.toml`
+                .add_source(config::File::with_name("settings.toml"))
                 .add_source(config::File::with_name(".env"))
                 .add_source(config::Environment::with_prefix(""))
                 .build()

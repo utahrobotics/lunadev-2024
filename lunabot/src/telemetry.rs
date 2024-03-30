@@ -4,13 +4,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use navigator::drive::Steering;
 use image::DynamicImage;
 use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
+use navigator::drive::Steering;
 use networking::{
     negotiation::{ChannelNegotiation, Negotiation},
     new_client, ConnectionError, NetworkConnector, NetworkNode,
 };
+use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, async_trait, asyncify_run,
@@ -190,9 +191,9 @@ impl Node for Telemetry {
                             }
                         };
                         controls_pub.set(controls);
-                        self.steering_signal.set(Steering::new(
-                            controls.drive as f32 / 127.0,
-                            controls.steering as f32 / 127.0,
+                        self.steering_signal.set(Steering::from_drive_and_steering(
+                            NotNan::new(controls.drive as f32 / 127.0).unwrap(),
+                            NotNan::new(controls.steering as f32 / 127.0).unwrap(),
                         ));
                     }
                 };

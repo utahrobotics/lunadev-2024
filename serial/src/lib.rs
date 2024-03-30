@@ -36,9 +36,9 @@ impl SerialConnection {
     /// The connection is not actually made until this node is ran.
     /// If `tolerate_error` is `true`, then errors are ignored and
     /// actions are retried.
-    pub async fn new<'a>(path: String, baud_rate: u32, tolerate_error: bool) -> Self {
+    pub fn new<'a>(path: impl Into<String>, baud_rate: u32, tolerate_error: bool) -> Self {
         Self {
-            path: path.into_boxed_str().into(),
+            path: path.into().into_boxed_str().into(),
             baud_rate,
             output_map: Box::new(Some),
             input_map: Box::new(|x| x),
@@ -202,19 +202,19 @@ impl VescConnection {
     }
 
     /// Provide a subscription for the current level.
-    pub fn connect_current_from(&self) -> DirectSubscription<u32> {
+    pub fn get_current_sub(&self) -> DirectSubscription<u32> {
         self.current.create_subscription()
     }
 
     /// Provide a subscription for the duty cycle.
-    pub fn connect_duty_from(&self) -> DirectSubscription<u32> {
+    pub fn get_duty_sub(&self) -> DirectSubscription<u32> {
         self.current.create_subscription()
     }
 }
 
 #[async_trait]
 impl Node for VescConnection {
-    const DEFAULT_NAME: &'static str = "vesc_connection";
+    const DEFAULT_NAME: &'static str = "vesc-connection";
 
     fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
         &mut self.intrinsics

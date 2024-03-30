@@ -11,11 +11,10 @@ use unros::{
 async fn main(mut app: Application) -> anyhow::Result<Application> {
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
     let serial = SerialConnection::new(
-        "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00".into(),
+        "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00",
         115200,
         true,
-    )
-    .await;
+    );
     let sub = Subscriber::<Bytes>::new(8);
     serial
         .msg_received_pub()

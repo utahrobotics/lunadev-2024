@@ -10,11 +10,11 @@ use apriltag::{AprilTagDetector, PoseObservation};
 use camera::{discover_all_cameras, Camera};
 use costmap::local::LocalCostmap;
 use fxhash::FxBuildHasher;
+use imu::open_imu;
 use localization::{
     frames::{IMUFrame, OrientationFrame, PositionFrame},
     Localizer,
 };
-use lunabot::open_imu;
 use nalgebra::{Isometry, Point3};
 use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 #[cfg(unix)]
@@ -29,6 +29,10 @@ use unros::{
     Application, Node,
 };
 
+use crate::drive::Drive;
+
+mod drive;
+mod imu;
 mod telemetry;
 
 #[unros::main]
@@ -87,6 +91,11 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     steering_sub
         .into_logger(|x| format!("{x:?}"), "steering.logs")
         .await?;
+
+    let drive = Drive::default();
+    telemetry
+        .steering_pub()
+        .accept_subscription(drive.get_steering_sub());
 
     let mut teleop_camera = Camera::new(2)?;
     teleop_camera.res_x = 1280;
@@ -239,6 +248,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(telemetry);
     app.add_node(teleop_camera);
     app.add_node(imu01);
+    app.add_node(drive);
     #[cfg(unix)]
     app.add_node(realsense_camera);
 

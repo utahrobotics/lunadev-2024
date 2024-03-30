@@ -10,8 +10,8 @@ use unros::{
     setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
 
-pub mod pathfinders;
 pub mod drive;
+pub mod pathfinders;
 
 type Float = f32;
 
