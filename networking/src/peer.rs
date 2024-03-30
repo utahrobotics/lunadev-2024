@@ -55,7 +55,7 @@ pub(super) enum PeerStateMachine {
     /// Client - Client is waiting for code to negotiate channels internally before sending `Negotiate` to server.
     /// Instantly transitions to `Connected` after sending `Negotiate`.
     AwaitingNegotiation {
-        packets_sub: Subscriber<Packet>,
+        packets_sub: Option<Subscriber<Packet>>,
         req: AwaitingNegotiationReq,
     },
 
@@ -101,7 +101,7 @@ impl PeerStateMachine {
                         };
                         let peer_sender = std::mem::replace(peer_sender, oneshot::channel().0);
                         *self = PeerStateMachine::AwaitingNegotiation {
-                            packets_sub,
+                            packets_sub: Some(packets_sub),
                             req: AwaitingNegotiationReq::ClientNegotiation {
                                 negotiation_recv: packets_router_recv,
                             },
@@ -152,7 +152,7 @@ impl PeerStateMachine {
                                 .is_ok()
                             {
                                 *self = PeerStateMachine::Connected {
-                                    packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
+                                    packets_sub: std::mem::take(packets_sub).unwrap(),
                                     channel_count: std::mem::take(channel_count),
                                     packets_router: std::mem::take(packets_router),
                                 };
@@ -318,7 +318,7 @@ impl PeerStateMachine {
                             }
 
                             *self = PeerStateMachine::Connected {
-                                packets_sub: std::mem::replace(packets_sub, Subscriber::new(1)),
+                                packets_sub: std::mem::take(packets_sub).unwrap(),
                                 channel_count,
                                 packets_router,
                             };

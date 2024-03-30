@@ -3,9 +3,7 @@
 //! type, allowing Subscriptions and Publishers with different generic types to connect.
 
 use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-    sync::{atomic::Ordering, Weak},
+    borrow::Cow, marker::PhantomData, ops::{Deref, DerefMut}, sync::{atomic::Ordering, Weak}
 };
 
 use log::warn;
@@ -95,16 +93,16 @@ pub trait Subscription {
     /// as it indicates data loss and a lack of processing speed. With a name,
     /// these lags will be logged as warnings in the standard log file (`.log`).
     #[must_use]
-    fn set_name(mut self, name: impl Into<String>) -> Self
+    fn set_name(mut self, name: impl Into<Cow<'static, str>>) -> Self
     where
         Self: Sized,
     {
-        self.set_name_mut(name.into().into_boxed_str());
+        self.set_name_mut(name.into());
         self
     }
 
     /// Analagous to `set_name`, except that mutation is done through a mutable reference.
-    fn set_name_mut(&mut self, name: Box<str>);
+    fn set_name_mut(&mut self, name: Cow<'static, str>);
 
     /// Increments the publisher count of the `Subscriber`, which is important for it to know
     /// when no more publishers are connected to it.
@@ -122,7 +120,7 @@ pub trait Subscription {
 #[derive(Debug)]
 pub struct DirectSubscription<T> {
     pub(super) sub: Weak<SubscriberInner<T>>,
-    pub(super) name: Option<Box<str>>,
+    pub(super) name: Option<Cow<'static, str>>,
     pub(super) lag: usize,
 }
 
@@ -156,7 +154,7 @@ impl<T> Subscription for DirectSubscription<T> {
         }
     }
 
-    fn set_name_mut(&mut self, name: Box<str>)
+    fn set_name_mut(&mut self, name: Cow<'static, str>)
     where
         Self: Sized,
     {
@@ -195,7 +193,7 @@ where
         self.inner.push((self.map)(value), token)
     }
 
-    fn set_name_mut(&mut self, name: Box<str>) {
+    fn set_name_mut(&mut self, name: Cow<'static, str>) {
         self.inner.set_name_mut(name);
     }
 
@@ -240,7 +238,7 @@ where
         }
     }
 
-    fn set_name_mut(&mut self, name: Box<str>) {
+    fn set_name_mut(&mut self, name: Cow<'static, str>) {
         self.inner.set_name_mut(name);
     }
 
@@ -272,7 +270,7 @@ impl<T> Subscription for BoxedSubscription<T> {
         self.deref_mut().push(value, token)
     }
 
-    fn set_name_mut(&mut self, name: Box<str>) {
+    fn set_name_mut(&mut self, name: Cow<'static, str>) {
         self.deref_mut().set_name_mut(name);
     }
 

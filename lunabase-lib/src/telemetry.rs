@@ -15,7 +15,7 @@ use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
 use networking::new_server;
 use unros::{
     default_run_options,
-    pubsub::{MonoPublisher, Subscriber, subs::Subscription},
+    pubsub::{subs::Subscription, MonoPublisher, Subscriber},
     setup_logging, start_unros_runtime, tokio, Application,
 };
 
@@ -136,7 +136,7 @@ impl INode for LunabotConn {
                     let controls_sub = Subscriber::new(1);
                     controls.accept_subscription(controls_sub.create_subscription());
 
-                    let mut important_pub = MonoPublisher::from(important.create_reliable_subscription().set_name("important-messages"));
+                    let mut important_pub = MonoPublisher::from(important.create_reliable_subscription());
                     let important_sub = Subscriber::new(8);
                     important.accept_subscription(important_sub.create_subscription());
 
@@ -290,8 +290,8 @@ impl INode for LunabotConn {
 
                         if !pinged && elapsed.as_secs() >= 3 {
                             pinged = true;
-                            godot_print!("Pinged {}", important_pub.get_sub_count());
                             important_pub.set(ImportantMessage::Ping);
+                            godot_print!("Pinged {}", important_pub.get_sub_count());
                         }
 
                         if shared.echo_controls.load(Ordering::Relaxed) {
