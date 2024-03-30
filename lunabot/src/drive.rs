@@ -65,8 +65,11 @@ impl Node for Drive {
             loop {
                 let steering = self.steering_sub.recv().await;
 
-                left_duty.set((steering.left * u32::MAX as f32).round() as u32);
-                right_duty.set((steering.right * u32::MAX as f32).round() as u32);
+                let left_modifier = if self.left_invert { -1.0 } else { 1.0 };
+                let right_modifier = if self.right_invert { -1.0 } else { 1.0 };
+
+                left_duty.set((steering.left * i32::MAX as f32 * left_modifier).round() as i32);
+                right_duty.set((steering.right * i32::MAX as f32 * right_modifier).round() as i32);
             }
         };
 

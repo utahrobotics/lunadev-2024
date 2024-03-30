@@ -184,7 +184,7 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> Node for SerialConnec
 pub struct VescConnection {
     serial: SerialConnection,
     current: Subscriber<u32>,
-    duty: Subscriber<u32>,
+    duty: Subscriber<i32>,
     intrinsics: NodeIntrinsics<Self>,
 }
 
@@ -207,8 +207,8 @@ impl VescConnection {
     }
 
     /// Provide a subscription for the duty cycle.
-    pub fn get_duty_sub(&self) -> DirectSubscription<u32> {
-        self.current.create_subscription()
+    pub fn get_duty_sub(&self) -> DirectSubscription<i32> {
+        self.duty.create_subscription()
     }
 }
 
@@ -231,10 +231,21 @@ impl Node for VescConnection {
 
             let mut stream = vesc_comm::VescConnection::new(stream);
 
+            if let Err(e) = stream.set_duty(u32::from_ne_bytes(0i32.to_ne_bytes())).await {
+                if self.serial.tolerate_error {
+                    error!(
+                        "Encountered the following error while communicating with: {}: {e}",
+                        self.serial.path
+                    );
+                } else {
+                    break Err(e.into());
+                }
+            }
+
             let e = loop {
                 tokio::select! {
                     duty = self.duty.recv() => {
-                        let Err(e) = stream.set_duty(duty).await else { continue; };
+                        let Err(e) = stream.set_duty(u32::from_ne_bytes(duty.to_ne_bytes())).await else { continue; };
                         break e;
                     }
                     current = self.current.recv() => {
