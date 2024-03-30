@@ -197,7 +197,7 @@ impl Node for NetworkNode {
         let drop_check = DropCheck::default();
         let _drop_check = drop_check.clone();
         let mut conns: FxHashMap<SocketAddr, PeerStateMachine> = FxHashMap::default();
-        let mut socket = DropWrapper::new(self.socket, |_| {});
+        let mut socket = self.socket;
         let spin_sleeper = SpinSleeper::default();
         let mut now = Instant::now();
 
@@ -205,6 +205,16 @@ impl Node for NetworkNode {
             now += now.elapsed();
             socket.manual_poll(now);
             if drop_check.has_dropped() {
+                for (addr, _) in conns {
+                    let mut payload = bitcode::encode(&SpecialMessage::Disconnect).unwrap();
+                    payload.push(0);
+                    if let Err(e) = socket.send(Packet::reliable_ordered(addr, payload, None)) {
+                        error!("Failed to send disconnect packet to {addr}: {e}");
+                    }
+                    debug!("Disconnected from {addr} as server is dropping");
+                }
+                now += now.elapsed();
+                socket.manual_poll(now);
                 break Ok(());
             }
 
