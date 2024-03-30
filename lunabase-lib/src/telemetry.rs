@@ -291,7 +291,6 @@ impl INode for LunabotConn {
                         if !pinged && elapsed.as_secs() >= 3 {
                             pinged = true;
                             important_pub.set(ImportantMessage::Ping);
-                            godot_print!("Pinged {}", important_pub.get_sub_count());
                         }
 
                         if shared.echo_controls.load(Ordering::Relaxed) {
