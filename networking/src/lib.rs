@@ -26,7 +26,6 @@ use unros::{
     },
     setup_logging,
     tokio::{self, sync::oneshot},
-    utils::DropWrapper,
     DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
@@ -230,7 +229,7 @@ impl Node for NetworkNode {
                                     self.peer_buffer_size,
                                 )
                             {
-                                info!("Received disconnect from {}", addr);
+                                debug!("Received disconnect from {}", addr);
                                 entry.remove();
                             }
                         }
