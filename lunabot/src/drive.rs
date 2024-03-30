@@ -27,21 +27,21 @@ struct DriveConfig<'a> {
     right_invert: bool,
 }
 
-impl Default for Drive {
-    fn default() -> Self {
-        let config: DriveConfig = get_env().expect("Config should be readable");
-        Self {
-            steering_sub: Subscriber::new(4),
-            intrinsics: Default::default(),
-            left_vesc: VescConnection::new(SerialConnection::new(config.left_port, 115200, true)),
-            right_vesc: VescConnection::new(SerialConnection::new(config.right_port, 115200, true)),
-            left_invert: config.left_invert,
-            right_invert: config.right_invert,
-        }
-    }
-}
 
 impl Drive {
+    
+    pub fn new() -> anyhow::Result<Self> {
+        let config: DriveConfig = get_env()?;
+        Ok(Self {
+                    steering_sub: Subscriber::new(4),
+                    intrinsics: Default::default(),
+                    left_vesc: VescConnection::new(SerialConnection::new(config.left_port, 115200, true)),
+                    right_vesc: VescConnection::new(SerialConnection::new(config.right_port, 115200, true)),
+                    left_invert: config.left_invert,
+                    right_invert: config.right_invert,
+                })
+    }
+
     pub fn get_steering_sub(&self) -> DirectSubscription<Steering> {
         self.steering_sub.create_subscription()
     }

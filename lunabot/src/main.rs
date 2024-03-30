@@ -92,7 +92,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .into_logger(|x| format!("{x:?}"), "steering.logs")
         .await?;
 
-    let drive = Drive::default();
+    let drive = Drive::new()?;
     telemetry
         .steering_pub()
         .accept_subscription(drive.get_steering_sub());
