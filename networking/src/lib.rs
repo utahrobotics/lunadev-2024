@@ -263,15 +263,15 @@ impl Node for NetworkNode {
                         }
                     },
                     laminar::SocketEvent::Connect(addr) => {
-                        info!("Connected to {addr}");
+                        debug!("Connected to {addr}");
                         continue;
                     }
                     laminar::SocketEvent::Timeout(addr) => {
-                        info!("Timed out from {addr}");
+                        debug!("Timed out from {addr}");
                         conns.remove(&addr);
                     }
                     laminar::SocketEvent::Disconnect(addr) => {
-                        info!("Disconnected from {addr}");
+                        debug!("Disconnected from {addr}");
                         conns.remove(&addr);
                     }
                 }
