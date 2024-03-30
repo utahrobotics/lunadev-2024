@@ -142,7 +142,7 @@ pub fn new_client() -> laminar::Result<(NetworkNode, NetworkConnector)> {
     Ok((
         NetworkNode {
             socket: Socket::bind("0.0.0.0:0")?,
-            service_duration: Duration::from_millis(50),
+            service_duration: Duration::from_millis(20),
             peer_buffer_size: 8,
             peer_pub: MonoPublisher::new(),
             intrinsics: NodeIntrinsics::default(),
@@ -164,7 +164,7 @@ where
     Ok((
         NetworkNode {
             socket: Socket::bind(bind_address)?,
-            service_duration: Duration::from_millis(50),
+            service_duration: Duration::from_millis(20),
             peer_buffer_size: 8,
             peer_pub: MonoPublisher::from(
                 peer_sub

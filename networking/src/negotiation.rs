@@ -18,7 +18,7 @@ pub struct Channel<T> {
     remote_addr: SocketAddr,
     received_packets: PublisherRef<Result<T, Arc<bitcode::Error>>>,
     packets_to_send: DirectSubscription<Packet>,
-    channel_count: Arc<()>
+    channel_count: Arc<()>,
 }
 
 impl<T> Clone for Channel<T> {
@@ -28,11 +28,10 @@ impl<T> Clone for Channel<T> {
             channel_id: self.channel_id,
             received_packets: self.received_packets.clone(),
             packets_to_send: self.packets_to_send.clone(),
-            channel_count: self.channel_count.clone()
+            channel_count: self.channel_count.clone(),
         }
     }
 }
-
 
 impl<T: Decode + Send + 'static> Channel<T> {
     pub fn accept_subscription(
@@ -50,13 +49,14 @@ impl<T: Decode + Send + 'static> Channel<T> {
     }
 }
 
-impl<T: Encode> Channel<T> {
+impl<T: Encode + std::fmt::Debug> Channel<T> {
     pub fn create_reliable_subscription(&self) -> impl Subscription<Item = T> {
         let channel_id = self.channel_id.get();
         let addr = self.remote_addr;
         self.packets_to_send.clone().map(move |value| {
             let mut data = bitcode::encode(&value).expect("Failed to serialize value");
             data.push(channel_id);
+            unros::log::info!("Sent {value:?}");
             Packet::reliable_unordered(addr, data)
         })
     }
@@ -118,7 +118,7 @@ pub trait FromPeer {
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
-        channel_count: Arc<()>
+        channel_count: Arc<()>,
     ) -> Self::Product;
     fn get_ids(
         &self,
@@ -149,7 +149,7 @@ impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
-        channel_count: Arc<()>
+        channel_count: Arc<()>,
     ) -> Self::Product {
         let pub_received_packets = Publisher::default();
         let recv_packets_sub = pub_received_packets.get_ref();
@@ -171,7 +171,7 @@ impl<T: Decode + Clone + 'static> FromPeer for ChannelNegotiation<T> {
             channel_id: *ids,
             received_packets: recv_packets_sub,
             packets_to_send: peer.packets_to_send.clone(),
-            channel_count
+            channel_count,
         }
     }
 
@@ -205,7 +205,7 @@ impl<A0: FromPeer, A1: FromPeer> FromPeer for (A0, A1) {
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
-        channel_count: Arc<()>
+        channel_count: Arc<()>,
     ) -> Self::Product {
         (
             A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),
@@ -230,7 +230,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer> FromPeer for (A0, A1, A2) {
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
-        channel_count: Arc<()>
+        channel_count: Arc<()>,
     ) -> Self::Product {
         (
             A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),
@@ -260,7 +260,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer> FromPeer for (A0, A
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
-        channel_count: Arc<()>
+        channel_count: Arc<()>,
     ) -> Self::Product {
         (
             A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),
@@ -300,7 +300,7 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer, A4: FromPeer> FromP
         peer: &NetworkPeer,
         ids: &Self::Ids,
         pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
-        channel_count: Arc<()>
+        channel_count: Arc<()>,
     ) -> Self::Product {
         (
             A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),

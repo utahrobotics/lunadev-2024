@@ -215,6 +215,7 @@ impl PeerStateMachine {
                 let Some(channel) = NonZeroU8::new(channel) else {
                     match bitcode::decode::<SpecialMessage>(data) {
                         Ok(SpecialMessage::Disconnect) => return Retention::Drop,
+                        Ok(SpecialMessage::Ack) => {}
 
                         Ok(x) => error!("Unexpected special_msg from {addr}: {x:?}"),
                         Err(e) => {
@@ -231,6 +232,8 @@ impl PeerStateMachine {
                             (publisher.setter)(data.into());
                         } else if channel_count.strong_count() == 0 {
                             entry.remove();
+                        } else {
+                            error!("Publisher is invalid");
                         }
                     }
                     Entry::Vacant(_) => {
@@ -335,18 +338,22 @@ impl PeerStateMachine {
                 channel_count,
                 packets_sub,
             } => {
+                let mut ack = bitcode::encode(&SpecialMessage::Ack).unwrap();\
+                ack.push(0);
+                if let Err(e) = socket.send(Packet::reliable_ordered(addr, ack, None)) {
+                    error!("Failed to send packet to {addr}: {e}");
+                }
                 while let Some(packet) = packets_sub.try_recv() {
                     if let Err(e) = socket.send(packet) {
                         error!("Failed to send packet to {addr}: {e}");
                     }
+                    info!("Sent packet");
                 }
 
                 if channel_count.strong_count() == 0 {
                     packets_router.retain(|_, netpub| (netpub.valid)());
 
-                    if packets_router.is_empty()
-                        && packets_sub.get_pub_count() == 0
-                    {
+                    if packets_router.is_empty() && packets_sub.get_pub_count() == 0 {
                         let mut payload = bitcode::encode(&SpecialMessage::Disconnect).unwrap();
                         payload.push(0);
                         if let Err(e) = socket.send(Packet::reliable_ordered(addr, payload, None)) {

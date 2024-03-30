@@ -34,7 +34,7 @@ use self::subs::{BoxedSubscription, DirectSubscription, PublisherToken, Subscrip
 /// like Rust's channels. These are analagous to single-producer-multi-consumer
 /// channels, except that a `Publisher` can be a producer to many different consumers.
 ///
-/// Signals make numerous clones of the values it will send, so you should
+/// Publishers make numerous clones of the values it will send, so you should
 /// use a type `T` that is cheap to clone with this signal. A good default is
 /// `Arc`. Since Nodes will often be used from different threads, the type `T`
 /// should also be `Send`.
