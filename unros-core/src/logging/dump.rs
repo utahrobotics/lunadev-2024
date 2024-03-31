@@ -268,14 +268,10 @@ impl std::fmt::Display for ScalingFilter {
 }
 
 impl VideoDataDump {
-    /// Generates the sdp file for this data dump assuming that this dump
-    /// was made for RTP.
+    /// Generates the sdp file with the given address
     #[must_use]
-    pub fn generate_sdp(&self) -> Option<String> {
-        let VideoDataDumpType::Rtp(addr) = &self.dump_type else {
-            return None;
-        };
-        Some(format!(
+    pub fn generate_sdp(addr: SocketAddrV4) -> String {
+        format!(
             "v=0
 o=- 0 0 IN IP4 127.0.0.1
 s=No Name
@@ -287,7 +283,7 @@ a=rtpmap:96 H264/90000
 a=fmtp:96 packetization-mode=1",
             addr.ip(),
             addr.port()
-        ))
+        )
     }
 
     /// Creates a new `VideoDataDump` that displays to a window.

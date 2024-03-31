@@ -96,18 +96,8 @@ impl Node for Telemetry {
             .get_intrinsics()
             .manually_run(context.get_name().clone());
 
-        let mut video_dump = VideoDataDump::new_rtp(
-            self.cam_width,
-            self.cam_height,
-            VIDEO_WIDTH,
-            VIDEO_HEIGHT,
-            ScalingFilter::FastBilinear,
-            self.video_addr,
-            self.cam_fps,
-        )?;
-
-        let sdp: Arc<str> = Arc::from(video_dump.generate_sdp().unwrap().into_boxed_str());
-        let enable_camera = Arc::new(AtomicBool::new(true));
+        let sdp: Arc<str> = Arc::from(VideoDataDump::generate_sdp(self.video_addr).into_boxed_str());
+        let enable_camera = Arc::new(AtomicBool::default());
         let enable_camera2 = enable_camera.clone();
 
         let drop_check = DropCheck::default();
@@ -119,23 +109,7 @@ impl Node for Telemetry {
             let sleeper = SpinSleeper::default();
 
             loop {
-                let mut start_service = Instant::now();
-                loop {
-                    if drop_observe.has_dropped() {
-                        return Ok(());
-                    }
-                    if !enable_camera.load(Ordering::Relaxed) {
-                        drop(video_dump);
-                        break;
-                    }
-                    if let Some(img) = self.image_subscriptions.try_recv() {
-                        video_dump.write_frame(img.clone())?;
-                    }
-    
-                    let elapsed = start_service.elapsed();
-                    start_service += elapsed;
-                    sleeper.sleep(self.camera_delta.saturating_sub(elapsed));
-                }
+                let mut video_dump;
                 loop {
                     if drop_observe.has_dropped() {
                         return Ok(());
@@ -168,6 +142,23 @@ impl Node for Telemetry {
                         break;
                     }
                     sleeper.sleep(self.camera_delta);
+                }
+                let mut start_service = Instant::now();
+                loop {
+                    if drop_observe.has_dropped() {
+                        return Ok(());
+                    }
+                    if !enable_camera.load(Ordering::Relaxed) {
+                        drop(video_dump);
+                        break;
+                    }
+                    if let Some(img) = self.image_subscriptions.try_recv() {
+                        video_dump.write_frame(img.clone())?;
+                    }
+    
+                    let elapsed = start_service.elapsed();
+                    start_service += elapsed;
+                    sleeper.sleep(self.camera_delta.saturating_sub(elapsed));
                 }
             }
         });
