@@ -43,10 +43,7 @@ pub fn generate_random_sparse_symmetric(dim: usize, lim: usize, sparsity: f64) -
 }
 
 /// Sort the eigenvalues and their corresponding eigenvectors in ascending order
-pub fn sort_eigenpairs(
-    eig: SymmetricEigen<f64, Dyn>,
-    ascending: bool,
-) -> SymmetricEigen<f64, Dyn> {
+pub fn sort_eigenpairs(eig: SymmetricEigen<f64, Dyn>, ascending: bool) -> SymmetricEigen<f64, Dyn> {
     // Sort the eigenvalues
     let mut vs: Vec<(f64, usize)> = eig
         .eigenvalues
@@ -56,21 +53,9 @@ pub fn sort_eigenpairs(
         .collect();
 
     if ascending {
-        vs.sort_unstable_by(|a, b| {
-            let mut cmp = a.0.total_cmp(&b.0);
-            if cmp == std::cmp::Ordering::Equal {
-                cmp = a.1.cmp(&b.1);
-            }
-            cmp
-        });
+        vs.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     } else {
-        vs.sort_unstable_by(|a, b| {
-            let mut cmp = b.0.total_cmp(&a.0);
-            if cmp == std::cmp::Ordering::Equal {
-                cmp = b.1.cmp(&a.1);
-            }
-            cmp
-        });
+        vs.sort_unstable_by(|b, a| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     }
 
     // Sorted eigenvalues

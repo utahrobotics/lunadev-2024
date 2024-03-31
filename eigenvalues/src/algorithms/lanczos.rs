@@ -85,7 +85,7 @@ impl HermitianLanczos {
                         let projection = v_i_plus_1.dot(&vs.column(k));
                         v_i_plus_1 -= projection * vs.column(k);
                     }
-                    
+
                     vs.set_column(i + 1, &v_i_plus_1.normalize());
                 }
             }
