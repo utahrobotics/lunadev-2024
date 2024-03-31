@@ -191,7 +191,7 @@ pub struct VescConnection {
 impl VescConnection {
     /// Wraps the given `SerialConnection` with the `VESC` protocol.
     ///
-    /// Pre-existing subscriptions in the given `SerialConnection` will be ignored (but not dropped).
+    /// Pre-existing subscriptions and the `Publisher` in the given `SerialConnection` will be dropped.
     pub fn new(serial: SerialConnection) -> Self {
         Self {
             serial,
@@ -222,6 +222,10 @@ impl Node for VescConnection {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
+
+        self.serial.get_intrinsics().ignore_drop();
+        let _ = std::mem::replace(&mut self.serial.serial_input, Subscriber::new(1));
+        std::mem::take(&mut self.serial.serial_output);
 
         loop {
             let Some(stream) = self.serial.connect(&context).await? else {

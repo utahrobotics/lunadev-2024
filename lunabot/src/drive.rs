@@ -17,9 +17,9 @@ pub struct Drive {
 }
 
 #[derive(Deserialize)]
-struct DriveConfig<'a> {
-    left_port: &'a str,
-    right_port: &'a str,
+struct DriveConfig {
+    left_port: String,
+    right_port: String,
 
     #[serde(default)]
     left_invert: bool,

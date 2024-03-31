@@ -92,10 +92,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .into_logger(|x| format!("{x:?}"), "steering.logs")
         .await?;
 
-    // let drive = Drive::new()?;
-    // telemetry
-    //     .steering_pub()
-    //     .accept_subscription(drive.get_steering_sub());
+    let drive = Drive::new()?;
+    telemetry
+        .steering_pub()
+        .accept_subscription(drive.get_steering_sub());
 
     let mut teleop_camera = Camera::new(0)?;
     teleop_camera.res_x = 1280;
@@ -248,7 +248,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(telemetry);
     app.add_node(teleop_camera);
     app.add_node(imu01);
-    // app.add_node(drive);
+    app.add_node(drive);
     #[cfg(unix)]
     app.add_node(realsense_camera);
 
