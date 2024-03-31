@@ -11,7 +11,7 @@ use std::{
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
-use lunabot::{make_negotiation, ControlsPacket};
+use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
 use networking::new_server;
 use unros::{
     default_run_options,
@@ -24,6 +24,7 @@ struct LunabotShared {
     controls_data: AtomicCell<ControlsPacket>,
     echo_controls: AtomicBool,
     connected: AtomicBool,
+    enable_camera: AtomicBool,
 }
 
 #[derive(GodotClass)]
@@ -42,6 +43,7 @@ impl INode for LunabotConn {
             controls_data: AtomicCell::default(),
             echo_controls: AtomicBool::default(),
             connected: AtomicBool::default(),
+            enable_camera: AtomicBool::new(true)
         };
         let shared = Arc::new(shared);
 
@@ -135,9 +137,11 @@ impl INode for LunabotConn {
                     let controls_sub = Subscriber::new(1);
                     controls.accept_subscription(controls_sub.create_subscription());
 
-                    let mut _important_pub = MonoPublisher::from(important.create_reliable_subscription());
+                    let mut important_pub = MonoPublisher::from(important.create_reliable_subscription());
                     let important_sub = Subscriber::new(8);
                     important.accept_subscription(important_sub.create_subscription());
+
+                    let mut last_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
 
                     loop {
                         macro_rules! received {
@@ -285,6 +289,16 @@ impl INode for LunabotConn {
                         if shared.echo_controls.load(Ordering::Relaxed) {
                             controls_pub.set(shared.controls_data.load());
                         }
+
+                        let current_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
+                        if current_enable_camera != last_enable_camera {
+                            last_enable_camera = current_enable_camera;
+                            if current_enable_camera {
+                                important_pub.set(ImportantMessage::EnableCamera);
+                            } else {
+                                important_pub.set(ImportantMessage::DisableCamera);
+                            }
+                        }
                     }
 
                     shared.connected.store(false, Ordering::Relaxed);
@@ -413,5 +427,17 @@ impl LunabotConn {
         controls_packet.arm_vel = (arm_vel * 127.0).round() as i8;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn enable_camera(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.enable_camera.store(true, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn disable_camera(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.enable_camera.store(false, Ordering::Relaxed);
     }
 }

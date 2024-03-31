@@ -5,6 +5,9 @@ use networking::{
     negotiation::{ChannelNegotiation, Negotiation},
 };
 
+pub const VIDEO_WIDTH: u32 = 1280;
+pub const VIDEO_HEIGHT: u32 = 720;
+
 pub fn make_negotiation() -> Negotiation<(
     ChannelNegotiation<ImportantMessage>,
     ChannelNegotiation<Arc<str>>,
