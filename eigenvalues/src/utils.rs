@@ -80,21 +80,9 @@ pub fn sort_eigenpairs(eig: SymmetricEigen<f64, Dyn>, ascending: bool) -> Symmet
 
 pub fn sort_vector(vs: &mut Vec<f64>, ascending: bool) {
     if ascending {
-        vs.sort_unstable_by(|a, b| {
-            a.total_cmp(b)
-            // let Some(x) = a.partial_cmp(b) else {
-            //     panic!("Cannot compare {:?} and {:?}", a, b);
-            // };
-            // x
-        });
+        vs.sort_unstable_by(|a, b| a.total_cmp(b));
     } else {
-        vs.sort_unstable_by(|a, b| {
-            b.total_cmp(a)
-            // let Some(x) = b.partial_cmp(a) else {
-            //     panic!("Cannot compare {:?} and {:?}", b, a);
-            // };
-            // x
-        });
+        vs.sort_unstable_by(|a, b| b.total_cmp(a));
     }
 }
 
