@@ -11,6 +11,7 @@ members = [
     "rig", "tools", "smach", "costmap",
     # "smooth-diff-drive",
     "lunasimbot", "unros-macros", "unros", "lunabase-lib", "camera-info", "networking", "usb-pluggy",
+    "eigenvalues"
 ]
 resolver = "2"
 exclude = ["publishing/", "logs/", "lunabase/", "camera-db/"]
@@ -36,7 +37,7 @@ serde-big-array = "0.5"
 rand_distr = "0.4"
 bytemuck = "1"
 log = "0.4"
-eigenvalues = { git = "https://github.com/Masterchef365/eigenvalues.git" }
+# eigenvalues = { git = "https://github.com/Masterchef365/eigenvalues.git" }
 ffmpeg-sidecar = "1.0"
 interprocess = { git = "https://github.com/kotauskas/interprocess", default-features = false, branch = "main", features = ["tokio"] }
 
@@ -58,7 +59,8 @@ opt-level = 3
 opt-level = 3
 
 [profile.release.package.lunabot]
-debug = 2
+debug = true
+# lto = "thin"
 
 [profile.release.package.lunabase-lib]
-debug = 2
+debug = true

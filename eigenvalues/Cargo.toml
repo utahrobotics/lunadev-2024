@@ -1,0 +1,19 @@
+[package]
+name = "eigenvalues"
+version = "0.4.0"
+authors = ["felipe <tifonzafel@gmail.com>"]
+description = "algorithms to compute eigenvalue/eigenvectors of symmetric matrices"
+readme = "README.md"
+repository = "https://github.com/felipeZ/eigenvalues"
+categories = [ "science" ]
+keywords = [ "linear-algebra", "eigenvalues" ]
+license = "Apache-2.0"
+edition = "2018"
+
+[dependencies]
+approx = "0.5"
+nalgebra = { workspace = true, features = ["rand"] }
+
+[lib]
+name = "eigenvalues"
+path = "src/lib.rs"

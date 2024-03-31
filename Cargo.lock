@@ -1086,7 +1086,6 @@ checksum = "56ce8c6da7551ec6c462cbaf3bfbc75131ebbfa1c944aeaa9dab51ca1c5f0c3b"
 [[package]]
 name = "eigenvalues"
 version = "0.4.0"
-source = "git+https://github.com/Masterchef365/eigenvalues.git#03d8fccc9bcb2f74934f98157fc00221b980fd60"
 dependencies = [
  "approx",
  "nalgebra",

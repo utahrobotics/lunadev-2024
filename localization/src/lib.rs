@@ -3,10 +3,7 @@
 //! robot) is in global space.
 
 use std::{
-    collections::hash_map::Entry,
-    num::NonZeroUsize,
-    ops::DerefMut,
-    time::{Duration, Instant},
+    collections::hash_map::Entry, num::NonZeroUsize, ops::DerefMut, time::{Duration, Instant}
 };
 
 use eigenvalues::{
