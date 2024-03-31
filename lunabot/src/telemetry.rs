@@ -198,6 +198,7 @@ impl Node for Telemetry {
                             continue;
                         }
                     };
+                enable_camera.store(true, Ordering::Relaxed);
                 info!("Connected to lunabase!");
                 get_log_pub().accept_subscription(logs.create_reliable_subscription());
 
@@ -278,6 +279,7 @@ impl Node for Telemetry {
                     _ = important_fut => {}
                 }
                 error!("Disconnected from lunabase!");
+                enable_camera.store(false, Ordering::Relaxed);
             }
         };
 
