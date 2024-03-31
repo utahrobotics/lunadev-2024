@@ -9,7 +9,6 @@ by providing your own implementation of the **Matrixoperations** trait.
 
 */
 use nalgebra::{DMatrix, DMatrixView, DVector, DVectorView};
-use std::clone::Clone;
 
 /// Trait containing the matrix free operations
 pub trait MatrixOperations: Clone {

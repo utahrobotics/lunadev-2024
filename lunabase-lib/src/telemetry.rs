@@ -126,6 +126,7 @@ impl INode for LunabotConn {
                     shared.connected.store(true, Ordering::Relaxed);
                     let mut last_receive_time = Instant::now();
                     let mut ffplay: Option<std::process::Child> = None;
+                    let mut ffplay_stderr: Option<JoinHandle<std::io::Result<u64>>> = None;
 
                     let logs_sub = Subscriber::new(32);
                     logs.accept_subscription(logs_sub.create_subscription());
@@ -143,6 +144,20 @@ impl INode for LunabotConn {
 
                     let mut last_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
 
+                    macro_rules! kill_ffplay {
+                        () => {
+                            if let Some(mut ffplay) = ffplay {
+                                match ffplay.kill() {
+                                    Ok(()) => match ffplay.wait() {
+                                        Ok(x) => info!("ffplay exited with {x}"),
+                                        Err(e) => error!("ffplay failed to exit {e}")
+                                    }
+                                    Err(e) => error!("ffplay failed to be killed {e}")
+                                }
+                            }
+                        };
+                    }
+
                     loop {
                         macro_rules! received {
                             () => {{
@@ -151,6 +166,50 @@ impl INode for LunabotConn {
                                 shared.base_mut_queue.push(Box::new(|mut base| {
                                     base.emit_signal("something_received".into(), &[]);
                                 }));
+                            }};
+                        }
+                        macro_rules! make_ffplay {
+                            () => {{
+                                let mut child = std::process::Command::new("ffplay")
+                                .args([
+                                    "-protocol_whitelist",
+                                    "file,rtp,udp",
+                                    "-i",
+                                    "camera.sdp",
+                                    "-flags",
+                                    "low_delay",
+                                    "-avioflags",
+                                    "direct",
+                                    "-probesize",
+                                    "32",
+                                    "-analyzeduration",
+                                    "0",
+                                    "-sync",
+                                    "ext",
+                                    "-framedrop",
+                                ])
+                                .stderr(Stdio::piped())
+                                .spawn()
+                                .expect("Failed to init ffplay process");
+
+                            if let Some(mut ffplay) = ffplay.take() {
+                                let _ = ffplay.kill();
+                            }
+
+                            let mut stderr = child.stderr.take().unwrap();
+                            ffplay = Some(child);
+
+                            ffplay_stderr = Some(
+                            std::thread::spawn(move || {
+                                std::io::copy(
+                                    &mut stderr,
+                                    &mut std::fs::OpenOptions::new()
+                                        .append(true)
+                                        .create(true)
+                                        .open("camera-ffmpeg.log")
+                                        .expect("camera-ffmpeg.log should be writable"),
+                                )
+                            }));
                             }};
                         }
                         tokio::select! {
@@ -212,45 +271,7 @@ impl INode for LunabotConn {
                                 std::fs::write("camera.sdp", sdp.as_bytes())
                                             .expect("camera.sdp should be writable");
 
-                                let mut child = std::process::Command::new("ffplay")
-                                    .args([
-                                        "-protocol_whitelist",
-                                        "file,rtp,udp",
-                                        "-i",
-                                        "camera.sdp",
-                                        "-flags",
-                                        "low_delay",
-                                        "-avioflags",
-                                        "direct",
-                                        "-probesize",
-                                        "32",
-                                        "-analyzeduration",
-                                        "0",
-                                        "-sync",
-                                        "ext",
-                                        "-framedrop",
-                                    ])
-                                    .stderr(Stdio::piped())
-                                    .spawn()
-                                    .expect("Failed to init ffplay process");
-
-                                if let Some(mut ffplay) = ffplay.take() {
-                                    let _ = ffplay.kill();
-                                }
-
-                                let mut stderr = child.stderr.take().unwrap();
-                                ffplay = Some(child);
-
-                                std::thread::spawn(move || {
-                                    let _ = std::io::copy(
-                                        &mut stderr,
-                                        &mut std::fs::OpenOptions::new()
-                                            .append(true)
-                                            .create(true)
-                                            .open("camera-ffmpeg.log")
-                                            .expect("camera-ffmpeg.log should be writable"),
-                                    );
-                                });
+                                make_ffplay!();
                             }
                             result = controls_sub.recv_or_closed() => {
                                 let Some(result) = result else {
@@ -274,20 +295,21 @@ impl INode for LunabotConn {
                         }
 
                         if Arc::strong_count(&shared) == 1 {
-                            if let Some(mut ffplay) = ffplay {
-                                match ffplay.kill() {
-                                    Ok(()) => match ffplay.wait() {
-                                        Ok(x) => info!("ffplay exited with {x}"),
-                                        Err(e) => error!("ffplay failed to exit {e}")
-                                    }
-                                    Err(e) => error!("ffplay failed to be killed {e}")
-                                }
-                            }
+                            kill_ffplay!();
                             return Ok(());
                         }
 
                         if shared.echo_controls.load(Ordering::Relaxed) {
                             controls_pub.set(shared.controls_data.load());
+                        }
+                        
+                        if let Some(inner) = &mut ffplay_stderr {
+                            if inner.is_finished() {
+                                if let Err(e) = ffplay_stderr.take().unwrap().join().unwrap() {
+                                    error!("{e}");
+                                    godot_error!("{e}");
+                                }
+                            }
                         }
 
                         let current_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
@@ -295,6 +317,10 @@ impl INode for LunabotConn {
                             last_enable_camera = current_enable_camera;
                             if current_enable_camera {
                                 important_pub.set(ImportantMessage::EnableCamera);
+                                
+                                if ffplay_stderr.is_none() {
+                                    make_ffplay!();
+                                }
                             } else {
                                 important_pub.set(ImportantMessage::DisableCamera);
                             }
@@ -305,15 +331,7 @@ impl INode for LunabotConn {
                     shared.base_mut_queue.push(Box::new(|mut base| {
                         base.emit_signal("disconnected".into(), &[]);
                     }));
-                    if let Some(mut ffplay) = ffplay {
-                        match ffplay.kill() {
-                            Ok(()) => match ffplay.wait() {
-                                Ok(x) => info!("ffplay exited with {x}"),
-                                Err(e) => error!("ffplay failed to exit {e}")
-                            }
-                            Err(e) => error!("ffplay failed to be killed {e}")
-                        }
-                    }
+                    kill_ffplay!();
                 }
             }, "conn-receiver");
 
@@ -326,6 +344,7 @@ impl INode for LunabotConn {
             run_options.auxilliary_control = false;
             if let Err(e) = start_unros_runtime(main, run_options) {
                 godot_error!("{e}");
+                unros::log::error!("{e}");
             }
         }));
     }
