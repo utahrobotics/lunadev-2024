@@ -7,54 +7,6 @@ use std::{
 
 use crossbeam::queue::ArrayQueue;
 
-struct DropWrapperInner<T, F> {
-    inner: T,
-    drop_fn: F,
-}
-
-/// A simple struct around a type that calls a function when it is dropped.
-///
-/// This can be used to avoid implementing `Drop` on a new type that wraps an existing type.
-/// However, since it is possible to get a mutable reference to the inner type, it is possible
-/// to move the inner type out or replace it, which will *not* call the drop function. The drop
-/// function is only called when this struct is dropped.
-pub struct DropWrapper<T, F: FnOnce(T)> {
-    inner: Option<DropWrapperInner<T, F>>,
-}
-
-impl<T, F> Drop for DropWrapper<T, F>
-where
-    F: FnOnce(T),
-{
-    fn drop(&mut self) {
-        if let Some(inner) = self.inner.take() {
-            (inner.drop_fn)(inner.inner);
-        }
-    }
-}
-
-impl<T, F: FnOnce(T)> DropWrapper<T, F> {
-    pub fn new(inner: T, drop_fn: F) -> Self {
-        Self {
-            inner: Some(DropWrapperInner { inner, drop_fn }),
-        }
-    }
-}
-
-impl<T, F: FnOnce(T)> Deref for DropWrapper<T, F> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner.as_ref().unwrap().inner
-    }
-}
-
-impl<T, F: FnOnce(T)> DerefMut for DropWrapper<T, F> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner.as_mut().unwrap().inner
-    }
-}
-
 // pub struct TimeVec<T, F = Box<dyn Fn(&VecDeque<T>) -> T + Send>> {
 //     vec: VecDeque<T>,
 //     head_time: Instant,
