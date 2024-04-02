@@ -4,53 +4,65 @@
 //! Do note that this crate should not be expected to connect
 //! to RealSense cameras.
 
-use std::sync::Arc;
+use std::{sync::{Arc, Mutex}, time::Duration};
 
-use eye::hal::{traits::Context as HalContext, PlatformContext};
-use image::{imageops::FilterType, DynamicImage};
+use eye::hal::{format::PixelFormat, platform::Device, traits::{Context as HalContext, Device as HalDevice, Stream}, PlatformContext};
+use image::{codecs::jpeg::JpegDecoder, imageops::FilterType, DynamicImage};
 use unros::{
-    anyhow::{self, Context},
-    async_trait, asyncify_run, log,
-    pubsub::{Publisher, PublisherRef},
-    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, async_trait, asyncify_run, log, pubsub::{Publisher, PublisherRef}, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
 };
+pub use eye::hal::device::Description;
+
+static PLATFORM: Mutex<Option<PlatformContext>> = Mutex::new(None);
 
 /// A pending connection to a camera.
 ///
 /// The connection is not created until this `Node` is ran.
-pub struct Camera {
+pub struct Camera<F=fn(DynamicImage, u32, u32) -> DynamicImage> where F: FnMut(DynamicImage, u32, u32)->DynamicImage + Send + 'static {
     pub fps: u32,
-    pub camera_index: u32,
     pub res_x: u32,
     pub res_y: u32,
-    camera_name: String,
+    device: Mutex<Device<'static>>,
+    description: Description,
     image_received: Publisher<Arc<DynamicImage>>,
     intrinsics: NodeIntrinsics<Self>,
+    resizer: F,
+}
+
+fn crop_resize(img: DynamicImage, res_x: u32, res_y: u32) -> DynamicImage {
+    img.resize_to_fill(res_x, res_y, FilterType::Triangle)
 }
 
 impl Camera {
     /// Creates a pending connection to the camera with the given index.
-    pub fn new(camera_index: u32) -> anyhow::Result<Self> {
-        // let tmp_camera = nokhwa::Camera::new(
-        //     CameraIndex::Index(camera_index),
-        //     RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
-        // )
-        // .context("Failed to initialize camera")?;
-        // let camera_name = tmp_camera.info().human_name();
-        // log::info!("Pinged {} with index {}", camera_name, camera_index);
+    pub fn new(description: Description) -> anyhow::Result<Self> {
+        let mut platform = PLATFORM.lock().unwrap();
+        if platform.is_none() {
+            *platform = Some(PlatformContext::all().next().ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?);
+        }
+        let platform = platform.as_mut().unwrap();
+        
         Ok(Self {
             fps: 0,
             res_x: 0,
             res_y: 0,
-            camera_index,
-            camera_name: todo!(),
+            device: Mutex::new(platform.open_device(&description.uri)?),
+            description,
             image_received: Default::default(),
             intrinsics: Default::default(),
+            resizer: crop_resize
         })
     }
+}
+
+impl<F: FnMut(DynamicImage, u32, u32)->DynamicImage + Send> Camera<F> {
 
     pub fn get_camera_name(&self) -> &str {
-        &self.camera_name
+        &self.description.product
+    }
+
+    pub fn get_camera_uri(&self) -> &str {
+        &self.description.uri
     }
 
     /// Gets a reference to the `Signal` that represents received images.
@@ -60,7 +72,7 @@ impl Camera {
 }
 
 #[async_trait]
-impl Node for Camera {
+impl<F> Node for Camera<F> where F: FnMut(DynamicImage, u32, u32)->DynamicImage + Send + 'static {
     const DEFAULT_NAME: &'static str = "camera";
 
     fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
@@ -69,7 +81,64 @@ impl Node for Camera {
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
-        Ok(())
+        let device = self.device.get_mut().unwrap();
+        let streams = device.streams()?;
+
+        let Some(mut stream_desc) = streams.into_iter().next() else {
+            return Err(anyhow::anyhow!("No streams available for {} at {}", self.description.product, self.description.uri));
+        };
+
+        if self.res_x != 0 {
+            stream_desc.width = self.res_x;
+        } else if self.res_y != 0 {
+            stream_desc.height = self.res_y;
+        }
+
+        // stream_desc.pixfmt = PixelFormat::Rgb(8);
+        
+        stream_desc.interval = if self.fps == 0 {
+            Duration::from_secs(1) / 30
+        } else {
+            Duration::from_secs(1) / self.fps
+        };
+
+        let mut stream = device.start_stream(&stream_desc)?;
+
+        let drop_check = DropCheck::default();
+        let drop_obs = drop_check.get_observing();
+
+        asyncify_run(move || {
+            loop {
+                let Some(result) = stream
+                    .next() else {
+                        break Ok(());
+                    };
+                let frame = result?;
+                if drop_obs.has_dropped() {
+                    break Ok(());
+                }
+
+
+                let mut img = match &stream_desc.pixfmt {
+                    PixelFormat::Gray(8) => todo!(),
+                    PixelFormat::Rgb(8) => todo!(),
+                    PixelFormat::Jpeg => {
+                        let decoder = JpegDecoder::new(frame).unwrap();
+                        DynamicImage::from_decoder(decoder)?
+                    }
+                    _ => unreachable!()
+                };
+
+                img = (self.resizer)(img, self.res_x, self.res_y);
+                if img.width() != self.res_x || img.height() != self.res_y {
+                    error!("Image was resized incorrectly to {}x{} instead of {}x{}", img.width(), img.height(), self.res_x, self.res_y);
+                } else {
+                    self.image_received.set(Arc::new(img));
+                }
+                
+            }
+        })
+        .await
         // let index = CameraIndex::Index(self.camera_index);
 
         // let requested = if self.fps > 0 {
@@ -93,48 +162,22 @@ impl Node for Camera {
         // let res_x = self.res_x;
         // let res_y = self.res_y;
 
-        // let drop_check = DropCheck::default();
-        // let drop_obs = drop_check.get_observing();
-
-        // asyncify_run(move || {
-        //     let mut camera =
-        //         nokhwa::Camera::new(index, requested).context("Failed to initialize camera")?;
-        //     camera.open_stream()?;
-        //     loop {
-        //         let frame = camera.frame()?;
-        //         if drop_obs.has_dropped() {
-        //             break Ok(());
-        //         }
-        //         let decoded = frame.decode_image::<RgbFormat>().unwrap();
-        //         let mut img = DynamicImage::from(decoded);
-        //         if res_x != 0 && res_y != 0 {
-        //             img = img.resize(res_x, res_y, FilterType::CatmullRom);
-        //         }
-        //         self.image_received.set(Arc::new(img));
-        //     }
-        // })
-        // .await
+        
     }
 }
 
 /// Returns an iterator over all the cameras that were identified on this computer.
 pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
     let ctx = PlatformContext::all().next().ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?;
-    let dev_descrs = ctx.devices()?;
-    println!("{dev_descrs:?}");
-    // Ok(query(nokhwa::utils::ApiBackend::Auto)?
-    //     .into_iter()
-    //     .filter_map(|info| {
-    //         let CameraIndex::Index(n) = info.index() else {
-    //             return None;
-    //         };
-    //         match Camera::new(*n) {
-    //             Ok(cam) => Some(cam),
-    //             Err(_) => {
-    //                 None
-    //             }
-    //         }
-    //     }))
-
-    Ok(std::iter::empty())
+    Ok(ctx.devices()?
+        .into_iter()
+        .filter_map(|desc| {
+            match Camera::new(desc) {
+                Ok(cam) => Some(cam),
+                Err(e) => {
+                    log::error!("{e:?}");
+                    None
+                }
+            }
+        }))
 }

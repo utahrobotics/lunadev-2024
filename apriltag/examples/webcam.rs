@@ -1,5 +1,5 @@
 use apriltag::AprilTagDetector;
-use camera::{discover_all_cameras, Camera};
+use camera::discover_all_cameras;
 use fxhash::FxBuildHasher;
 use rig::Robot;
 use unros::{
@@ -17,10 +17,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     // HD Global Shutter: 506.0
     // Wide Angle:
     let mut apriltag = AprilTagDetector::new(506.0, 1920, 1200, camera_element.get_ref());
-    discover_all_cameras()
+    let camera = discover_all_cameras()
         .context("Failed to discover cameras")?
-        .for_each(|_| {});
-    let camera = Camera::new(0)?;
+        .next()
+        .context("Failed to discover cameras")?;
     camera
         .image_received_pub()
         .accept_subscription(apriltag.create_image_subscription());

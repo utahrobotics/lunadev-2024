@@ -7,7 +7,7 @@ use std::{
 };
 
 use apriltag::{AprilTagDetector, PoseObservation};
-use camera::{discover_all_cameras, Camera};
+use camera::discover_all_cameras;
 use costmap::local::LocalCostmap;
 use fxhash::FxBuildHasher;
 use imu::open_imu;
@@ -48,10 +48,14 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     #[cfg(unix)]
     let costmap = costmap;
 
-    let camera_count = discover_all_cameras()?
-        .map(|mut x| x.get_intrinsics().ignore_drop())
-        .count();
-    info!("Discovered {camera_count} cameras");
+    let mut cameras: Vec<_> = discover_all_cameras()?
+        .map(|mut x| {
+            info!("Discovered {} at {}", x.get_camera_name(), x.get_camera_uri());
+            x.get_intrinsics().ignore_drop();
+            x
+        })
+        .collect();
+    info!("Discovered {} cameras", cameras.len());
 
     #[cfg(unix)]
     let realsense_camera =
@@ -97,7 +101,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .steering_pub()
         .accept_subscription(drive.get_steering_sub());
 
-    let mut teleop_camera = Camera::new(0)?;
+    let mut teleop_camera = cameras.remove(0);
     teleop_camera.res_x = 1280;
     teleop_camera.res_y = 720;
     teleop_camera

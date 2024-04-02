@@ -1,26 +1,30 @@
 use std::io::stdin;
 
-use camera::{discover_all_cameras, Camera};
+use camera::discover_all_cameras;
 use camera_info::interactive_examine;
 use unros::{
-    anyhow::{self, Context},
-    tokio::{self, task::JoinHandle},
-    Application, Node,
+    anyhow::{self, Context}, log::info, tokio::{self, task::JoinHandle}, Application, Node
 };
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
-    discover_all_cameras()
+    let mut cameras: Vec<_> = discover_all_cameras()
         .context("Failed to discover cameras")?
-        .for_each(|mut x| x.get_intrinsics().ignore_drop());
+        .enumerate()
+        .map(|(i, mut x)| {
+            info!("Discovered {} at {i}", x.get_camera_name());
+            x.get_intrinsics().ignore_drop();
+            x
+        })
+        .collect();
 
     let join: JoinHandle<Result<_, anyhow::Error>> = tokio::task::spawn_blocking(|| {
         let stdin = stdin();
-        println!("Please provide a camera index");
+        println!("Please provide a camera uri");
         let mut input = String::new();
         let index = loop {
             stdin.read_line(&mut input)?;
-            let Ok(index) = input.trim().parse::<u32>() else {
+            let Ok(index) = input.trim().parse::<usize>() else {
                 println!("Invalid integer!");
                 input.clear();
                 continue;
@@ -34,7 +38,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let index = join.await.unwrap()?;
 
-    let camera = Camera::new(index)?;
+    let camera = cameras.remove(index);
     let camera_name = camera.get_camera_name().to_string();
     interactive_examine(
         &mut app,

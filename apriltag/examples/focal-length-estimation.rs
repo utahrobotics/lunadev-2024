@@ -1,10 +1,11 @@
 use std::time::Duration;
 
 use apriltag::AprilTagDetector;
-use camera::{discover_all_cameras, Camera};
+use camera::discover_all_cameras;
 use fxhash::FxBuildHasher;
 use rig::Robot;
 use unros::{
+    Node,
     anyhow::{self, Context},
     pubsub::{Publisher, Subscriber},
     setup_logging, tokio, Application,
@@ -15,17 +16,21 @@ const TAG_WIDTH: f64 = 0.137;
 const TAG_ID: usize = 0;
 const IMAGE_WIDTH: u32 = 1920;
 const IMAGE_HEIGHT: u32 = 1200;
-const CAMERA_INDEX: u32 = 0;
+const CAMERA_INDEX: usize = 0;
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, _) = rig.destructure::<FxBuildHasher>(["camera"])?;
     let camera_element = elements.remove("camera").unwrap();
-    discover_all_cameras()
+    let mut cameras: Vec<_> = discover_all_cameras()
         .context("Failed to discover cameras")?
-        .for_each(|_| {});
-    let camera = Camera::new(CAMERA_INDEX)?;
+        .map(|mut x| {
+            x.get_intrinsics().ignore_drop();
+            x
+        })
+        .collect();
+    let camera = cameras.remove(CAMERA_INDEX);
     let camera_sub = Subscriber::new(1);
     camera
         .image_received_pub()
