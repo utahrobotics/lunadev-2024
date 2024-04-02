@@ -9,6 +9,7 @@ use std::{
 use costmap::local::{LocalCostmap, LocalCostmapGuard};
 use nalgebra::{Point2, Vector2};
 use ordered_float::NotNan;
+use ::pathfinding::directed::bfs::bfs;
 use unros::service::Pending;
 
 use crate::{pathfinders::NavigationError, Float};
@@ -18,6 +19,7 @@ use self::pathfinding::astar;
 use super::{CostmapReference, DirectPathfinder};
 
 mod pathfinding;
+const ROOT_2: Float = std::f64::consts::SQRT_2 as Float;
 
 impl CostmapReference for Arc<LocalCostmap> {
     fn process(
@@ -56,15 +58,55 @@ impl CostmapReference for Arc<LocalCostmap> {
 
             let guard = node.costmap_ref.lock();
 
+            let mut start_pos = Vector2::<usize>::new(
+                node.costmap_ref.get_area_width() / 2,
+                node.costmap_ref.get_area_width() / 2,
+            );
+
+            if !guard.is_cell_safe(node.agent_radius, start_pos.into(), node.max_height_diff) {
+                let path = bfs(
+                    &start_pos,
+                    |current| {
+                        let current = current.cast::<isize>();
+                        [
+                            Vector2::new(-1, -1) + current,
+                            Vector2::new(-1, 0) + current,
+                            Vector2::new(-1, 1) + current,
+                            Vector2::new(0, -1) + current,
+                            Vector2::new(0, 1) + current,
+                            Vector2::new(1, -1) + current,
+                            Vector2::new(1, 0) + current,
+                            Vector2::new(1, 1) + current,
+                        ]
+                        .into_iter()
+                        .filter_map(|next| {
+                            if next.x < 0 || next.y < 0 {
+                                None
+                            } else {
+                                let next = Vector2::new(next.x as usize, next.y as usize);
+    
+                                if next.x >= node.costmap_ref.get_area_width()
+                                    || next.y >= node.costmap_ref.get_area_width()
+                                {
+                                    None
+                                } else {
+                                    Some(next)
+                                }
+                            }
+                        })
+                    },
+                    |current| guard.is_cell_safe(node.agent_radius, (*current).into(), node.max_height_diff),
+                );
+                if let Some(path) = path {
+                    start_pos = path.into_iter().last().unwrap();
+                }
+            }
+
             let (path, _distance) = astar(
                 // In local space, our start position is always (0, 0)
-                &Vector2::<usize>::new(
-                    node.costmap_ref.get_area_width() / 2,
-                    node.costmap_ref.get_area_width() / 2,
-                ),
+                &start_pos,
                 |current| {
                     let current = current.cast::<isize>();
-                    const ROOT_2: Float = std::f64::consts::SQRT_2 as Float;
                     [
                         (Vector2::new(-1, -1) + current, ROOT_2),
                         (Vector2::new(-1, 0) + current, 1.0),
