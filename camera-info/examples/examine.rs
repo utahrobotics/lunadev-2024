@@ -3,7 +3,7 @@ use std::io::stdin;
 use camera::discover_all_cameras;
 use camera_info::interactive_examine;
 use unros::{
-    anyhow::{self, Context}, log::info, tokio::{self, task::JoinHandle}, Application, Node
+    anyhow::{self, Context}, tokio::{self, task::JoinHandle}, Application, Node
 };
 
 #[unros::main]
@@ -12,7 +12,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .context("Failed to discover cameras")?
         .enumerate()
         .map(|(i, mut x)| {
-            info!("Discovered {} at {i}", x.get_camera_name());
+            println!("Discovered {} at {i}", x.get_camera_name());
             x.get_intrinsics().ignore_drop();
             x
         })
@@ -20,7 +20,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let join: JoinHandle<Result<_, anyhow::Error>> = tokio::task::spawn_blocking(|| {
         let stdin = stdin();
-        println!("Please provide a camera uri");
+        println!("Please provide a camera index");
         let mut input = String::new();
         let index = loop {
             stdin.read_line(&mut input)?;
