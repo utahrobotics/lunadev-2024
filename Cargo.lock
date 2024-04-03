@@ -806,11 +806,13 @@ checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
 name = "costmap"
 version = "0.1.0"
 dependencies = [
+ "dst-init",
  "image",
  "nalgebra",
  "ordered-float",
  "quadtree_rs",
  "rig",
+ "simba",
  "spin_sleep",
  "unros",
 ]
@@ -1030,6 +1032,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "442039f5147480ba31067cb00ada1adae6892028e40e45fc5de7b7df6dcc1b5f"
 dependencies = [
  "const-random",
+]
+
+[[package]]
+name = "dst-init"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a45d2bbd21f444c8d72d21d90a9e3d12e0d953615f1d4a51297c1e4bcf67e36"
+dependencies = [
+ "dst-init-macros",
+]
+
+[[package]]
+name = "dst-init-macros"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3946adb47ca382e890e019eba31d2372305d1e0db2cb32bb2d062421d3dedb5"
+dependencies = [
+ "convert_case",
+ "proc-macro2 1.0.79",
+ "quote 1.0.35",
+ "syn 1.0.109",
 ]
 
 [[package]]

@@ -1,7 +1,6 @@
 use eigenvalues::algorithms::lanczos::HermitianLanczos;
 use eigenvalues::utils::{generate_random_sparse_symmetric, sort_eigenpairs, test_eigenpairs};
 use eigenvalues::SpectrumTarget;
-use nalgebra;
 
 #[test]
 fn test_lanczos() {
