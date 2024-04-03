@@ -43,7 +43,7 @@ impl INode for LunabotConn {
             controls_data: AtomicCell::default(),
             echo_controls: AtomicBool::default(),
             connected: AtomicBool::default(),
-            enable_camera: AtomicBool::new(true)
+            enable_camera: AtomicBool::new(true),
         };
         let shared = Arc::new(shared);
 

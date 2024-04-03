@@ -50,7 +50,11 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     let mut cameras: Vec<_> = discover_all_cameras()?
         .map(|mut x| {
-            info!("Discovered {} at {}", x.get_camera_name(), x.get_camera_uri());
+            info!(
+                "Discovered {} at {}",
+                x.get_camera_name(),
+                x.get_camera_uri()
+            );
             x.get_intrinsics().ignore_drop();
             x
         })

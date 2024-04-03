@@ -6,10 +6,9 @@ use std::{
     time::Instant,
 };
 
-use costmap::local::{LocalCostmap, LocalCostmapGuard};
+use ::pathfinding::directed::bfs::bfs;
 use nalgebra::{Point2, Vector2};
 use ordered_float::NotNan;
-use ::pathfinding::directed::bfs::bfs;
 use unros::service::Pending;
 
 use crate::{pathfinders::NavigationError, Float};
@@ -84,7 +83,7 @@ impl CostmapReference for Arc<LocalCostmap> {
                                 None
                             } else {
                                 let next = Vector2::new(next.x as usize, next.y as usize);
-    
+
                                 if next.x >= node.costmap_ref.get_area_width()
                                     || next.y >= node.costmap_ref.get_area_width()
                                 {
@@ -95,7 +94,13 @@ impl CostmapReference for Arc<LocalCostmap> {
                             }
                         })
                     },
-                    |current| guard.is_cell_safe(node.agent_radius, (*current).into(), node.max_height_diff),
+                    |current| {
+                        guard.is_cell_safe(
+                            node.agent_radius,
+                            (*current).into(),
+                            node.max_height_diff,
+                        )
+                    },
                 );
                 if let Some(path) = path {
                     start_pos = path.into_iter().last().unwrap();

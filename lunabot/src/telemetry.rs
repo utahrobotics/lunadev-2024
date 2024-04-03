@@ -1,6 +1,9 @@
 use std::{
     net::SocketAddrV4,
-    sync::{atomic::{AtomicBool, Ordering}, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -70,7 +73,7 @@ impl Telemetry {
             cam_width,
             cam_height,
             video_addr,
-            cam_fps
+            cam_fps,
         })
     }
 
@@ -96,7 +99,8 @@ impl Node for Telemetry {
             .get_intrinsics()
             .manually_run(context.get_name().clone());
 
-        let sdp: Arc<str> = Arc::from(VideoDataDump::generate_sdp(self.video_addr).into_boxed_str());
+        let sdp: Arc<str> =
+            Arc::from(VideoDataDump::generate_sdp(self.video_addr).into_boxed_str());
         let enable_camera = Arc::new(AtomicBool::default());
         let enable_camera2 = enable_camera.clone();
 
@@ -129,7 +133,7 @@ impl Node for Telemetry {
                                     video_dump = x;
                                     break;
                                 }
-                                Err(e) => error!("Failed to create video dump: {e}")
+                                Err(e) => error!("Failed to create video dump: {e}"),
                             }
                             let start_service = Instant::now();
                             while start_service.elapsed().as_millis() < 2000 {
@@ -155,7 +159,7 @@ impl Node for Telemetry {
                     if let Some(img) = self.image_subscriptions.try_recv() {
                         video_dump.write_frame(img.clone())?;
                     }
-    
+
                     let elapsed = start_service.elapsed();
                     start_service += elapsed;
                     sleeper.sleep(self.camera_delta.saturating_sub(elapsed));
@@ -194,7 +198,8 @@ impl Node for Telemetry {
                 get_log_pub().accept_subscription(logs.create_reliable_subscription());
 
                 let important_fut = async {
-                    let mut _important_pub = MonoPublisher::from(important.create_reliable_subscription());
+                    let mut _important_pub =
+                        MonoPublisher::from(important.create_reliable_subscription());
                     let important_sub = Subscriber::new(8);
                     important.accept_subscription(important_sub.create_subscription());
 
@@ -210,14 +215,19 @@ impl Node for Telemetry {
                             }
                         };
                         match msg {
-                            ImportantMessage::EnableCamera => enable_camera.store(true, Ordering::Relaxed),
-                            ImportantMessage::DisableCamera => enable_camera.store(false, Ordering::Relaxed),
+                            ImportantMessage::EnableCamera => {
+                                enable_camera.store(true, Ordering::Relaxed)
+                            }
+                            ImportantMessage::DisableCamera => {
+                                enable_camera.store(false, Ordering::Relaxed)
+                            }
                         }
                     }
                 };
 
                 let steering_fut = async {
-                    let mut controls_pub = MonoPublisher::from(controls.create_unreliable_subscription());
+                    let mut controls_pub =
+                        MonoPublisher::from(controls.create_unreliable_subscription());
                     let controls_sub = Subscriber::new(1);
                     controls.accept_subscription(controls_sub.create_subscription());
 

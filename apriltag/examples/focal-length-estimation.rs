@@ -5,10 +5,9 @@ use camera::discover_all_cameras;
 use fxhash::FxBuildHasher;
 use rig::Robot;
 use unros::{
-    Node,
     anyhow::{self, Context},
     pubsub::{Publisher, Subscriber},
-    setup_logging, tokio, Application,
+    setup_logging, tokio, Application, Node,
 };
 
 const TAG_DISTANCE: f64 = 2.98;

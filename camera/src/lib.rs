@@ -4,21 +4,34 @@
 //! Do note that this crate should not be expected to connect
 //! to RealSense cameras.
 
-use std::{sync::{Arc, Mutex}, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use eye::hal::{format::PixelFormat, platform::Device, traits::{Context as HalContext, Device as HalDevice, Stream}, PlatformContext};
+pub use eye::hal::device::Description;
+use eye::hal::{
+    format::PixelFormat,
+    platform::Device,
+    traits::{Context as HalContext, Device as HalDevice, Stream},
+    PlatformContext,
+};
 use image::{codecs::jpeg::JpegDecoder, imageops::FilterType, DynamicImage};
 use unros::{
-    anyhow, async_trait, asyncify_run, log, pubsub::{Publisher, PublisherRef}, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, asyncify_run, log,
+    pubsub::{Publisher, PublisherRef},
+    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
-pub use eye::hal::device::Description;
 
 static PLATFORM: Mutex<Option<PlatformContext>> = Mutex::new(None);
 
 /// A pending connection to a camera.
 ///
 /// The connection is not created until this `Node` is ran.
-pub struct Camera<F=fn(DynamicImage, u32, u32) -> DynamicImage> where F: FnMut(DynamicImage, u32, u32)->DynamicImage + Send + 'static {
+pub struct Camera<F = fn(DynamicImage, u32, u32) -> DynamicImage>
+where
+    F: FnMut(DynamicImage, u32, u32) -> DynamicImage + Send + 'static,
+{
     pub fps: u32,
     pub res_x: u32,
     pub res_y: u32,
@@ -38,10 +51,14 @@ impl Camera {
     pub fn new(description: Description) -> anyhow::Result<Self> {
         let mut platform = PLATFORM.lock().unwrap();
         if platform.is_none() {
-            *platform = Some(PlatformContext::all().next().ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?);
+            *platform = Some(
+                PlatformContext::all()
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?,
+            );
         }
         let platform = platform.as_mut().unwrap();
-        
+
         Ok(Self {
             fps: 0,
             res_x: 0,
@@ -50,13 +67,12 @@ impl Camera {
             description,
             image_received: Default::default(),
             intrinsics: Default::default(),
-            resizer: crop_resize
+            resizer: crop_resize,
         })
     }
 }
 
-impl<F: FnMut(DynamicImage, u32, u32)->DynamicImage + Send> Camera<F> {
-
+impl<F: FnMut(DynamicImage, u32, u32) -> DynamicImage + Send> Camera<F> {
     pub fn get_camera_name(&self) -> &str {
         &self.description.product
     }
@@ -72,7 +88,10 @@ impl<F: FnMut(DynamicImage, u32, u32)->DynamicImage + Send> Camera<F> {
 }
 
 #[async_trait]
-impl<F> Node for Camera<F> where F: FnMut(DynamicImage, u32, u32)->DynamicImage + Send + 'static {
+impl<F> Node for Camera<F>
+where
+    F: FnMut(DynamicImage, u32, u32) -> DynamicImage + Send + 'static,
+{
     const DEFAULT_NAME: &'static str = "camera";
 
     fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
@@ -85,7 +104,11 @@ impl<F> Node for Camera<F> where F: FnMut(DynamicImage, u32, u32)->DynamicImage 
         let streams = device.streams()?;
 
         let Some(mut stream_desc) = streams.into_iter().next() else {
-            return Err(anyhow::anyhow!("No streams available for {} at {}", self.description.product, self.description.uri));
+            return Err(anyhow::anyhow!(
+                "No streams available for {} at {}",
+                self.description.product,
+                self.description.uri
+            ));
         };
 
         if self.res_x != 0 {
@@ -95,7 +118,7 @@ impl<F> Node for Camera<F> where F: FnMut(DynamicImage, u32, u32)->DynamicImage 
         }
 
         // stream_desc.pixfmt = PixelFormat::Rgb(8);
-        
+
         stream_desc.interval = if self.fps == 0 {
             Duration::from_secs(1) / 30
         } else {
@@ -107,35 +130,36 @@ impl<F> Node for Camera<F> where F: FnMut(DynamicImage, u32, u32)->DynamicImage 
         let drop_check = DropCheck::default();
         let drop_obs = drop_check.get_observing();
 
-        asyncify_run(move || {
-            loop {
-                let Some(result) = stream
-                    .next() else {
-                        break Ok(());
-                    };
-                let frame = result?;
-                if drop_obs.has_dropped() {
-                    break Ok(());
+        asyncify_run(move || loop {
+            let Some(result) = stream.next() else {
+                break Ok(());
+            };
+            let frame = result?;
+            if drop_obs.has_dropped() {
+                break Ok(());
+            }
+
+            let mut img = match &stream_desc.pixfmt {
+                PixelFormat::Gray(8) => todo!(),
+                PixelFormat::Rgb(8) => todo!(),
+                PixelFormat::Jpeg => {
+                    let decoder = JpegDecoder::new(frame).unwrap();
+                    DynamicImage::from_decoder(decoder)?
                 }
+                _ => unreachable!(),
+            };
 
-
-                let mut img = match &stream_desc.pixfmt {
-                    PixelFormat::Gray(8) => todo!(),
-                    PixelFormat::Rgb(8) => todo!(),
-                    PixelFormat::Jpeg => {
-                        let decoder = JpegDecoder::new(frame).unwrap();
-                        DynamicImage::from_decoder(decoder)?
-                    }
-                    _ => unreachable!()
-                };
-
-                img = (self.resizer)(img, self.res_x, self.res_y);
-                if img.width() != self.res_x || img.height() != self.res_y {
-                    error!("Image was resized incorrectly to {}x{} instead of {}x{}", img.width(), img.height(), self.res_x, self.res_y);
-                } else {
-                    self.image_received.set(Arc::new(img));
-                }
-                
+            img = (self.resizer)(img, self.res_x, self.res_y);
+            if img.width() != self.res_x || img.height() != self.res_y {
+                error!(
+                    "Image was resized incorrectly to {}x{} instead of {}x{}",
+                    img.width(),
+                    img.height(),
+                    self.res_x,
+                    self.res_y
+                );
+            } else {
+                self.image_received.set(Arc::new(img));
             }
         })
         .await
@@ -161,23 +185,22 @@ impl<F> Node for Camera<F> where F: FnMut(DynamicImage, u32, u32)->DynamicImage 
 
         // let res_x = self.res_x;
         // let res_y = self.res_y;
-
-        
     }
 }
 
 /// Returns an iterator over all the cameras that were identified on this computer.
 pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
-    let ctx = PlatformContext::all().next().ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?;
-    Ok(ctx.devices()?
+    let ctx = PlatformContext::all()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?;
+    Ok(ctx
+        .devices()?
         .into_iter()
-        .filter_map(|desc| {
-            match Camera::new(desc) {
-                Ok(cam) => Some(cam),
-                Err(e) => {
-                    log::error!("{e:?}");
-                    None
-                }
+        .filter_map(|desc| match Camera::new(desc) {
+            Ok(cam) => Some(cam),
+            Err(e) => {
+                log::error!("{e:?}");
+                None
             }
         }))
 }

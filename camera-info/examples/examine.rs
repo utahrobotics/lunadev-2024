@@ -3,7 +3,9 @@ use std::io::stdin;
 use camera::discover_all_cameras;
 use camera_info::interactive_examine;
 use unros::{
-    anyhow::{self, Context}, tokio::{self, task::JoinHandle}, Application, Node
+    anyhow::{self, Context},
+    tokio::{self, task::JoinHandle},
+    Application, Node,
 };
 
 #[unros::main]
