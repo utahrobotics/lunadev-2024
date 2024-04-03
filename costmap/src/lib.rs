@@ -1,11 +1,10 @@
-// #![feature(binary_heap_drain_sorted)]
 #![feature(new_uninit, ptr_metadata, alloc_layout_extra, convert_float_to_int)]
 
 use std::{convert::FloatToInt, ops::Mul, sync::{atomic::{AtomicUsize, Ordering}, Arc}};
 
 use dst_init::{dst, BoxExt, Slice, SliceExt};
 use nalgebra::{Isometry3, Point2, Point3, RealField, UnitQuaternion};
-use quadtree_rs::{area::AreaBuilder, point, Quadtree};
+use quadtree_rs::{area::AreaBuilder, Quadtree};
 use rig::RobotElementRef;
 use simba::scalar::SubsetOf;
 use unros::{anyhow, async_trait, pubsub::{subs::Subscription, Publisher, PublisherRef, Subscriber}, setup_logging, Node, NodeIntrinsics, RuntimeContext};
@@ -38,6 +37,7 @@ struct CostmapFrame<N> {
 #[dst]
 struct CostmapInner<N> {
     point_count: usize,
+    threshold: N,
     frames: [Arc<CostmapFrame<N>>]
 }
 
