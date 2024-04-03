@@ -101,7 +101,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .steering_pub()
         .accept_subscription(drive.get_steering_sub());
 
-    let mut teleop_camera = cameras.remove(0);
+    let mut teleop_camera = cameras.remove(4);
     teleop_camera.res_x = 1280;
     teleop_camera.res_y = 720;
     teleop_camera
