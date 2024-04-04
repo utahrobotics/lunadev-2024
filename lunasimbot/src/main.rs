@@ -1,13 +1,13 @@
 use std::{ops::DerefMut, sync::Arc};
 
-use costmap::{local::LocalCostmap, Points};
+use costmap::{CostmapGenerator, Points};
 use fxhash::FxBuildHasher;
 use localization::{
     frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame},
     Localizer,
 };
 use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
-use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
+// use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rand_distr::{Distribution, Normal};
 use rig::Robot;
 use unros::{
@@ -33,48 +33,53 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let camera_ref = camera.get_ref();
     let debug_element = elements.remove("debug").unwrap();
 
-    let mut costmap = LocalCostmap::new(400, 0.05, 0.01, robot_base.get_ref());
-    costmap.min_frequency = 0.0;
+    let costmap = CostmapGenerator::new(10);
     let points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
-    points_signal.accept_subscription(costmap.create_points_sub().map(move |points| Points {
-        points,
-        robot_element: camera_ref.clone(),
-    }));
+    points_signal.accept_subscription(costmap.create_points_sub(0.05).map(
+        move |points| Points {
+            points,
+            robot_element: camera_ref.clone(),
+        },
+    ));
 
-    let costmap = Arc::new(costmap);
-    let costmap_ref = costmap.clone();
+    let costmap_sub = Subscriber::new(1);
+    costmap
+        .get_costmap_pub()
+        .accept_subscription(costmap_sub.create_subscription());
 
     let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(400, 400, 24)?;
-    let drop_check = app.get_main_thread_drop_check();
+    let debug_element_ref = debug_element.get_ref();
 
     rayon::spawn(move || {
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(42));
-            if drop_check.has_dropped() {
-                break;
-            }
-            let costmap = costmap_ref.lock().get_costmap();
-            let obstacles = costmap_ref.costmap_to_obstacle(&costmap, 0.1, 0.0, 0.65);
-            let img = costmap_ref.obstacles_to_img(&obstacles);
-            // let img = costmap_ref.costmap_to_img(&costmap).0;
-
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let Some(costmap) = costmap_sub.try_recv() else {
+                if costmap_sub.get_pub_count() == 0 {
+                    break;
+                } else {
+                    continue;
+                }
+            };
+            let position = debug_element_ref.get_global_isometry().translation.vector;
+            let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.3, 0.15);
+            // let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
             costmap_display.write_frame(Arc::new(img.into())).unwrap();
         }
     });
 
-    let pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.1);
-    let path_sub = Subscriber::new(1);
-    pathfinder
-        .path_pub()
-        .accept_subscription(path_sub.create_subscription());
+    // let pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.1);
+    let path_sub = Subscriber::<()>::new(1);
+    // pathfinder
+    //     .path_pub()
+    //     .accept_subscription(path_sub.create_subscription());
 
-    let driver = DifferentialDriver::new(robot_base.get_ref());
+    // let driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
-    pathfinder
-        .path_pub()
-        .accept_subscription(driver.create_path_sub());
-    let nav_task = pathfinder.get_navigation_handle();
+    // pathfinder
+    //     .path_pub()
+    //     .accept_subscription(driver.create_path_sub());
+    // let nav_task = pathfinder.get_navigation_handle();
 
     // let robot_base_ref = robot_base.get_ref();
     let localizer = Localizer::new(robot_base, 0.0);
@@ -91,10 +96,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let imu_pub = Publisher::default();
     imu_pub.accept_subscription(localizer.create_imu_sub().set_name("imu"));
 
-    let steering_sub = Subscriber::new(1);
-    driver
-        .steering_pub()
-        .accept_subscription(steering_sub.create_subscription());
+    let steering_sub = Subscriber::<()>::new(1);
+    // driver
+    //     .steering_pub()
+    //     .accept_subscription(steering_sub.create_subscription());
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
     app.add_task(
@@ -234,30 +239,30 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
-                    match nav_task.try_schedule(Point3::new(x, 0.0, y)).await {
-                        Ok(handle) => {
-                            tokio::spawn(async move {
-                                match handle.wait().await {
-                                    Ok(()) => log::info!("Navigation complete"),
-                                    Err(e) => log::error!("{e}"),
-                                }
-                            });
-                        }
-                        Err(e) => log::error!("{e}"),
-                    }
+                    // match nav_task.try_schedule(Point3::new(x, 0.0, y)).await {
+                    //     Ok(handle) => {
+                    //         tokio::spawn(async move {
+                    //             match handle.wait().await {
+                    //                 Ok(()) => log::info!("Navigation complete"),
+                    //                 Err(e) => log::error!("{e}"),
+                    //             }
+                    //         });
+                    //     }
+                    //     Err(e) => log::error!("{e}"),
+                    // }
                 }
 
                 if let Some(steering) = steering_sub.try_recv() {
-                    last_left_steering = steering.left.into_inner();
-                    last_right_steering = steering.right.into_inner();
-                    stream
-                        .write_f32_le(last_left_steering)
-                        .await
-                        .expect("Failed to write steering");
-                    stream
-                        .write_f32_le(last_right_steering)
-                        .await
-                        .expect("Failed to write steering");
+                    // last_left_steering = steering.left.into_inner();
+                    // last_right_steering = steering.right.into_inner();
+                    // stream
+                    //     .write_f32_le(last_left_steering)
+                    //     .await
+                    //     .expect("Failed to write steering");
+                    // stream
+                    //     .write_f32_le(last_right_steering)
+                    //     .await
+                    //     .expect("Failed to write steering");
                 } else {
                     stream
                         .write_f32_le(last_left_steering)
@@ -304,20 +309,20 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 stream.flush().await.expect("Failed to write steering");
 
                 if let Some(path) = path_sub.try_recv() {
-                    stream
-                        .write_u16_le(path.len() as u16)
-                        .await
-                        .expect("Failed to write path length");
-                    for point in path.iter() {
-                        stream
-                            .write_f32_le(point.x)
-                            .await
-                            .expect("Failed to write point.x");
-                        stream
-                            .write_f32_le(point.y)
-                            .await
-                            .expect("Failed to write point.y");
-                    }
+                    // stream
+                    //     .write_u16_le(path.len() as u16)
+                    //     .await
+                    //     .expect("Failed to write path length");
+                    // for point in path.iter() {
+                    //     stream
+                    //         .write_f32_le(point.x)
+                    //         .await
+                    //         .expect("Failed to write point.x");
+                    //     stream
+                    //         .write_f32_le(point.y)
+                    //         .await
+                    //         .expect("Failed to write point.y");
+                    // }
                 } else {
                     stream
                         .write_u16_le(0)
@@ -331,9 +336,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         "telemetry",
     );
 
-    app.add_node(driver);
-    app.add_node(pathfinder);
+    // app.add_node(driver);
+    // app.add_node(pathfinder);
     app.add_node(localizer);
+    app.add_node(costmap);
 
     Ok(app)
 }

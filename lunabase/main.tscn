@@ -849,6 +849,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.42865, -0.424198, 2.11976)
 [node name="Boulder4" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D" instance=ExtResource("3_02f7a")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.30077, -0.203136, 2.17333)
 
+[node name="Marker3D" type="Marker3D" parent="Sim/SubViewportContainer/SubViewport/Node3D/MeshInstance3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.81, 0, -3.1)
+
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="Sim/SubViewportContainer/SubViewport/Node3D"]
 transform = Transform3D(0.243107, -0.860673, 0.44737, 3.6215e-11, 0.461207, 0.887293, -0.969999, -0.215707, 0.112123, 0, 1.80059, 0)
 shadow_enabled = true

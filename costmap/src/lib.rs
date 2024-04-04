@@ -10,7 +10,7 @@ use std::{
 
 use dst_init::{dst, BoxExt, Slice, SliceExt};
 use image::GrayImage;
-use nalgebra::{Isometry3, Point2, Point3, RealField, UnitQuaternion};
+use nalgebra::{Isometry3, Point2, Point3, RealField};
 use quadtree_rs::{area::AreaBuilder, Quadtree};
 use rig::RobotElementRef;
 use simba::scalar::{SubsetOf, SupersetOf};
@@ -36,8 +36,10 @@ pub struct Points<T> {
 struct CostmapFrame<N> {
     quadtree: Quadtree<usize, HeightCell<N>>,
     max_density: usize,
-    // max_height: N,
-    // min_height: N,
+    min_x: isize,
+    min_y: isize,
+    max_height: N,
+    min_height: N,
     resolution: N,
     isometry: Isometry3<N>,
 }
@@ -59,25 +61,33 @@ impl<
             + Copy
             + FloatToInt<isize>
             + FloatToInt<usize>
+            + FloatToInt<u8>
             + SupersetOf<usize>
-            + SupersetOf<u32>,
+            + SupersetOf<i64>,
     > Costmap<N>
 {
     pub fn is_global_point_safe(&self, point: Point3<N>, radius: N, max_diff: N) -> bool {
         assert!(!radius.is_negative());
         assert!(!max_diff.is_negative());
+
         for frame in self.inner.frames.iter() {
             let point3d = frame.isometry.inverse_transform_point(&point);
-            let point2d = unsafe {
+            let mut point2d = unsafe {
                 Point2::<isize>::new(
                     (point3d.x / frame.resolution).round().to_int_unchecked(),
                     (point3d.z / frame.resolution).round().to_int_unchecked(),
                 )
             };
+            point2d.x -= frame.min_x;
+            point2d.y -= frame.min_y;
             if point2d.x < 0 || point2d.y < 0 {
                 continue;
             }
-            let radius: usize = unsafe { (radius / frame.resolution).round().to_int_unchecked() };
+            let mut radius: usize =
+                unsafe { (radius / frame.resolution).round().to_int_unchecked() };
+            if radius == 0 {
+                radius = 1;
+            }
             let cells = frame.quadtree.query(
                 AreaBuilder::default()
                     .anchor(quadtree_rs::point::Point {
@@ -106,7 +116,7 @@ impl<
                 }
             }
         }
-        false
+        true
     }
 
     pub fn get_obstacle_map(
@@ -119,16 +129,16 @@ impl<
         max_diff: N,
     ) -> GrayImage {
         assert!(resolution.is_positive());
-        let data: Vec<_> = (0..height)
+        let data: Vec<_> = (0..height as i64)
             .into_par_iter()
             .flat_map(|mut y| {
-                y -= height / 2;
-                (0..width).into_par_iter().map(move |mut x| {
-                    x -= width / 2;
-                    let mut point = point;
-                    point.x += nalgebra::convert::<_, N>(x) * resolution;
-                    point.z += nalgebra::convert::<_, N>(y) * resolution;
-                    if self.is_global_point_safe(point, radius, max_diff) {
+                y -= height as i64 / 2;
+                (0..width as i64).into_par_iter().map(move |mut x| {
+                    x -= width as i64 / 2;
+                    let mut transformed_point = point;
+                    transformed_point.x += nalgebra::convert::<_, N>(x) * resolution;
+                    transformed_point.z += nalgebra::convert::<_, N>(y) * resolution;
+                    if self.is_global_point_safe(transformed_point, radius, max_diff) {
                         0u8
                     } else {
                         255u8
@@ -139,56 +149,138 @@ impl<
 
         GrayImage::from_vec(width, height, data).expect("Failed to create obstacle map")
     }
+
+    pub fn get_cost_map(
+        &self,
+        point: Point3<N>,
+        resolution: N,
+        width: u32,
+        height: u32,
+    ) -> GrayImage {
+        assert!(resolution.is_positive());
+        let data: Vec<_> = (0..height as i64)
+            .into_par_iter()
+            .flat_map(|mut y| {
+                y -= height as i64 / 2;
+                (0..width as i64).into_par_iter().map(move |mut x| {
+                    x -= width as i64 / 2;
+                    let mut transformed_point = point;
+                    transformed_point.x += nalgebra::convert::<_, N>(x) * resolution;
+                    transformed_point.z += nalgebra::convert::<_, N>(y) * resolution;
+
+                    let mut total_height = N::zero();
+                    let mut count = 0usize;
+                    let mut max_height = N::zero();
+                    let mut min_height = N::zero();
+
+                    for frame in self.inner.frames.iter() {
+                        max_height = max_height.max(frame.max_height);
+                        min_height = min_height.min(frame.min_height);
+
+                        let point3d = frame.isometry.inverse_transform_point(&transformed_point);
+                        let mut point2d = unsafe {
+                            Point2::<isize>::new(
+                                (point3d.x / frame.resolution).round().to_int_unchecked(),
+                                (point3d.z / frame.resolution).round().to_int_unchecked(),
+                            )
+                        };
+                        point2d.x -= frame.min_x;
+                        point2d.y -= frame.min_y;
+                        if point2d.x < 0 || point2d.y < 0 {
+                            continue;
+                        }
+                        let mut cells = frame.quadtree.query(
+                            AreaBuilder::default()
+                                .anchor(quadtree_rs::point::Point {
+                                    x: point2d.x as usize,
+                                    y: point2d.y as usize,
+                                })
+                                .dimensions((1, 1))
+                                .build()
+                                .unwrap(),
+                        );
+
+                        let threshold: usize = unsafe {
+                            (self.inner.threshold * nalgebra::convert(frame.max_density))
+                                .round()
+                                .to_int_unchecked()
+                        };
+
+                        if let Some(cell) = cells.next() {
+                            let cell = cell.value_ref();
+                            if cell.count < threshold {
+                                continue;
+                            }
+                            let height =
+                                cell.total_height / nalgebra::convert(cell.count);
+                            total_height += height;
+                            count += 1;
+                        }
+
+                        assert!(cells.next().is_none());
+                    }
+
+                    (total_height / nalgebra::convert(count), max_height, min_height)
+                })
+            })
+            .collect();
+
+        let comparator = |a: &N, b: &N| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
+        let max_height = data.iter().map(|(_, h, _)| *h).max_by(comparator).unwrap();
+        let min_height = data.iter().map(|(_, _, h)| *h).min_by(comparator).unwrap();
+        let divisor = max_height.abs().max(min_height.abs());
+
+        let data: Vec<u8> = data.into_iter()
+            .map(|(height, _, _)| {
+                let height = height.abs() / divisor * nalgebra::convert(255.0);
+                unsafe {
+                    height.round().to_int_unchecked()
+                }
+            })
+            .collect();
+
+        GrayImage::from_vec(width, height, data).expect("Failed to create cost map")
+    }
 }
 
 pub struct CostmapGenerator<N: RealField + Copy = f32> {
     pub threshold: N,
     pub window_length: usize,
-    octree_sub: Subscriber<CostmapFrame<N>>,
+    quadtree_sub: Subscriber<CostmapFrame<N>>,
     intrinsics: NodeIntrinsics<Self>,
     costmap_pub: Publisher<Costmap<N>>,
 }
 
-pub trait PointTransformer<N: RealField> {
-    fn transform(point: Point3<N>, robot_element: &RobotElementRef) -> Point3<N>;
-}
-
-pub struct AddRotation(());
-pub struct NoTransform(());
-
-impl<N: RealField> PointTransformer<N> for AddRotation
-where
-    f32: SubsetOf<N>,
-{
-    fn transform(point: Point3<N>, robot_element: &RobotElementRef) -> Point3<N> {
-        let rot: UnitQuaternion<N> =
-            nalgebra::convert(robot_element.get_global_isometry().rotation);
-        rot.transform_point(&point)
+impl CostmapGenerator {
+    pub fn new(frame_buffer_size: usize) -> Self {
+        Self {
+            threshold: 0.5,
+            window_length: 10,
+            quadtree_sub: Subscriber::new(frame_buffer_size),
+            intrinsics: Default::default(),
+            costmap_pub: Default::default(),
+        }
     }
 }
 
-impl<N: RealField> PointTransformer<N> for NoTransform {
-    fn transform(point: Point3<N>, _robot_element: &RobotElementRef) -> Point3<N> {
-        point
-    }
-}
 
-impl<N: RealField + FloatToInt<isize> + Copy> CostmapGenerator<N> {
-    pub fn create_points_sub<T, F>(&self, resolution: N) -> impl Subscription<Item = Points<T>>
+impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<usize>> CostmapGenerator<N> {
+    pub fn create_points_sub<T>(&self, resolution: N) -> impl Subscription<Item = Points<T>>
     where
         T: IntoIterator<Item = Point3<N>>,
-        F: PointTransformer<N>,
         f32: SubsetOf<N>,
     {
         assert!(resolution.is_positive());
-        self.octree_sub
+        self.quadtree_sub
             .create_subscription()
             .filter_map(move |original_points: Points<T>| {
                 let points: Box<[_]> = original_points
                     .points
                     .into_iter()
                     .map(|mut p| {
-                        p = F::transform(p, &original_points.robot_element);
+                        let iso: Isometry3<N> = nalgebra::convert(original_points.robot_element.get_isometry_from_base());
+                        p = iso.transform_point(&p);
+
                         let pt = unsafe {
                             Point2::<isize>::new(
                                 (p.x / resolution).round().to_int_unchecked(),
@@ -228,8 +320,15 @@ impl<N: RealField + FloatToInt<isize> + Copy> CostmapGenerator<N> {
                     }
                 }
 
-                let max_range = (max_x - min_x).max(max_y - min_y) as usize;
-                let depth = max_range.ilog2().next_power_of_two() as usize;
+                let max_range = (max_x - min_x).max(max_y - min_y) as usize + 1;
+
+                let depth = if max_range == 0 {
+                    1usize
+                } else {
+                    unsafe {
+                        nalgebra::convert::<_, N>(max_range).log2().ceil().to_int_unchecked()
+                    }
+                };
                 let mut max_density = 0;
 
                 let mut quadtree = Quadtree::<usize, HeightCell<N>>::new(depth);
@@ -255,13 +354,14 @@ impl<N: RealField + FloatToInt<isize> + Copy> CostmapGenerator<N> {
                     );
 
                     if *modified_count.get_mut() == 0 {
-                        quadtree.insert_pt(
+                        let inserted = quadtree.insert_pt(
                             anchor,
                             HeightCell {
                                 total_height: height,
                                 count: 1,
                             },
-                        );
+                        ).is_some();
+                        assert!(inserted, "{anchor:?} {depth} {max_range}");
                         max_density = max_density.max(1);
                     } else {
                         max_density = max_density.max(*modified_count.get_mut());
@@ -271,11 +371,13 @@ impl<N: RealField + FloatToInt<isize> + Copy> CostmapGenerator<N> {
                 Some(CostmapFrame {
                     quadtree,
                     max_density,
-                    // max_height,
-                    // min_height,
+                    min_x,
+                    min_y,
+                    max_height,
+                    min_height,
                     resolution,
                     isometry: nalgebra::convert(
-                        original_points.robot_element.get_global_isometry(),
+                        original_points.robot_element.get_isometry_of_base(),
                     ),
                 })
             })
@@ -296,8 +398,10 @@ impl<N: RealField + Copy> Node for CostmapGenerator<N> {
             Arc::new(CostmapFrame {
                 quadtree: Quadtree::new(0),
                 max_density: 0,
-                // max_height: N::zero(),
-                // min_height: N::zero(),
+                min_x: 0,
+                min_y: 0,
+                max_height: N::zero(),
+                min_height: N::zero(),
                 resolution: N::one(),
                 isometry: nalgebra::Isometry3::identity(),
             })
@@ -318,7 +422,7 @@ impl<N: RealField + Copy> Node for CostmapGenerator<N> {
                 inner: inner.into(),
             });
 
-            let Some(frame) = self.octree_sub.recv_or_closed().await else {
+            let Some(frame) = self.quadtree_sub.recv_or_closed().await else {
                 break Ok(());
             };
             costmap_frames[frame_index] = Arc::new(frame);

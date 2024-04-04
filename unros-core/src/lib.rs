@@ -42,6 +42,7 @@ use config::Config;
 use crossbeam::queue::SegQueue;
 pub use log;
 use log::{debug, error, info, warn};
+pub use rand;
 pub use rayon;
 use serde::Deserialize;
 use sysinfo::Pid;

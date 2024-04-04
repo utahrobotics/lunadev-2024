@@ -4,25 +4,35 @@
 //! Do note that this crate should not be expected to connect
 //! to RealSense cameras.
 
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::Arc;
 
+#[cfg(unix)]
+use std::{sync::Mutex, time::Duration};
+
+#[cfg(unix)]
 pub use eye::hal::device::Description;
+#[cfg(unix)]
 use eye::hal::{
     format::PixelFormat,
     platform::Device,
     traits::{Context as HalContext, Device as HalDevice, Stream},
     PlatformContext,
 };
-use image::{codecs::jpeg::JpegDecoder, imageops::FilterType, DynamicImage};
+#[cfg(unix)]
+use image::codecs::jpeg::JpegDecoder;
+use image::{imageops::FilterType, DynamicImage};
 use unros::{
-    anyhow, async_trait, asyncify_run, log,
+    anyhow, async_trait,
     pubsub::{Publisher, PublisherRef},
-    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
+#[cfg(not(unix))]
+pub struct Description {
+    pub uri: String,
+    pub product: String,
+}
 
+#[cfg(unix)]
 static PLATFORM: Mutex<Option<PlatformContext>> = Mutex::new(None);
 
 /// A pending connection to a camera.
@@ -35,10 +45,12 @@ where
     pub fps: u32,
     pub res_x: u32,
     pub res_y: u32,
+    #[cfg(unix)]
     device: Mutex<Device<'static>>,
     description: Description,
     image_received: Publisher<Arc<DynamicImage>>,
     intrinsics: NodeIntrinsics<Self>,
+    #[allow(dead_code)]
     resizer: F,
 }
 
@@ -49,20 +61,24 @@ fn crop_resize(img: DynamicImage, res_x: u32, res_y: u32) -> DynamicImage {
 impl Camera {
     /// Creates a pending connection to the camera with the given index.
     pub fn new(description: Description) -> anyhow::Result<Self> {
-        let mut platform = PLATFORM.lock().unwrap();
-        if platform.is_none() {
-            *platform = Some(
-                PlatformContext::all()
-                    .next()
-                    .ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?,
-            );
-        }
-        let platform = platform.as_mut().unwrap();
+        #[cfg(unix)]
+        let platform = {
+            let mut platform = PLATFORM.lock().unwrap();
+            if platform.is_none() {
+                *platform = Some(
+                    PlatformContext::all()
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?,
+                );
+            }
+            platform.as_mut().unwrap()
+        };
 
         Ok(Self {
             fps: 0,
             res_x: 0,
             res_y: 0,
+            #[cfg(unix)]
             device: Mutex::new(platform.open_device(&description.uri)?),
             description,
             image_received: Default::default(),
@@ -98,6 +114,7 @@ where
         &mut self.intrinsics
     }
 
+    #[cfg(unix)]
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
         let device = self.device.get_mut().unwrap();
@@ -127,10 +144,10 @@ where
 
         let mut stream = device.start_stream(&stream_desc)?;
 
-        let drop_check = DropCheck::default();
+        let drop_check = unros::DropCheck::default();
         let drop_obs = drop_check.get_observing();
 
-        asyncify_run(move || loop {
+        unros::asyncify_run(move || loop {
             let Some(result) = stream.next() else {
                 break Ok(());
             };
@@ -186,9 +203,16 @@ where
         // let res_x = self.res_x;
         // let res_y = self.res_y;
     }
+    #[cfg(not(unix))]
+    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+        setup_logging!(context);
+        warn!("Camera node is not supported on this platform");
+        Ok(())
+    }
 }
 
 /// Returns an iterator over all the cameras that were identified on this computer.
+#[cfg(unix)]
 pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
     let ctx = PlatformContext::all()
         .next()
@@ -199,8 +223,14 @@ pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
         .filter_map(|desc| match Camera::new(desc) {
             Ok(cam) => Some(cam),
             Err(e) => {
-                log::error!("{e:?}");
+                unros::log::error!("{e:?}");
                 None
             }
         }))
+}
+
+/// Returns an iterator over all the cameras that were identified on this computer.
+#[cfg(not(unix))]
+pub fn discover_all_cameras() -> anyhow::Result<impl Iterator<Item = Camera>> {
+    Ok(std::iter::empty())
 }

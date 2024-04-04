@@ -64,3 +64,6 @@ debug = true
 
 [profile.release.package.lunabase-lib]
 debug = true
+
+[profile.release.package.lunasimbot]
+debug = true

@@ -12,7 +12,7 @@ costmap = { path = "../costmap" }
 fxhash = { workspace = true }
 nalgebra = { workspace = true }
 toml = { workspace = true }
-navigator = { path = "../navigator" }
+# navigator = { path = "../navigator" }
 localization = { path = "../localization" }
 rand_distr = { workspace = true }
 interprocess = { workspace = true }
