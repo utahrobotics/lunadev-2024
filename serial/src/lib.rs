@@ -62,7 +62,8 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
             #[cfg(unix)]
             stream.set_exclusive(true)?;
             stream.clear(tokio_serial::ClearBuffer::All)?;
-            stream.set_break()?;
+            // stream.set_break()?;
+
             // stream.set_flow_control(tokio_serial::FlowControl::Software)?;
             Ok(stream)
         })();
@@ -227,13 +228,34 @@ impl Node for VescConnection {
         let _ = std::mem::replace(&mut self.serial.serial_input, Subscriber::new(1));
         std::mem::take(&mut self.serial.serial_output);
 
-        loop {
+        'main: loop {
             let Some(stream) = self.serial.connect(&context).await? else {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             };
 
             let mut stream = vesc_comm::VescConnection::new(stream);
+
+            loop {
+                match stream.get_values().await {
+                    Ok(values) => {
+                        info!("Connected to VESC on: {}", self.serial.path);
+                        info!("VESC values: {values:?}");
+                        break;
+                    }
+                    Err(e) => {
+                        if self.serial.tolerate_error {
+                            error!(
+                                "Encountered the following error while communicating with: {}: {e}",
+                                self.serial.path
+                            );
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        } else {
+                            break 'main Err(e.into());
+                        }
+                    }
+                }
+            }
 
             if let Err(e) = stream
                 .set_duty(u32::from_ne_bytes(0i32.to_ne_bytes()))
@@ -252,7 +274,8 @@ impl Node for VescConnection {
             let e = loop {
                 tokio::select! {
                     duty = self.duty.recv() => {
-                        let Err(e) = stream.set_duty(u32::from_ne_bytes(duty.to_ne_bytes())).await else { continue; };
+                        println!("{duty}");
+                        let Err(e) = stream.set_duty(100000).await else { continue; };
                         break e;
                     }
                     current = self.current.recv() => {

@@ -103,7 +103,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .steering_pub()
         .accept_subscription(drive.get_steering_sub());
 
-    let mut teleop_camera = cameras.remove(4);
+    let mut teleop_camera = cameras.remove(0);
     teleop_camera.res_x = 1280;
     teleop_camera.res_y = 720;
     teleop_camera
@@ -251,7 +251,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(pathfinder);
     app.add_node(telemetry);
     app.add_node(teleop_camera);
-    app.add_node(imu01);
+    // app.add_node(imu01);
     app.add_node(drive);
     app.add_node(costmap);
     #[cfg(unix)]
