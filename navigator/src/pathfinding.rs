@@ -178,6 +178,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Node for Pa
     }
 }
 
+#[derive(Default)]
 pub struct DirectPathfinder<N> {
     phantom: PhantomData<N>,
 }
