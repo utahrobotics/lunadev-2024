@@ -84,10 +84,7 @@ impl<
             if point2d.x < 0 || point2d.y < 0 {
                 continue;
             }
-            let point2d = Point2::new(
-                point2d.x as usize,
-                point2d.y as usize,
-            );
+            let point2d = Point2::new(point2d.x as usize, point2d.y as usize);
             let mut radius_int: usize =
                 unsafe { (radius / frame.resolution).round().to_int_unchecked() };
             if radius_int == 0 {
@@ -124,7 +121,7 @@ impl<
                 if sum.sqrt() * frame.resolution > radius {
                     continue;
                 }
-                
+
                 let height = cell.total_height / nalgebra::convert(cell.count) - point3d.y;
                 if height.abs() > max_diff {
                     return false;
@@ -226,8 +223,7 @@ impl<
                             if cell.count < threshold {
                                 continue;
                             }
-                            let height =
-                                cell.total_height / nalgebra::convert(cell.count);
+                            let height = cell.total_height / nalgebra::convert(cell.count);
                             total_height += height;
                             count += 1;
                         }
@@ -235,7 +231,11 @@ impl<
                         assert!(cells.next().is_none());
                     }
 
-                    (total_height / nalgebra::convert(count), max_height, min_height)
+                    (
+                        total_height / nalgebra::convert(count),
+                        max_height,
+                        min_height,
+                    )
                 })
             })
             .collect();
@@ -245,12 +245,11 @@ impl<
         let min_height = data.iter().map(|(_, _, h)| *h).min_by(comparator).unwrap();
         let divisor = max_height.abs().max(min_height.abs());
 
-        let data: Vec<u8> = data.into_iter()
+        let data: Vec<u8> = data
+            .into_iter()
             .map(|(height, _, _)| {
                 let height = height.abs() / divisor * nalgebra::convert(255.0);
-                unsafe {
-                    height.round().to_int_unchecked()
-                }
+                unsafe { height.round().to_int_unchecked() }
             })
             .collect();
 
@@ -278,7 +277,9 @@ impl CostmapGenerator {
     }
 }
 
-impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<usize>> CostmapGenerator<N> {
+impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<usize>>
+    CostmapGenerator<N>
+{
     pub fn create_points_sub<T>(&self, resolution: N) -> impl Subscription<Item = Points<T>>
     where
         T: IntoIterator<Item = Point3<N>>,
@@ -292,7 +293,9 @@ impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<us
                     .points
                     .into_iter()
                     .map(|mut p| {
-                        let iso: Isometry3<N> = nalgebra::convert(original_points.robot_element.get_isometry_from_base());
+                        let iso: Isometry3<N> = nalgebra::convert(
+                            original_points.robot_element.get_isometry_from_base(),
+                        );
                         p = iso.transform_point(&p);
 
                         let pt = unsafe {
@@ -340,7 +343,10 @@ impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<us
                     1usize
                 } else {
                     unsafe {
-                        nalgebra::convert::<_, N>(max_range).log2().ceil().to_int_unchecked()
+                        nalgebra::convert::<_, N>(max_range)
+                            .log2()
+                            .ceil()
+                            .to_int_unchecked()
                     }
                 };
                 let mut max_density = 0;
@@ -368,13 +374,15 @@ impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<us
                     );
 
                     if *modified_count.get_mut() == 0 {
-                        let inserted = quadtree.insert_pt(
-                            anchor,
-                            HeightCell {
-                                total_height: height,
-                                count: 1,
-                            },
-                        ).is_some();
+                        let inserted = quadtree
+                            .insert_pt(
+                                anchor,
+                                HeightCell {
+                                    total_height: height,
+                                    count: 1,
+                                },
+                            )
+                            .is_some();
                         assert!(inserted, "{anchor:?} {depth} {max_range}");
                         max_density = max_density.max(1);
                     } else {

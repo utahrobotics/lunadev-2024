@@ -36,12 +36,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let costmap = CostmapGenerator::new(10);
     let points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
-    points_signal.accept_subscription(costmap.create_points_sub(0.05).map(
-        move |points| Points {
-            points,
-            robot_element: camera_ref.clone(),
-        },
-    ));
+    points_signal.accept_subscription(costmap.create_points_sub(0.05).map(move |points| Points {
+        points,
+        robot_element: camera_ref.clone(),
+    }));
 
     let costmap_sub = Subscriber::new(1);
     costmap
