@@ -12,7 +12,7 @@ members = [
     # "smooth-diff-drive",
     "lunasimbot", "unros-macros", "unros", "lunabase-lib", "camera-info", "networking", "usb-pluggy",
     "eigenvalues"
-]
+, "py-repl"]
 resolver = "2"
 exclude = ["publishing/", "logs/", "lunabase/", "camera-db/"]
 
