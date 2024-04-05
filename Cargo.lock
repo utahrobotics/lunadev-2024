@@ -2258,6 +2258,7 @@ dependencies = [
  "ordered-float",
  "pathfinding",
  "rig",
+ "simba",
  "spin_sleep",
  "unros",
 ]

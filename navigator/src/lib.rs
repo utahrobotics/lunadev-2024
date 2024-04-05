@@ -1,3 +1,4 @@
+#![feature(convert_float_to_int)]
 use std::{sync::Arc, time::Duration};
 
 use drive::Steering;
@@ -12,6 +13,7 @@ use unros::{
 
 pub mod drive;
 pub mod pathfinding;
+mod utils;
 // pub mod pathfinders;
 
 type Float = f32;
