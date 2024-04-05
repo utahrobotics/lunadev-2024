@@ -2,13 +2,12 @@ use std::{
     io::Write,
     net::SocketAddrV4,
     str::FromStr,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
 use apriltag::{AprilTagDetector, PoseObservation};
 use camera::discover_all_cameras;
-use costmap::local::LocalCostmap;
+use costmap::CostmapGenerator;
 use fxhash::FxBuildHasher;
 use imu::open_imu;
 use localization::{
@@ -16,7 +15,7 @@ use localization::{
     Localizer,
 };
 use nalgebra::{Isometry, Point3};
-use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
+use navigator::{pathfinding::Pathfinder, DifferentialDriver};
 #[cfg(unix)]
 use realsense::{discover_all_realsense, PointCloud};
 use rig::Robot;
@@ -34,6 +33,7 @@ use crate::drive::Drive;
 mod drive;
 mod imu;
 mod telemetry;
+// mod actuators;
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
@@ -43,7 +43,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let robot_base_ref = robot_base.get_ref();
     let imu01 = elements.remove("imu01").unwrap().get_ref();
 
-    let costmap = LocalCostmap::new(80, 0.05, 0.01, robot_base.get_ref());
+    let costmap = CostmapGenerator::new(10);
 
     #[cfg(unix)]
     let costmap = costmap;
@@ -73,7 +73,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
             let camera_element_ref = camera_element.get_ref();
             camera
                 .cloud_received_pub()
-                .accept_subscription(costmap.create_points_sub().map(move |x: PointCloud| {
+                .accept_subscription(costmap.create_points_sub(0.1).map(move |x: PointCloud| {
                     Points {
                         points: x.iter().map(|x| x.0),
                         robot_element: camera_element_ref.clone(),
@@ -82,8 +82,6 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
             camera
         };
-
-    let costmap = Arc::new(costmap);
 
     let telemetry = Telemetry::new(
         SocketAddrV4::from_str("10.8.0.6:43721").unwrap(),
@@ -200,12 +198,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
             .accept_subscription(localizer.create_imu_sub().set_name("RealSense IMU"));
     }
 
-    let navigator = DirectPathfinder::new(robot_base_ref.clone(), costmap.clone(), 0.5, 0.15);
+    let pathfinder: Pathfinder = Pathfinder::new_with_engine(Default::default(), robot_base_ref.clone());
     let driver = DifferentialDriver::new(robot_base_ref.clone());
 
-    navigator
-        .path_pub()
-        .accept_subscription(driver.create_path_sub());
+    // pathfinder.get_path_pub().accept_subscription(driver.create_path_sub());
 
     let mut data_dump = DataDump::new_file("motion.csv").await?;
     writeln!(
@@ -252,11 +248,12 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(apriltag);
     app.add_node(localizer);
     app.add_node(driver);
-    app.add_node(navigator);
+    app.add_node(pathfinder);
     app.add_node(telemetry);
     app.add_node(teleop_camera);
     app.add_node(imu01);
     app.add_node(drive);
+    app.add_node(costmap);
     #[cfg(unix)]
     app.add_node(realsense_camera);
 

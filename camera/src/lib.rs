@@ -62,16 +62,18 @@ impl Camera {
     /// Creates a pending connection to the camera with the given index.
     pub fn new(description: Description) -> anyhow::Result<Self> {
         #[cfg(unix)]
+        let mut platform_lock;
+        #[cfg(unix)]
         let platform = {
-            let mut platform = PLATFORM.lock().unwrap();
-            if platform.is_none() {
-                *platform = Some(
+            platform_lock = PLATFORM.lock().unwrap();
+            if platform_lock.is_none() {
+                *platform_lock = Some(
                     PlatformContext::all()
                         .next()
                         .ok_or_else(|| anyhow::anyhow!("Unable to get PlatformContext"))?,
                 );
             }
-            platform.as_mut().unwrap()
+            platform_lock.as_mut().unwrap()
         };
 
         Ok(Self {

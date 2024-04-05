@@ -32,7 +32,14 @@ pub fn make_negotiation() -> Negotiation<(
 pub struct ControlsPacket {
     pub drive: i8,
     pub steering: i8,
-    pub arm_vel: i8,
+    pub lift_height: u8,
+    pub tilt_frac: u8,
+}
+
+
+pub struct ArmControls {
+    pub lift_height: f32,
+    pub tilt_frac: f32,
 }
 
 #[derive(Debug, Eq, PartialEq, Encode, Decode, Clone, Copy)]

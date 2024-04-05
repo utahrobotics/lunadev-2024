@@ -16,7 +16,7 @@ use rig::RobotBaseRef;
 use simba::scalar::SupersetOf;
 use unros::{
     anyhow, async_trait, asyncify_run,
-    pubsub::{Publisher, Subscriber, WatchSubscriber},
+    pubsub::{Publisher, PublisherRef, Subscriber, WatchSubscriber},
     service::{new_service, Service, ServiceHandle},
     setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
@@ -79,7 +79,7 @@ pub trait PathfindingEngine<N: RealField>: Send + 'static {
     ) -> Option<Vec<Point3<N>>>;
 }
 
-pub struct Pathfinder<E: PathfindingEngine<N>, N: RealField + SupersetOf<f32> + Copy = f32> {
+pub struct Pathfinder<N: RealField + SupersetOf<f32> + Copy = f32, E: PathfindingEngine<N> = DirectPathfinder<N>> {
     engine: E,
     costmap_sub: Subscriber<Costmap<N>>,
     intrinsics: NodeIntrinsics<Self>,
@@ -94,7 +94,7 @@ pub struct Pathfinder<E: PathfindingEngine<N>, N: RealField + SupersetOf<f32> + 
     pub max_height_diff: N,
 }
 
-impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<E, N> {
+impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<N, E> {
     pub fn new_with_engine(engine: E, robot_base: RobotBaseRef) -> Self {
         let (service, service_handle) = new_service();
         Self {
@@ -112,10 +112,14 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
             max_height_diff: nalgebra::convert(0.15),
         }
     }
+    
+    pub fn get_path_pub(&self) -> PublisherRef<Arc<[Point3<N>]>> {
+        self.path_pub.get_ref()
+    }
 }
 
 #[async_trait]
-impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Node for Pathfinder<E, N> {
+impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Node for Pathfinder<N, E> {
     const DEFAULT_NAME: &'static str = "pathfinder";
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
@@ -189,11 +193,12 @@ impl<
             + FloatToInt<isize>
             + FloatToInt<usize>
             + FloatToInt<u8>
+            + FloatToInt<i64>
             + SupersetOf<usize>
             + SupersetOf<isize>
             + SupersetOf<i64>
             + SupersetOf<f32>
-            + std::hash::Hash,
+            + SupersetOf<u32>
     > PathfindingEngine<N> for DirectPathfinder<N>
 {
     fn pathfind(
@@ -332,7 +337,7 @@ impl<
     }
 }
 
-#[derive(Hash, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct CVec3<T: RealField> {
     inner: Vector3<T>,
     resolution: T,
@@ -342,6 +347,15 @@ impl<T: RealField + SupersetOf<f32> + Copy> PartialEq for CVec3<T> {
     fn eq(&self, other: &Self) -> bool {
         let diff = self.inner - other.inner;
         diff.magnitude() < self.resolution * nalgebra::convert(0.5)
+    }
+}
+
+impl<T: RealField + SupersetOf<f32> + FloatToInt<i64> + Copy> std::hash::Hash for CVec3<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        unsafe {
+            state.write_i64((self.inner.x / self.resolution).to_int_unchecked());
+            state.write_i64((self.inner.y / self.resolution).to_int_unchecked());
+        }
     }
 }
 
