@@ -11,6 +11,7 @@ use unros::{
 };
 
 pub mod drive;
+pub mod pathfinding;
 // pub mod pathfinders;
 
 type Float = f32;
@@ -42,7 +43,9 @@ impl DifferentialDriver<fn(Float) -> Float> {
             intrinsics: Default::default(),
         }
     }
+}
 
+impl<F: FnMut(Float) -> Float + Send + 'static> DifferentialDriver<F> {
     pub fn steering_pub(&self) -> PublisherRef<Steering> {
         self.steering_signal.get_ref()
     }

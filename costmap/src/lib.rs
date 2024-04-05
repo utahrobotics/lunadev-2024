@@ -63,6 +63,7 @@ impl<
             + FloatToInt<usize>
             + FloatToInt<u8>
             + SupersetOf<usize>
+            + SupersetOf<isize>
             + SupersetOf<i64>,
     > Costmap<N>
 {
@@ -83,18 +84,22 @@ impl<
             if point2d.x < 0 || point2d.y < 0 {
                 continue;
             }
-            let mut radius: usize =
+            let point2d = Point2::new(
+                point2d.x as usize,
+                point2d.y as usize,
+            );
+            let mut radius_int: usize =
                 unsafe { (radius / frame.resolution).round().to_int_unchecked() };
-            if radius == 0 {
-                radius = 1;
+            if radius_int == 0 {
+                radius_int = 1;
             }
             let cells = frame.quadtree.query(
                 AreaBuilder::default()
                     .anchor(quadtree_rs::point::Point {
-                        x: point2d.x as usize,
-                        y: point2d.y as usize,
+                        x: point2d.x.saturating_sub(radius_int),
+                        y: point2d.y.saturating_sub(radius_int),
                     })
-                    .dimensions((radius * 2, radius * 2))
+                    .dimensions((radius_int * 2, radius_int * 2))
                     .build()
                     .unwrap(),
             );
@@ -106,10 +111,20 @@ impl<
             };
 
             for cell in cells {
+                let anchor = cell.anchor();
                 let cell = cell.value_ref();
+
                 if cell.count < threshold {
                     continue;
                 }
+
+                let sum = anchor.x.abs_diff(point2d.x).pow(2) + anchor.y.abs_diff(point2d.y).pow(2);
+                let sum: N = nalgebra::convert(sum);
+
+                if sum.sqrt() * frame.resolution > radius {
+                    continue;
+                }
+                
                 let height = cell.total_height / nalgebra::convert(cell.count) - point3d.y;
                 if height.abs() > max_diff {
                     return false;
@@ -262,7 +277,6 @@ impl CostmapGenerator {
         }
     }
 }
-
 
 impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<usize>> CostmapGenerator<N> {
     pub fn create_points_sub<T>(&self, resolution: N) -> impl Subscription<Item = Points<T>>
