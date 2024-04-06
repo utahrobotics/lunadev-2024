@@ -27,11 +27,11 @@ where
     path.into_iter().rev().cloned().collect()
 }
 
-pub(crate) fn astar<N, C, FN, IN, FH, FS>(
+pub(crate) fn astar<N, C, FN, IN, FH>(
     start: &N,
     mut successors: FN,
     mut heuristic: FH,
-    mut success: FS,
+    end: N
 ) -> (Vec<N>, C)
 where
     N: Eq + Hash + Clone,
@@ -39,8 +39,10 @@ where
     FN: FnMut(&N) -> IN,
     IN: IntoIterator<Item = (N, C)>,
     FH: FnMut(&N) -> C,
-    FS: FnMut(&N) -> bool,
 {
+    let success = |current| {
+        current == end
+    };
     let mut best = None;
     let mut to_see = BinaryHeap::new();
     to_see.push(SmallestCostHolder {
@@ -53,7 +55,7 @@ where
     while let Some(SmallestCostHolder { cost, index, .. }) = to_see.pop() {
         let successors = {
             let (node, &(_, c)) = parents.get_index(index).unwrap(); // Cannot fail
-            if success(node) {
+            if success(node.clone()) {
                 let path = reverse_path(&parents, |&(p, _)| p, index);
                 return (path, cost);
             }
@@ -104,9 +106,7 @@ where
         continue;
     }
     let (mut path, cost) = best.unwrap();
-    if path.len() == 1 {
-        path.push(path[0].clone());
-    }
+    path.push(end);
     (path, cost)
 }
 

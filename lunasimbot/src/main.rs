@@ -7,6 +7,7 @@ use localization::{
     Localizer,
 };
 use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
+use navigator::{pathfinding::Pathfinder, DifferentialDriver};
 // use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rand_distr::{Distribution, Normal};
 use rig::Robot;
@@ -66,20 +67,22 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         }
     });
 
-    // let pathfinder = DirectPathfinder::new(robot_base.get_ref(), costmap, 0.65, 0.1);
-    let path_sub = Subscriber::<()>::new(1);
-    // pathfinder
-    //     .path_pub()
-    //     .accept_subscription(path_sub.create_subscription());
+    let pathfinder: Pathfinder = Pathfinder::new_with_engine(Default::default(), robot_base.get_ref());
+    costmap
+        .get_costmap_pub()
+        .accept_subscription(pathfinder.create_costmap_sub());
+    let path_sub = Subscriber::new(1);
+    pathfinder
+        .get_path_pub()
+        .accept_subscription(path_sub.create_subscription());
 
-    // let driver = DifferentialDriver::new(robot_base.get_ref());
+    let driver = DifferentialDriver::new(robot_base.get_ref());
     // driver.can_reverse = true;
-    // pathfinder
-    //     .path_pub()
-    //     .accept_subscription(driver.create_path_sub());
-    // let nav_task = pathfinder.get_navigation_handle();
+    pathfinder
+        .get_path_pub()
+        .accept_subscription(driver.create_path_sub());
+    let nav_task = pathfinder.get_navigation_handle();
 
-    // let robot_base_ref = robot_base.get_ref();
     let localizer = Localizer::new(robot_base, 0.0);
 
     let position_pub = Publisher::default();
@@ -94,10 +97,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let imu_pub = Publisher::default();
     imu_pub.accept_subscription(localizer.create_imu_sub().set_name("imu"));
 
-    let steering_sub = Subscriber::<()>::new(1);
-    // driver
-    //     .steering_pub()
-    //     .accept_subscription(steering_sub.create_subscription());
+    let steering_sub = Subscriber::new(1);
+    driver
+        .steering_pub()
+        .accept_subscription(steering_sub.create_subscription());
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
     app.add_task(
@@ -209,15 +212,11 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 points.reserve(n.saturating_sub(points.capacity()));
                 let distr = Normal::new(0.0, 0.05).unwrap();
                 let mut rng = quick_rng();
-                // let mut first = true;
                 for _ in 0..n {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
                     let z = stream.read_f32_le().await.expect("Failed to receive point");
-                    // if first {
-                    //     println!("{point:?}");
-                    //     first = false;
-                    // }
+                    
                     let mut vec = Vector3::new(x, y, z);
 
                     vec.scale_mut(1.0 + distr.sample(rng.deref_mut()));
@@ -237,30 +236,31 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
-                    // match nav_task.try_schedule(Point3::new(x, 0.0, y)).await {
-                    //     Ok(handle) => {
-                    //         tokio::spawn(async move {
-                    //             match handle.wait().await {
-                    //                 Ok(()) => log::info!("Navigation complete"),
-                    //                 Err(e) => log::error!("{e}"),
-                    //             }
-                    //         });
-                    //     }
-                    //     Err(e) => log::error!("{e}"),
-                    // }
+                    match nav_task.try_schedule_or_closed(Point3::new(x, 0.0, y)).await {
+                        Some(Ok(handle)) => {
+                            tokio::spawn(async move {
+                                match handle.wait().await {
+                                    Ok(()) => log::info!("Navigation complete"),
+                                    Err(e) => log::error!("{e}"),
+                                }
+                            });
+                        }
+                        Some(Err(e)) => log::error!("{e}"),
+                        None => log::error!("Navigation task closed"),
+                    }
                 }
 
                 if let Some(steering) = steering_sub.try_recv() {
-                    // last_left_steering = steering.left.into_inner();
-                    // last_right_steering = steering.right.into_inner();
-                    // stream
-                    //     .write_f32_le(last_left_steering)
-                    //     .await
-                    //     .expect("Failed to write steering");
-                    // stream
-                    //     .write_f32_le(last_right_steering)
-                    //     .await
-                    //     .expect("Failed to write steering");
+                    last_left_steering = steering.left.into_inner();
+                    last_right_steering = steering.right.into_inner();
+                    stream
+                        .write_f32_le(last_left_steering)
+                        .await
+                        .expect("Failed to write steering");
+                    stream
+                        .write_f32_le(last_right_steering)
+                        .await
+                        .expect("Failed to write steering");
                 } else {
                     stream
                         .write_f32_le(last_left_steering)
@@ -307,20 +307,20 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 stream.flush().await.expect("Failed to write steering");
 
                 if let Some(path) = path_sub.try_recv() {
-                    // stream
-                    //     .write_u16_le(path.len() as u16)
-                    //     .await
-                    //     .expect("Failed to write path length");
-                    // for point in path.iter() {
-                    //     stream
-                    //         .write_f32_le(point.x)
-                    //         .await
-                    //         .expect("Failed to write point.x");
-                    //     stream
-                    //         .write_f32_le(point.y)
-                    //         .await
-                    //         .expect("Failed to write point.y");
-                    // }
+                    stream
+                        .write_u16_le(path.len() as u16)
+                        .await
+                        .expect("Failed to write path length");
+                    for point in path.iter() {
+                        stream
+                            .write_f32_le(point.x)
+                            .await
+                            .expect("Failed to write point.x");
+                        stream
+                            .write_f32_le(point.z)
+                            .await
+                            .expect("Failed to write point.z");
+                    }
                 } else {
                     stream
                         .write_u16_le(0)
@@ -334,8 +334,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         "telemetry",
     );
 
-    // app.add_node(driver);
-    // app.add_node(pathfinder);
+    app.add_node(driver);
+    app.add_node(pathfinder);
     app.add_node(localizer);
     app.add_node(costmap);
 

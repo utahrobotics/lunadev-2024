@@ -2075,6 +2075,7 @@ dependencies = [
  "interprocess",
  "localization",
  "nalgebra",
+ "navigator",
  "rand_distr",
  "rig",
  "toml",

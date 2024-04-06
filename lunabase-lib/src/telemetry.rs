@@ -443,7 +443,7 @@ impl LunabotConn {
 
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.arm_vel = (arm_vel * 127.0).round() as i8;
+        // controls_packet.arm_vel = (arm_vel * 127.0).round() as i8;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }

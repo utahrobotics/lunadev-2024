@@ -2,7 +2,7 @@
 use std::{sync::Arc, time::Duration};
 
 use drive::Steering;
-use nalgebra::{Point2, UnitVector2, Vector2};
+use nalgebra::{Point3, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
@@ -21,7 +21,7 @@ type Float = f32;
 const PI: Float = std::f64::consts::PI as Float;
 
 pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
-    path_sub: Subscriber<Arc<[Point2<Float>]>>,
+    path_sub: Subscriber<Arc<[Point3<Float>]>>,
     steering_signal: Publisher<Steering>,
     robot_base: RobotBaseRef,
     pub refresh_rate: Duration,
@@ -52,7 +52,7 @@ impl<F: FnMut(Float) -> Float + Send + 'static> DifferentialDriver<F> {
         self.steering_signal.get_ref()
     }
 
-    pub fn create_path_sub(&self) -> DirectSubscription<Arc<[Point2<Float>]>> {
+    pub fn create_path_sub(&self) -> DirectSubscription<Arc<[Point3<Float>]>> {
         self.path_sub.create_subscription()
     }
 }
@@ -90,8 +90,9 @@ where
 
                     let (i, _) = path
                         .iter()
+                        .map(|v| Vector2::new(v.x, v.z))
                         .enumerate()
-                        .map(|(i, x)| (i, (x.coords - position).magnitude_squared()))
+                        .map(|(i, v)| (i, (v - position).magnitude_squared()))
                         .min_by_key(|(_, distance)| NotNan::new(*distance).unwrap())
                         .unwrap();
 
@@ -100,12 +101,15 @@ where
                     }
 
                     let next = path[i + 1];
+                    let next = Vector2::new(next.x, next.z);
 
                     let forward = isometry.get_forward_vector();
                     let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
-                    let travel = (next.cast::<Float>() - position.cast()).coords.normalize();
+                    let travel = (next - position).normalize();
                     let cross = (forward.x * travel.y - forward.y * travel.x).signum();
+                    assert!(!travel.x.is_nan(), "{position:?} {next:?} {path:?}");
+                    assert!(!travel.y.is_nan(), "{position:?} {next:?} {path:?}");
                     let mut angle = forward.angle(&travel);
                     let mut reversing = 1.0;
 
