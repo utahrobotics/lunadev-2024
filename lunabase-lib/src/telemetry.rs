@@ -11,7 +11,7 @@ use std::{
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
-use lunabot::{make_negotiation, ControlsPacket, ImportantMessage};
+use lunabot::{make_negotiation, ArmParameters, ControlsPacket, ImportantMessage};
 use networking::new_server;
 use unros::{
     default_run_options,
@@ -431,19 +431,46 @@ impl LunabotConn {
     }
 
     #[func]
-    fn send_arm_controls(&self, mut arm_vel: f32) {
-        if arm_vel > 1.0 {
-            arm_vel = 1.0;
-            godot_warn!("arm_vel greater than 1!")
-        }
-        if arm_vel < -1.0 {
-            arm_vel = -1.0;
-            godot_warn!("arm_vel lesser than -1!")
-        }
-
+    fn lift_arm(&self) {
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        // controls_packet.arm_vel = (arm_vel * 127.0).round() as i8;
+        controls_packet.arm_params = ArmParameters::LiftArm;
+        shared.controls_data.store(controls_packet);
+        shared.echo_controls.store(true, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn lower_arm(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        let mut controls_packet = shared.controls_data.load();
+        controls_packet.arm_params = ArmParameters::LowerArm;
+        shared.controls_data.store(controls_packet);
+        shared.echo_controls.store(true, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn tilt_bucket_up(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        let mut controls_packet = shared.controls_data.load();
+        controls_packet.arm_params = ArmParameters::TiltUp;
+        shared.controls_data.store(controls_packet);
+        shared.echo_controls.store(true, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn tilt_bucket_down(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        let mut controls_packet = shared.controls_data.load();
+        controls_packet.arm_params = ArmParameters::TiltDown;
+        shared.controls_data.store(controls_packet);
+        shared.echo_controls.store(true, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn stop_arm(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        let mut controls_packet = shared.controls_data.load();
+        controls_packet.arm_params = ArmParameters::Stop;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }

@@ -1,4 +1,7 @@
-use std::{io::{Read, Write}, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio}};
+use std::{
+    io::{Read, Write},
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
+};
 
 const TERMINATOR: &'static [u8] = b">>>END=REP<<<\n";
 
@@ -26,14 +29,12 @@ impl PyRepl {
             .stdin(Stdio::piped())
             .spawn()?;
 
-        Ok(
-            Self {
-                stdin: cmd.stdin.take(),
-                stdout: cmd.stdout.take().unwrap(),
-                stderr: cmd.stderr.take().unwrap(),
-                cmd,
-            }
-        )
+        Ok(Self {
+            stdin: cmd.stdin.take(),
+            stdout: cmd.stdout.take().unwrap(),
+            stderr: cmd.stderr.take().unwrap(),
+            cmd,
+        })
     }
 
     pub fn close(&mut self) -> anyhow::Result<()> {
@@ -46,7 +47,7 @@ impl PyRepl {
         stdin.write_all(code.as_bytes())?;
         stdin.write_all(b"\n")?;
         stdin.flush()?;
-        
+
         let mut returned = vec![];
         let mut buf = [0; 1024];
         loop {

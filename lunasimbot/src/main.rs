@@ -67,7 +67,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         }
     });
 
-    let pathfinder: Pathfinder = Pathfinder::new_with_engine(Default::default(), robot_base.get_ref());
+    let pathfinder: Pathfinder =
+        Pathfinder::new_with_engine(Default::default(), robot_base.get_ref());
     costmap
         .get_costmap_pub()
         .accept_subscription(pathfinder.create_costmap_sub());
@@ -216,7 +217,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
                     let z = stream.read_f32_le().await.expect("Failed to receive point");
-                    
+
                     let mut vec = Vector3::new(x, y, z);
 
                     vec.scale_mut(1.0 + distr.sample(rng.deref_mut()));
@@ -236,7 +237,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 {
                     let x = stream.read_f32_le().await.expect("Failed to receive point");
                     let y = stream.read_f32_le().await.expect("Failed to receive point");
-                    match nav_task.try_schedule_or_closed(Point3::new(x, 0.0, y)).await {
+                    match nav_task
+                        .try_schedule_or_closed(Point3::new(x, 0.0, y))
+                        .await
+                    {
                         Some(Ok(handle)) => {
                             tokio::spawn(async move {
                                 match handle.wait().await {

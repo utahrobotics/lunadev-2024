@@ -48,6 +48,21 @@ impl SerialConnection {
             intrinsics: Default::default(),
         }
     }
+
+    pub fn map_to_string(self) -> SerialConnection<String, String> {
+        let mut output_buf = vec![];
+
+        self.map_input(|msg: String| msg.into_bytes().into())
+            .map_output(move |bytes: Bytes| {
+                output_buf.extend_from_slice(&bytes);
+                if let Ok(msg) = std::str::from_utf8(&output_buf) {
+                    Some(msg.into())
+                } else {
+                    output_buf.clear();
+                    None
+                }
+            })
+    }
 }
 
 impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O> {

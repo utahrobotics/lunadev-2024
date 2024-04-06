@@ -28,12 +28,12 @@ use unros::{
     Application, Node,
 };
 
-use crate::drive::Drive;
+use crate::{actuators::Arms, drive::Drive};
 
+mod actuators;
 mod drive;
 mod imu;
 mod telemetry;
-// mod actuators;
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
@@ -90,18 +90,22 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         20,
     )
     .await?;
-    let steering_sub = Subscriber::new(8);
+
+    let arm_sub = Subscriber::new(8);
     telemetry
-        .steering_pub()
-        .accept_subscription(steering_sub.create_subscription());
-    steering_sub
-        .into_logger(|x| format!("{x:?}"), "steering.logs")
+        .arm_pub()
+        .accept_subscription(arm_sub.create_subscription());
+    arm_sub
+        .into_logger(|x| format!("{x:?}"), "arms.logs")
         .await?;
 
     let drive = Drive::new()?;
     telemetry
         .steering_pub()
         .accept_subscription(drive.get_steering_sub());
+
+    let arms = Arms::new()?;
+    telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
 
     let mut teleop_camera = cameras.remove(0);
     teleop_camera.res_x = 1280;
@@ -198,7 +202,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
             .accept_subscription(localizer.create_imu_sub().set_name("RealSense IMU"));
     }
 
-    let pathfinder: Pathfinder = Pathfinder::new_with_engine(Default::default(), robot_base_ref.clone());
+    let pathfinder: Pathfinder =
+        Pathfinder::new_with_engine(Default::default(), robot_base_ref.clone());
     let driver = DifferentialDriver::new(robot_base_ref.clone());
 
     // pathfinder.get_path_pub().accept_subscription(driver.create_path_sub());
@@ -253,6 +258,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     app.add_node(teleop_camera);
     // app.add_node(imu01);
     app.add_node(drive);
+    app.add_node(arms);
     app.add_node(costmap);
     #[cfg(unix)]
     app.add_node(realsense_camera);

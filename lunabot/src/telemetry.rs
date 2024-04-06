@@ -8,7 +8,9 @@ use std::{
 };
 
 use image::DynamicImage;
-use lunabot::{make_negotiation, ControlsPacket, ImportantMessage, VIDEO_HEIGHT, VIDEO_WIDTH};
+use lunabot::{
+    make_negotiation, ArmParameters, ControlsPacket, ImportantMessage, VIDEO_HEIGHT, VIDEO_WIDTH,
+};
 use navigator::drive::Steering;
 use networking::{
     negotiation::{ChannelNegotiation, Negotiation},
@@ -33,6 +35,7 @@ pub struct Telemetry {
     pub server_addr: SocketAddrV4,
     pub camera_delta: Duration,
     steering_signal: Publisher<Steering>,
+    arm_signal: Publisher<ArmParameters>,
     image_subscriptions: Subscriber<Arc<DynamicImage>>,
     intrinsics: NodeIntrinsics<Self>,
     negotiation: Negotiation<(
@@ -67,6 +70,7 @@ impl Telemetry {
             server_addr,
             steering_signal: Publisher::default(),
             image_subscriptions: Subscriber::new(1),
+            arm_signal: Publisher::default(),
             camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
             intrinsics: Default::default(),
             negotiation: make_negotiation(),
@@ -79,6 +83,10 @@ impl Telemetry {
 
     pub fn steering_pub(&self) -> PublisherRef<Steering> {
         self.steering_signal.get_ref()
+    }
+
+    pub fn arm_pub(&self) -> PublisherRef<ArmParameters> {
+        self.arm_signal.get_ref()
     }
 
     pub fn create_image_subscription(&self) -> DirectSubscription<Arc<DynamicImage>> {
@@ -247,6 +255,7 @@ impl Node for Telemetry {
                             NotNan::new(controls.drive as f32 / 127.0).unwrap(),
                             NotNan::new(controls.steering as f32 / 127.0).unwrap(),
                         ));
+                        self.arm_signal.set(controls.arm_params);
                     }
                 };
 

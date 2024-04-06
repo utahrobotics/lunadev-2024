@@ -15,7 +15,10 @@ use pathfinding::directed::bfs::bfs;
 use rig::RobotBaseRef;
 use simba::scalar::SupersetOf;
 use unros::{
-    anyhow, async_trait, asyncify_run, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, service::{new_service, Service, ServiceHandle}, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, asyncify_run,
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
+    service::{new_service, Service, ServiceHandle},
+    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 use crate::utils::astar;
@@ -76,7 +79,10 @@ pub trait PathfindingEngine<N: RealField>: Send + 'static {
     ) -> Option<Vec<Point3<N>>>;
 }
 
-pub struct Pathfinder<N: RealField + SupersetOf<f32> + Copy = f32, E: PathfindingEngine<N> = DirectPathfinder<N>> {
+pub struct Pathfinder<
+    N: RealField + SupersetOf<f32> + Copy = f32,
+    E: PathfindingEngine<N> = DirectPathfinder<N>,
+> {
     engine: E,
     costmap_sub: Subscriber<Costmap<N>>,
     intrinsics: NodeIntrinsics<Self>,
@@ -113,7 +119,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
     pub fn create_costmap_sub(&self) -> DirectSubscription<Costmap<N>> {
         self.costmap_sub.create_subscription()
     }
-    
+
     pub fn get_path_pub(&self) -> PublisherRef<Arc<[Point3<N>]>> {
         self.path_pub.get_ref()
     }
@@ -198,10 +204,20 @@ pub struct DirectPathfinder<N> {
     phantom: PhantomData<N>,
 }
 
-impl<
-        N
-    > PathfindingEngine<N> for DirectPathfinder<N>
-where N: RealField + Copy + FloatToInt<isize> + FloatToInt<usize> + FloatToInt<u8> + FloatToInt<i64> + SupersetOf<usize> + SupersetOf<isize> + SupersetOf<i64> + SupersetOf<f32> + SupersetOf<u32> {
+impl<N> PathfindingEngine<N> for DirectPathfinder<N>
+where
+    N: RealField
+        + Copy
+        + FloatToInt<isize>
+        + FloatToInt<usize>
+        + FloatToInt<u8>
+        + FloatToInt<i64>
+        + SupersetOf<usize>
+        + SupersetOf<isize>
+        + SupersetOf<i64>
+        + SupersetOf<f32>
+        + SupersetOf<u32>,
+{
     fn pathfind(
         &mut self,
         start: Point3<N>,
@@ -310,13 +326,13 @@ where N: RealField + Copy + FloatToInt<isize> + FloatToInt<usize> + FloatToInt<u
                 .into_iter()
                 .filter_map(|next| {
                     // if costmap.is_global_point_safe(next.into(), agent_radius, max_height_diff) {
-                        Some((
-                            CVec3 {
-                                inner: next,
-                                resolution,
-                            },
-                            1usize,
-                        ))
+                    Some((
+                        CVec3 {
+                            inner: next,
+                            resolution,
+                        },
+                        1usize,
+                    ))
                     // } else {
                     //     None
                     // }
@@ -324,10 +340,14 @@ where N: RealField + Copy + FloatToInt<isize> + FloatToInt<usize> + FloatToInt<u
             },
             |current| {
                 let diff = current.inner - end.coords;
-                let cost: usize = unsafe { (diff.magnitude() / resolution).round().to_int_unchecked() };
+                let cost: usize =
+                    unsafe { (diff.magnitude() / resolution).round().to_int_unchecked() };
                 cost
             },
-            CVec3 { inner: end.coords, resolution }
+            CVec3 {
+                inner: end.coords,
+                resolution,
+            },
         );
 
         // let mut new_path: Vec<Point3<N>> = Vec::with_capacity(path.len());
@@ -361,24 +381,30 @@ fn traverse_to<N>(
     agent_radius: N,
     max_height_diff: N,
     costmap: &Costmap<N>,
-    resolution: N
-) -> bool where N: RealField + FloatToInt<usize> + SupersetOf<usize> + SupersetOf<i64> + SupersetOf<isize> + FloatToInt<isize> + FloatToInt<u8> + FloatToInt<i64> + FloatToInt<isize> + Copy {
+    resolution: N,
+) -> bool
+where
+    N: RealField
+        + FloatToInt<usize>
+        + SupersetOf<usize>
+        + SupersetOf<i64>
+        + SupersetOf<isize>
+        + FloatToInt<isize>
+        + FloatToInt<u8>
+        + FloatToInt<i64>
+        + FloatToInt<isize>
+        + Copy,
+{
     let mut travel = to - from;
     let distance = travel.magnitude();
     travel.unscale_mut(distance);
 
-    let count: usize = unsafe {
-        (distance / resolution).floor().to_int_unchecked()
-    };
+    let count: usize = unsafe { (distance / resolution).floor().to_int_unchecked() };
 
     for i in 1..count {
         let intermediate: Vector3<N> = from + travel * nalgebra::convert::<_, N>(i);
 
-        if !costmap.is_global_point_safe(
-            intermediate.into(),
-            agent_radius,
-            max_height_diff,
-        ) {
+        if !costmap.is_global_point_safe(intermediate.into(), agent_radius, max_height_diff) {
             return false;
         }
     }

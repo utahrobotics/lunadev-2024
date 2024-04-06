@@ -28,18 +28,27 @@ pub fn make_negotiation() -> Negotiation<(
     .unwrap()
 }
 
+#[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Debug)]
+pub enum ArmParameters {
+    TiltUp,
+    TiltDown,
+    Stop,
+    LiftArm,
+    LowerArm,
+    SetArm { tilt_frac: u8, lift_frac: u8 },
+}
+
+impl Default for ArmParameters {
+    fn default() -> Self {
+        ArmParameters::Stop
+    }
+}
+
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Default, Debug)]
 pub struct ControlsPacket {
     pub drive: i8,
     pub steering: i8,
-    pub lift_height: u8,
-    pub tilt_frac: u8,
-}
-
-
-pub struct ArmControls {
-    pub lift_height: f32,
-    pub tilt_frac: f32,
+    pub arm_params: ArmParameters,
 }
 
 #[derive(Debug, Eq, PartialEq, Encode, Decode, Clone, Copy)]

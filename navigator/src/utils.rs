@@ -31,7 +31,7 @@ pub(crate) fn astar<N, C, FN, IN, FH>(
     start: &N,
     mut successors: FN,
     mut heuristic: FH,
-    end: N
+    end: N,
 ) -> (Vec<N>, C)
 where
     N: Eq + Hash + Clone,
@@ -40,9 +40,7 @@ where
     IN: IntoIterator<Item = (N, C)>,
     FH: FnMut(&N) -> C,
 {
-    let success = |current| {
-        current == end
-    };
+    let success = |current| current == end;
     let mut best = None;
     let mut to_see = BinaryHeap::new();
     to_see.push(SmallestCostHolder {

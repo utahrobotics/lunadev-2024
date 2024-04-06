@@ -2,7 +2,9 @@ use navigator::drive::Steering;
 use py_repl::PyRepl;
 use serde::Deserialize;
 use unros::{
-    anyhow, async_trait, get_env, log, pubsub::{subs::DirectSubscription, Subscriber}, setup_logging, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, get_env, log,
+    pubsub::{subs::DirectSubscription, Subscriber},
+    setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
 
 pub struct Drive {
@@ -33,7 +35,10 @@ impl Drive {
         if !msg.trim().is_empty() {
             log::error!("{msg}");
         }
-        msg = vesc.exec(&format!(r#"vesc = Driver("{}", "{}")"#, config.left_port, config.right_port))?;
+        msg = vesc.exec(&format!(
+            r#"vesc = Driver("{}", "{}")"#,
+            config.left_port, config.right_port
+        ))?;
         if !msg.trim().is_empty() {
             log::error!("{msg}");
         }
@@ -73,7 +78,11 @@ impl Node for Drive {
                 let left_modifier = if self.left_invert { -1.0 } else { 1.0 };
                 let right_modifier = if self.right_invert { -1.0 } else { 1.0 };
 
-                let msg = self.vesc.exec(&format!(r#"vesc.set_duty_cycle({}, {})"#, steering.left * left_modifier, steering.right * right_modifier))?;
+                let msg = self.vesc.exec(&format!(
+                    r#"vesc.set_duty_cycle({}, {})"#,
+                    steering.left * left_modifier,
+                    steering.right * right_modifier
+                ))?;
                 if !msg.trim().is_empty() {
                     error!("{msg}");
                 }

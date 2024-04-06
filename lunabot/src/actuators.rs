@@ -1,55 +1,44 @@
-use lunabot::ArmControls;
-use navigator::drive::Steering;
+use lunabot::ArmParameters;
 use serde::Deserialize;
-use serial::{SerialConnection, VescConnection};
+use serial::SerialConnection;
 use unros::{
     anyhow, async_trait, get_env,
     pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber},
-    setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
+    setup_logging, Node, NodeIntrinsics, RuntimeContext,
 };
 
-
 pub struct Arms {
-    steering_sub: Subscriber<ArmControls>,
-    left_conn: SerialConnection<String, f32>,
-    right_vesc: SerialConnection<String, f32>,
+    arm_sub: Subscriber<ArmParameters>,
+    tilt_conn: SerialConnection<String, String>,
+    lift_conn: SerialConnection<String, String>,
     intrinsics: NodeIntrinsics<Self>,
-    left_invert: bool,
-    right_invert: bool,
 }
 
 #[derive(Deserialize)]
-struct DriveConfig {
-    left_port: String,
-    right_port: String,
-
-    #[serde(default)]
-    left_invert: bool,
-    #[serde(default)]
-    right_invert: bool,
+struct ArmConfig {
+    tilt_port: String,
+    lift_port: String,
 }
 
 impl Arms {
     pub fn new() -> anyhow::Result<Self> {
-        let config: DriveConfig = get_env()?;
+        let config: ArmConfig = get_env()?;
         Ok(Self {
-            steering_sub: Subscriber::new(4),
+            arm_sub: Subscriber::new(4),
             intrinsics: Default::default(),
-            left_vesc: VescConnection::new(SerialConnection::new(config.left_port, 115200, true)),
-            right_vesc: VescConnection::new(SerialConnection::new(config.right_port, 115200, true)),
-            left_invert: config.left_invert,
-            right_invert: config.right_invert,
+            tilt_conn: SerialConnection::new(config.tilt_port, 115200, true).map_to_string(),
+            lift_conn: SerialConnection::new(config.lift_port, 115200, true).map_to_string(),
         })
     }
 
-    pub fn get_steering_sub(&self) -> DirectSubscription<Steering> {
-        self.steering_sub.create_subscription()
+    pub fn get_arm_sub(&self) -> DirectSubscription<ArmParameters> {
+        self.arm_sub.create_subscription()
     }
 }
 
 #[async_trait]
 impl Node for Arms {
-    const DEFAULT_NAME: &'static str = "drive";
+    const DEFAULT_NAME: &'static str = "arms";
 
     fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
         &mut self.intrinsics
@@ -58,32 +47,23 @@ impl Node for Arms {
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
-        let mut left_duty = MonoPublisher::from(self.left_vesc.get_duty_sub());
-        let mut right_duty = MonoPublisher::from(self.right_vesc.get_duty_sub());
+        let mut tilt_repl = MonoPublisher::from(self.tilt_conn.message_to_send_sub());
+        let mut lift_repl = MonoPublisher::from(self.lift_conn.message_to_send_sub());
 
-        let steering_fut = async {
-            loop {
-                let steering = self.steering_sub.recv().await;
+        loop {
+            let params = self.arm_sub.recv().await;
 
-                let left_modifier = if self.left_invert { -1.0 } else { 1.0 };
-                let right_modifier = if self.right_invert { -1.0 } else { 1.0 };
-
-                left_duty.set((steering.left * i32::MAX as f32 * left_modifier).round() as i32);
-                right_duty.set((steering.right * i32::MAX as f32 * right_modifier).round() as i32);
+            match params {
+                ArmParameters::TiltUp => tilt_repl.set("r()\r".into()),
+                ArmParameters::TiltDown => tilt_repl.set("e()\r".into()),
+                ArmParameters::Stop => {
+                    tilt_repl.set("s()\r".into());
+                    lift_repl.set("s()\r".into());
+                }
+                ArmParameters::LiftArm => lift_repl.set("e()\r".into()),
+                ArmParameters::LowerArm => lift_repl.set("r()\r".into()),
+                ArmParameters::SetArm { .. } => todo!(),
             }
-        };
-
-        self.left_vesc
-            .get_intrinsics()
-            .manually_run("left-vesc".into());
-        self.right_vesc
-            .get_intrinsics()
-            .manually_run("right-vesc".into());
-
-        tokio::select! {
-            res = steering_fut => res,
-            res = self.left_vesc.run(context.clone()) => res,
-            res = self.right_vesc.run(context.clone()) => res
         }
     }
 }
