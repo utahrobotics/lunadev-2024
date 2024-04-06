@@ -59,7 +59,7 @@ impl PyRepl {
                 break;
             }
         }
-        returned.drain((returned.len() - TERMINATOR.len() - 1)..);
+        returned.drain((returned.len() - TERMINATOR.len())..);
         String::from_utf8(returned).map_err(Into::into)
     }
 

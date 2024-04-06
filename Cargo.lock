@@ -2056,6 +2056,7 @@ dependencies = [
  "navigator",
  "networking",
  "ordered-float",
+ "py-repl",
  "realsense",
  "rig",
  "serde",

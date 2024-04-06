@@ -24,6 +24,7 @@ spin_sleep = { workspace = true }
 image = { workspace = true }
 serde = { workspace = true }
 ordered-float = { workspace = true }
+py-repl = { path = "../py-repl" }
 
 [target.'cfg(unix)'.dependencies]
 realsense = { path = "../realsense" }
