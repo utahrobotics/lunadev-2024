@@ -68,7 +68,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     });
 
     let pathfinder: Pathfinder =
-        Pathfinder::new_with_engine(Default::default(), robot_base.get_ref());
+        Pathfinder::new_with_engine(0.5, Default::default(), robot_base.get_ref());
     costmap
         .get_costmap_pub()
         .accept_subscription(pathfinder.create_costmap_sub());

@@ -203,7 +203,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     }
 
     let pathfinder: Pathfinder =
-        Pathfinder::new_with_engine(Default::default(), robot_base_ref.clone());
+        Pathfinder::new_with_engine(0.7, Default::default(), robot_base_ref.clone());
     let driver = DifferentialDriver::new(robot_base_ref.clone());
 
     // pathfinder.get_path_pub().accept_subscription(driver.create_path_sub());

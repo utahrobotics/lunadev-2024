@@ -1,12 +1,11 @@
-#![feature(new_uninit, ptr_metadata, alloc_layout_extra, convert_float_to_int)]
+#![feature(new_uninit, ptr_metadata, alloc_layout_extra)]
 
-use std::{
-    convert::FloatToInt,
+use std::
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
-    },
-};
+    };
+
 
 use dst_init::{dst, BoxExt, Slice, SliceExt};
 use image::GrayImage;
@@ -59,12 +58,10 @@ pub struct Costmap<N = f64> {
 impl<
         N: RealField
             + Copy
-            + FloatToInt<isize>
-            + FloatToInt<usize>
-            + FloatToInt<u8>
             + SupersetOf<usize>
             + SupersetOf<isize>
-            + SupersetOf<i64>,
+            + SupersetOf<i64>
+            + SupersetOf<u8>,
     > Costmap<N>
 {
     pub fn is_global_point_safe(&self, point: Point3<N>, radius: N, max_diff: N) -> bool {
@@ -73,12 +70,12 @@ impl<
 
         for frame in self.inner.frames.iter() {
             let point3d = frame.isometry.inverse_transform_point(&point);
-            let mut point2d = unsafe {
+            let mut point2d = 
                 Point2::<isize>::new(
-                    (point3d.x / frame.resolution).round().to_int_unchecked(),
-                    (point3d.z / frame.resolution).round().to_int_unchecked(),
+                    (point3d.x / frame.resolution).round().to_subset_unchecked(),
+                    (point3d.z / frame.resolution).round().to_subset_unchecked(),
                 )
-            };
+            ;
             point2d.x -= frame.min_x;
             point2d.y -= frame.min_y;
             if point2d.x < 0 || point2d.y < 0 {
@@ -86,7 +83,7 @@ impl<
             }
             let point2d = Point2::new(point2d.x as usize, point2d.y as usize);
             let mut radius_int: usize =
-                unsafe { (radius / frame.resolution).round().to_int_unchecked() };
+                (radius / frame.resolution).round().to_subset_unchecked();
             if radius_int == 0 {
                 radius_int = 1;
             }
@@ -101,11 +98,11 @@ impl<
                     .unwrap(),
             );
 
-            let threshold: usize = unsafe {
+            let threshold: usize = 
                 (self.inner.threshold * nalgebra::convert(frame.max_density))
                     .round()
-                    .to_int_unchecked()
-            };
+                    .to_subset_unchecked()
+            ;
 
             for cell in cells {
                 let anchor = cell.anchor();
@@ -190,12 +187,12 @@ impl<
                         min_height = min_height.min(frame.min_height);
 
                         let point3d = frame.isometry.inverse_transform_point(&transformed_point);
-                        let mut point2d = unsafe {
+                        let mut point2d = 
                             Point2::<isize>::new(
-                                (point3d.x / frame.resolution).round().to_int_unchecked(),
-                                (point3d.z / frame.resolution).round().to_int_unchecked(),
+                                (point3d.x / frame.resolution).round().to_subset_unchecked(),
+                                (point3d.z / frame.resolution).round().to_subset_unchecked(),
                             )
-                        };
+                        ;
                         point2d.x -= frame.min_x;
                         point2d.y -= frame.min_y;
                         if point2d.x < 0 || point2d.y < 0 {
@@ -212,11 +209,11 @@ impl<
                                 .unwrap(),
                         );
 
-                        let threshold: usize = unsafe {
+                        let threshold: usize = 
                             (self.inner.threshold * nalgebra::convert(frame.max_density))
                                 .round()
-                                .to_int_unchecked()
-                        };
+                                .to_subset_unchecked()
+                        ;
 
                         if let Some(cell) = cells.next() {
                             let cell = cell.value_ref();
@@ -249,7 +246,7 @@ impl<
             .into_iter()
             .map(|(height, _, _)| {
                 let height = height.abs() / divisor * nalgebra::convert(255.0);
-                unsafe { height.round().to_int_unchecked() }
+                height.round().to_subset_unchecked()
             })
             .collect();
 
@@ -277,7 +274,7 @@ impl CostmapGenerator {
     }
 }
 
-impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<usize>>
+impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>>
     CostmapGenerator<N>
 {
     pub fn create_points_sub<T>(&self, resolution: N) -> impl Subscription<Item = Points<T>>
@@ -298,12 +295,12 @@ impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<us
                         );
                         p = iso.transform_point(&p);
 
-                        let pt = unsafe {
+                        let pt =
                             Point2::<isize>::new(
-                                (p.x / resolution).round().to_int_unchecked(),
-                                (p.z / resolution).round().to_int_unchecked(),
+                                (p.x / resolution).round().to_subset_unchecked(),
+                                (p.z / resolution).round().to_subset_unchecked(),
                             )
-                        };
+                        ;
                         (pt, p.y)
                     })
                     .collect();
@@ -342,12 +339,12 @@ impl<N: RealField + FloatToInt<isize> + FloatToInt<usize> + Copy + SupersetOf<us
                 let depth = if max_range == 0 {
                     1usize
                 } else {
-                    unsafe {
+                    
                         nalgebra::convert::<_, N>(max_range)
                             .log2()
                             .ceil()
-                            .to_int_unchecked()
-                    }
+                            .to_subset_unchecked()
+                    
                 };
                 let mut max_density = 0;
 
