@@ -302,7 +302,7 @@ impl INode for LunabotConn {
                         if shared.echo_controls.load(Ordering::Relaxed) {
                             controls_pub.set(shared.controls_data.load());
                         }
-                        
+
                         if let Some(inner) = &mut ffplay_stderr {
                             if inner.is_finished() {
                                 if let Err(e) = ffplay_stderr.take().unwrap().join().unwrap() {
@@ -317,7 +317,7 @@ impl INode for LunabotConn {
                             last_enable_camera = current_enable_camera;
                             if current_enable_camera {
                                 important_pub.set(ImportantMessage::EnableCamera);
-                                
+
                                 if ffplay_stderr.is_none() {
                                     make_ffplay!();
                                 }

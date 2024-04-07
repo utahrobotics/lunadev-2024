@@ -1,11 +1,9 @@
 #![feature(new_uninit, ptr_metadata, alloc_layout_extra)]
 
-use std::
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
-
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use dst_init::{dst, BoxExt, Slice, SliceExt};
 use image::GrayImage;
@@ -56,12 +54,7 @@ pub struct Costmap<N = f64> {
 }
 
 impl<
-        N: RealField
-            + Copy
-            + SupersetOf<usize>
-            + SupersetOf<isize>
-            + SupersetOf<i64>
-            + SupersetOf<u8>,
+        N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize> + SupersetOf<i64> + SupersetOf<u8>,
     > Costmap<N>
 {
     pub fn is_global_point_safe(&self, point: Point3<N>, radius: N, max_diff: N) -> bool {
@@ -70,20 +63,17 @@ impl<
 
         for frame in self.inner.frames.iter() {
             let point3d = frame.isometry.inverse_transform_point(&point);
-            let mut point2d = 
-                Point2::<isize>::new(
-                    (point3d.x / frame.resolution).round().to_subset_unchecked(),
-                    (point3d.z / frame.resolution).round().to_subset_unchecked(),
-                )
-            ;
+            let mut point2d = Point2::<isize>::new(
+                (point3d.x / frame.resolution).round().to_subset_unchecked(),
+                (point3d.z / frame.resolution).round().to_subset_unchecked(),
+            );
             point2d.x -= frame.min_x;
             point2d.y -= frame.min_y;
             if point2d.x < 0 || point2d.y < 0 {
                 continue;
             }
             let point2d = Point2::new(point2d.x as usize, point2d.y as usize);
-            let mut radius_int: usize =
-                (radius / frame.resolution).round().to_subset_unchecked();
+            let mut radius_int: usize = (radius / frame.resolution).round().to_subset_unchecked();
             if radius_int == 0 {
                 radius_int = 1;
             }
@@ -98,11 +88,9 @@ impl<
                     .unwrap(),
             );
 
-            let threshold: usize = 
-                (self.inner.threshold * nalgebra::convert(frame.max_density))
-                    .round()
-                    .to_subset_unchecked()
-            ;
+            let threshold: usize = (self.inner.threshold * nalgebra::convert(frame.max_density))
+                .round()
+                .to_subset_unchecked();
 
             for cell in cells {
                 let anchor = cell.anchor();
@@ -187,12 +175,10 @@ impl<
                         min_height = min_height.min(frame.min_height);
 
                         let point3d = frame.isometry.inverse_transform_point(&transformed_point);
-                        let mut point2d = 
-                            Point2::<isize>::new(
-                                (point3d.x / frame.resolution).round().to_subset_unchecked(),
-                                (point3d.z / frame.resolution).round().to_subset_unchecked(),
-                            )
-                        ;
+                        let mut point2d = Point2::<isize>::new(
+                            (point3d.x / frame.resolution).round().to_subset_unchecked(),
+                            (point3d.z / frame.resolution).round().to_subset_unchecked(),
+                        );
                         point2d.x -= frame.min_x;
                         point2d.y -= frame.min_y;
                         if point2d.x < 0 || point2d.y < 0 {
@@ -209,11 +195,10 @@ impl<
                                 .unwrap(),
                         );
 
-                        let threshold: usize = 
-                            (self.inner.threshold * nalgebra::convert(frame.max_density))
-                                .round()
-                                .to_subset_unchecked()
-                        ;
+                        let threshold: usize = (self.inner.threshold
+                            * nalgebra::convert(frame.max_density))
+                        .round()
+                        .to_subset_unchecked();
 
                         if let Some(cell) = cells.next() {
                             let cell = cell.value_ref();
@@ -274,9 +259,7 @@ impl CostmapGenerator {
     }
 }
 
-impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>>
-    CostmapGenerator<N>
-{
+impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerator<N> {
     pub fn create_points_sub<T>(&self, resolution: N) -> impl Subscription<Item = Points<T>>
     where
         T: IntoIterator<Item = Point3<N>>,
@@ -295,12 +278,10 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>>
                         );
                         p = iso.transform_point(&p);
 
-                        let pt =
-                            Point2::<isize>::new(
-                                (p.x / resolution).round().to_subset_unchecked(),
-                                (p.z / resolution).round().to_subset_unchecked(),
-                            )
-                        ;
+                        let pt = Point2::<isize>::new(
+                            (p.x / resolution).round().to_subset_unchecked(),
+                            (p.z / resolution).round().to_subset_unchecked(),
+                        );
                         (pt, p.y)
                     })
                     .collect();
@@ -339,12 +320,10 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>>
                 let depth = if max_range == 0 {
                     1usize
                 } else {
-                    
-                        nalgebra::convert::<_, N>(max_range)
-                            .log2()
-                            .ceil()
-                            .to_subset_unchecked()
-                    
+                    nalgebra::convert::<_, N>(max_range)
+                        .log2()
+                        .ceil()
+                        .to_subset_unchecked()
                 };
                 let mut max_density = 0;
 

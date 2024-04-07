@@ -1,10 +1,8 @@
 use std::{
-    marker::PhantomData,
-    sync::{
+    f64::consts::FRAC_1_SQRT_2, marker::PhantomData, sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
-    },
-    time::{Duration, Instant},
+    }, time::{Duration, Instant}
 };
 
 use costmap::Costmap;
@@ -18,7 +16,6 @@ use unros::{
     service::{new_service, Service, ServiceHandle},
     setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
-
 
 #[derive(Debug)]
 pub enum NavigationError {
@@ -108,7 +105,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
             path_pub: Publisher::default(),
             completion_distance: nalgebra::convert(0.15),
             refresh_rate: Duration::from_millis(50),
-            resolution: nalgebra::convert(0.1),
+            resolution: agent_radius,
             agent_radius,
             max_height_diff: nalgebra::convert(0.15),
         }
@@ -179,7 +176,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Node for Pa
                     self.resolution,
                     self.agent_radius,
                     self.max_height_diff,
-                    &context
+                    &context,
                 ) {
                     self.path_pub.set(path.into_boxed_slice().into());
                     // pending_task.finish(Err(NavigationError::NoPath));
@@ -245,18 +242,22 @@ where
                         next += current.inner;
                         if costmap.is_global_point_safe(next.into(), agent_radius, max_height_diff)
                         {
-                            Some(
-                                CVec3 {
-                                    inner: next,
-                                    resolution,
-                                }
-                            )
+                            Some(CVec3 {
+                                inner: next,
+                                resolution,
+                            })
                         } else {
                             None
                         }
                     })
                 },
-                |current| costmap.is_global_point_safe(current.inner.into(), agent_radius, max_height_diff),
+                |current| {
+                    costmap.is_global_point_safe(
+                        current.inner.into(),
+                        agent_radius,
+                        max_height_diff,
+                    )
+                },
             ) {
                 start = path.pop().unwrap().inner;
                 pre_path = path;
@@ -272,28 +273,34 @@ where
                 resolution,
             },
             |current| {
-                if !too_long && start_time.elapsed().as_secs() >= 2 {
-                    too_long = true;
-                }
+                // if !too_long && start_time.elapsed().as_secs() >= 2 {
+                //     too_long = true;
+                // }
                 let current = *current;
                 [
                     Vector3::new(-resolution, N::zero(), N::zero()),
                     Vector3::new(resolution, N::zero(), N::zero()),
                     Vector3::new(N::zero(), N::zero(), -resolution),
                     Vector3::new(N::zero(), N::zero(), resolution),
+                    // Vector3::new(-resolution, N::zero(), resolution) * nalgebra::convert::<_, N>(FRAC_1_SQRT_2),
+                    // Vector3::new(resolution, N::zero(), resolution) * nalgebra::convert::<_, N>(FRAC_1_SQRT_2),
+                    // Vector3::new(resolution, N::zero(), -resolution) * nalgebra::convert::<_, N>(FRAC_1_SQRT_2),
+                    // Vector3::new(-resolution, N::zero(), -resolution) * nalgebra::convert::<_, N>(FRAC_1_SQRT_2),
                 ]
                 .into_iter()
                 .filter(move |_| !too_long)
                 .filter_map(move |mut next| {
                     next += current.inner;
+                    println!("{next:?} {}", (next - end.coords).magnitude());
+                    std::thread::sleep(std::time::Duration::from_millis(100));
                     if costmap.is_global_point_safe(next.into(), agent_radius, max_height_diff) {
-                    Some((
-                        CVec3 {
-                            inner: next,
-                            resolution,
-                        },
-                        1usize,
-                    ))
+                        Some((
+                            CVec3 {
+                                inner: next,
+                                resolution,
+                            },
+                            1usize,
+                        ))
                     } else {
                         None
                     }
@@ -301,14 +308,14 @@ where
                 .chain(std::iter::once(()).filter_map(move |()| {
                     let mut diff = current.inner - end.coords;
                     diff.y = N::zero();
-                    let distance = diff.magnitude() / resolution;
-                    if distance <= N::one() {
+                    let distance = diff.magnitude();
+                    if distance <= resolution {
                         Some((
                             CVec3 {
                                 inner: end.coords,
                                 resolution,
                             },
-                            distance.round().to_subset_unchecked(),
+                            (distance / resolution).round().to_subset_unchecked(),
                         ))
                     } else {
                         None
@@ -318,14 +325,17 @@ where
             |current| {
                 let mut diff = current.inner - end.coords;
                 diff.y = N::zero();
-                let cost: usize =
-                    (diff.magnitude() / resolution).round().to_subset_unchecked();
-                cost
+                let cost: usize = (diff.magnitude() / resolution)
+                    .round()
+                    .to_subset_unchecked();
+                cost / 2
             },
-            |current| current ==
-            &CVec3 {
-                inner: end.coords,
-                resolution,
+            |current| {
+                current
+                    == &CVec3 {
+                        inner: end.coords,
+                        resolution,
+                    }
             },
         );
 
@@ -338,14 +348,21 @@ where
         path.append(&mut post_path);
 
         let mut new_path: Vec<Point3<N>> = Vec::with_capacity(path.len());
-        let mut path = path.into_iter().into_iter().map(|x| x.inner.into());
+        let mut path = path.into_iter().map(|x| x.inner.into());
 
         let mut start = path.next().unwrap();
         new_path.push(start);
         let mut last = path.next().unwrap();
 
         for next in path {
-            if traverse_to(start.coords, next.coords, agent_radius, max_height_diff, &costmap, resolution) {
+            if traverse_to(
+                start.coords,
+                next.coords,
+                agent_radius,
+                max_height_diff,
+                &costmap,
+                resolution,
+            ) {
                 last = next;
             } else {
                 new_path.push(last);
@@ -357,7 +374,6 @@ where
         new_path.push(end);
 
         Some(new_path)
-        // Some(path.into_iter().map(|x| x.inner.into()).collect())
     }
 }
 
@@ -371,12 +387,7 @@ fn traverse_to<N>(
     resolution: N,
 ) -> bool
 where
-    N: RealField
-        + SupersetOf<usize>
-        + SupersetOf<i64>
-        + SupersetOf<isize>
-        + SupersetOf<u8>
-        + Copy,
+    N: RealField + SupersetOf<usize> + SupersetOf<i64> + SupersetOf<isize> + SupersetOf<u8> + Copy,
 {
     let mut travel = to - from;
     let distance = travel.magnitude();
@@ -403,18 +414,18 @@ struct CVec3<T: RealField> {
 
 impl<T: RealField + SupersetOf<i64> + Copy> PartialEq for CVec3<T> {
     fn eq(&self, other: &Self) -> bool {
-            let self_x: i64 = (self.inner.x / self.resolution).to_subset_unchecked();
-            let self_z: i64 = (self.inner.z / self.resolution).to_subset_unchecked();
-            let other_x: i64 = (other.inner.x / self.resolution).to_subset_unchecked();
-            let other_z: i64 = (other.inner.z / self.resolution).to_subset_unchecked();
+        let self_x: i64 = (self.inner.x / self.resolution).to_subset_unchecked();
+        let self_z: i64 = (self.inner.z / self.resolution).to_subset_unchecked();
+        let other_x: i64 = (other.inner.x / self.resolution).to_subset_unchecked();
+        let other_z: i64 = (other.inner.z / self.resolution).to_subset_unchecked();
 
-            self_x == other_x && self_z == other_z
+        self_x == other_x && self_z == other_z
     }
 }
 
 impl<T: RealField + SupersetOf<i64> + Copy> std::hash::Hash for CVec3<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-            state.write_i64((self.inner.x / self.resolution).to_subset_unchecked());
+        state.write_i64((self.inner.x / self.resolution).to_subset_unchecked());
         state.write_i64((self.inner.z / self.resolution).to_subset_unchecked());
     }
 }
