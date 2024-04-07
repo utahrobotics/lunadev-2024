@@ -266,6 +266,7 @@ where
 
         let start_time = Instant::now();
         let mut too_long = false;
+        let mut out_of_bounds = false;
 
         let result = astar(
             &CVec3 {
@@ -273,9 +274,9 @@ where
                 resolution,
             },
             |current| {
-                // if !too_long && start_time.elapsed().as_secs() >= 2 {
-                //     too_long = true;
-                // }
+                if !too_long && start_time.elapsed().as_secs() >= 2 {
+                    too_long = true;
+                }
                 let current = *current;
                 [
                     Vector3::new(-resolution, N::zero(), N::zero()),
@@ -291,8 +292,8 @@ where
                 .filter(move |_| !too_long)
                 .filter_map(move |mut next| {
                     next += current.inner;
-                    println!("{next:?} {}", (next - end.coords).magnitude());
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    // println!("{next:?} {}", (next - end.coords).magnitude());
+                    // std::thread::sleep(std::time::Duration::from_millis(100));
                     if costmap.is_global_point_safe(next.into(), agent_radius, max_height_diff) {
                         Some((
                             CVec3 {
@@ -331,11 +332,16 @@ where
                 cost / 2
             },
             |current| {
-                current
-                    == &CVec3 {
-                        inner: end.coords,
-                        resolution,
-                    }
+                if current == &(CVec3 { inner: end.coords, resolution }) {
+                    true
+                }
+                else if !costmap.is_global_point_in_bounds(current.inner.into()) {
+                    out_of_bounds = true;
+                    true
+                }
+                else {
+                    false
+                }
             },
         );
 
@@ -344,6 +350,14 @@ where
         }
 
         let (mut post_path, _distance) = result?;
+
+        if post_path.len() == 1 {
+            post_path.push(CVec3 {
+                inner: end.coords,
+                resolution,
+            });
+        }
+
         let mut path = pre_path;
         path.append(&mut post_path);
 
@@ -389,6 +403,9 @@ fn traverse_to<N>(
 where
     N: RealField + SupersetOf<usize> + SupersetOf<i64> + SupersetOf<isize> + SupersetOf<u8> + Copy,
 {
+    if !costmap.is_global_point_in_bounds(to.into()) {
+        return true;
+    }
     let mut travel = to - from;
     let distance = travel.magnitude();
     travel.unscale_mut(distance);
