@@ -23,6 +23,8 @@ use rand::{rngs::SmallRng, Rng};
 use rand_distr::{Distribution, Normal};
 use rig::{RobotBase, RobotElementRef};
 use smach::{State, StateResult};
+use unros::rayon::iter::IndexedParallelIterator;
+use unros::rayon::prelude::ParallelSliceMut;
 use unros::{
     anyhow, async_trait,
     pubsub::{subs::DirectSubscription, Subscriber},
@@ -33,8 +35,6 @@ use unros::{
     rng::quick_rng,
     setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
 };
-use unros::rayon::prelude::ParallelSliceMut;
-use unros::rayon::iter::IndexedParallelIterator;
 use utils::UnorderedQueue;
 
 pub mod frames;
@@ -330,7 +330,8 @@ async fn run_localizer<N: Float>(
                 position_weight: default_weight,
                 orientation: bb.start_orientation,
                 orientation_weight: default_weight,
-                linear_velocity: random_unit_vector(&mut rng).scale(nconvert(trans_distr.sample(rng.deref_mut()))),
+                linear_velocity: random_unit_vector(&mut rng)
+                    .scale(nconvert(trans_distr.sample(rng.deref_mut()))),
                 linear_velocity_weight: default_weight,
                 angular_velocity: Default::default(),
                 angular_velocity_weight: default_weight,
@@ -397,7 +398,7 @@ async fn run_localizer<N: Float>(
                         let count = (nconvert::<_, N>(particles.len()) * bb.undeprivation_factor).ceil();
                         let corrective_weight = (bb.minimum_unnormalized_weight - sum) / count;
                         let count: usize = count.to_subset_unchecked();
-                        
+
                         let distr = Normal::new(0.0, std_dev.to_f32()).unwrap();
                         particles.par_iter_mut().take(count).for_each(|p| {
                             let mut rng = quick_rng();
@@ -410,7 +411,7 @@ async fn run_localizer<N: Float>(
                                 p.linear_acceleration_weight /= sum;
                             });
                         }
-                    
+
                 }
 
                 {
@@ -433,7 +434,7 @@ async fn run_localizer<N: Float>(
                         let count = (nconvert::<_, N>(particles.len()) * bb.undeprivation_factor).ceil();
                         let corrective_weight = (bb.minimum_unnormalized_weight - sum) / count;
                         let count: usize = count.to_subset_unchecked();
-                        
+
                         let distr = Normal::new(0.0, std_dev.to_f32()).unwrap();
                         particles.par_iter_mut().take(count).for_each(|p| {
                             let mut rng = quick_rng();
@@ -471,20 +472,20 @@ async fn run_localizer<N: Float>(
                             let count = (nconvert::<_, N>(particles.len()) * bb.undeprivation_factor).ceil();
                             let corrective_weight = (bb.minimum_unnormalized_weight - sum) / count;
                             let count: usize = count.to_subset_unchecked();
-                            
+
                             let distr = Normal::new(0.0, std_dev.to_f32()).unwrap();
                             particles.par_iter_mut().take(count).for_each(|p| {
                                 let mut rng = quick_rng();
                                 p.position = frame.position.coords + random_unit_vector(&mut rng).scale(nconvert(distr.sample(rng.deref_mut())));
                                 p.position_weight += corrective_weight;
                             });
-                            
+
                     sum =bb.minimum_unnormalized_weight;
                         }
                         particles.par_iter_mut().for_each(|p| {
                             p.position_weight /= sum;
                         });
-                    
+
                 }
             }
             mut frame = bb.velocity_sub.recv() => {
@@ -509,7 +510,7 @@ async fn run_localizer<N: Float>(
                     let count = (nconvert::<_, N>(particles.len()) * bb.undeprivation_factor).ceil();
                     let corrective_weight = (bb.minimum_unnormalized_weight - sum) / count;
                     let count: usize = count.to_subset_unchecked();
-                    
+
                     let distr = Normal::new(0.0, std_dev.to_f32()).unwrap();
                     particles.par_iter_mut().take(count).for_each(|p| {
                         let mut rng = quick_rng();
@@ -518,14 +519,14 @@ async fn run_localizer<N: Float>(
                     });
                     sum =bb.minimum_unnormalized_weight;
                 }
-                
+
                         particles.par_iter_mut().for_each(|p| {
                             // if quick_rng().gen_bool(0.002) {
                             //     println!("{}", p.linear_velocity_weight);
                             // }
                             p.linear_velocity_weight /= sum;
                         });
-                    
+
                 }
             }
             mut frame = bb.orientation_sub.recv() => {
@@ -552,7 +553,7 @@ async fn run_localizer<N: Float>(
                     let count = (nconvert::<_, N>(particles.len()) * bb.undeprivation_factor).ceil();
                     let corrective_weight = (bb.minimum_unnormalized_weight - sum) / count;
                     let count: usize = count.to_subset_unchecked();
-                    
+
                     let distr = Normal::new(0.0, std_dev.to_f32()).unwrap();
                     particles.par_iter_mut().take(count).for_each(|p| {
                         let mut rng = quick_rng();
@@ -581,7 +582,11 @@ async fn run_localizer<N: Float>(
                             acceleration_weights.push((p.linear_acceleration, running_weight));
                             running_weight += p.linear_acceleration_weight;
                         });
-                        assert!((running_weight - N::one()).abs() < nconvert(1e-5), "{}", (running_weight - N::one()).abs());
+                        assert!(
+                            (running_weight - N::one()).abs() < nconvert(1e-5),
+                            "{}",
+                            (running_weight - N::one()).abs()
+                        );
                     },
                     || {
                         let mut running_weight = N::zero();
@@ -590,7 +595,11 @@ async fn run_localizer<N: Float>(
                             linear_velocity_weights.push((p.linear_velocity, running_weight));
                             running_weight += p.linear_velocity_weight;
                         });
-                        assert!((running_weight - N::one()).abs() < nconvert(1e-5), "{}", (running_weight - N::one()).abs());
+                        assert!(
+                            (running_weight - N::one()).abs() < nconvert(1e-5),
+                            "{}",
+                            (running_weight - N::one()).abs()
+                        );
                     },
                 );
             },
@@ -603,7 +612,11 @@ async fn run_localizer<N: Float>(
                             position_weights.push((p.position, running_weight));
                             running_weight += p.position_weight;
                         });
-                        assert!((running_weight - N::one()).abs() < nconvert(1e-5), "{}", (running_weight - N::one()).abs());
+                        assert!(
+                            (running_weight - N::one()).abs() < nconvert(1e-5),
+                            "{}",
+                            (running_weight - N::one()).abs()
+                        );
                     },
                     || {
                         join(
@@ -615,7 +628,11 @@ async fn run_localizer<N: Float>(
                                         .push((p.angular_velocity, running_weight));
                                     running_weight += p.angular_velocity_weight;
                                 });
-                                assert!((running_weight - N::one()).abs() < nconvert(1e-5), "{}", (running_weight - N::one()).abs());
+                                assert!(
+                                    (running_weight - N::one()).abs() < nconvert(1e-5),
+                                    "{}",
+                                    (running_weight - N::one()).abs()
+                                );
                             },
                             || {
                                 let mut running_weight = N::zero();
@@ -624,7 +641,11 @@ async fn run_localizer<N: Float>(
                                     orientation_weights.push((p.orientation, running_weight));
                                     running_weight += p.orientation_weight;
                                 });
-                                assert!((running_weight - N::one()).abs() < nconvert(1e-5), "{}", (running_weight - N::one()).abs());
+                                assert!(
+                                    (running_weight - N::one()).abs() < nconvert(1e-5),
+                                    "{}",
+                                    (running_weight - N::one()).abs()
+                                );
                             },
                         )
                     },
@@ -678,8 +699,7 @@ async fn run_localizer<N: Float>(
                     let distr = Normal::new(0.0, mean_std_dev.to_f32()).unwrap();
                     let scale: N = nconvert(distr.sample(rng.deref_mut()));
                     // println!("{scale}");
-                    p.linear_acceleration +=
-                        random_unit_vector(&mut rng).scale(scale);
+                    p.linear_acceleration += random_unit_vector(&mut rng).scale(scale);
                 },
                 || {
                     let mut rng = quick_rng();
@@ -690,7 +710,9 @@ async fn run_localizer<N: Float>(
                             sample = nconvert(rng.gen_range(0.0..1.0f32));
                             for (ang_vel, weight) in angular_velocity_weights.iter().rev() {
                                 if sample >= *weight {
-                                    p.orientation = UnitQuaternion::default().try_slerp(ang_vel, delta, nconvert(f32::EPSILON)).unwrap_or_default()
+                                    p.orientation = UnitQuaternion::default()
+                                        .try_slerp(ang_vel, delta, nconvert(f32::EPSILON))
+                                        .unwrap_or_default()
                                         * orientation;
                                     break;
                                 }
