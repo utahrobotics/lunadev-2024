@@ -58,6 +58,7 @@ impl<N: Float> Localizer<N> {
                 recalibrate_sub: Subscriber::new(1),
                 minimum_unnormalized_weight: nconvert(0.6),
                 undeprivation_factor: nconvert(0.05),
+                likelihood_table: LikelihoodTable::default(),
                 imu_sub: Subscriber::new(1),
                 position_sub: Subscriber::new(1),
                 orientation_sub: Subscriber::new(1),
@@ -118,6 +119,27 @@ struct CalibratedImu<N: Float> {
     angular_velocity_bias: UnitQuaternion<N>,
 }
 
+pub struct LikelihoodTable<N: Float> {
+    pub position: Box<dyn Fn(Vector3<N>) -> N + Send + Sync>,
+    pub linear_velocity: Box<dyn Fn(Vector3<N>) -> N + Send + Sync>,
+    pub linear_acceleration: Box<dyn Fn(Vector3<N>) -> N + Send + Sync>,
+
+    pub orientation: Box<dyn Fn(UnitQuaternion<N>) -> N + Send + Sync>,
+    pub angular_velocity: Box<dyn Fn(UnitQuaternion<N>) -> N + Send + Sync>,
+}
+
+impl<N: Float> Default for LikelihoodTable<N> {
+    fn default() -> Self {
+        Self {
+            position: Box::new(|_| N::one()),
+            linear_velocity: Box::new(|_| N::one()),
+            linear_acceleration: Box::new(|_| N::one()),
+            orientation: Box::new(|_| N::one()),
+            angular_velocity: Box::new(|_| N::one()),
+        }
+    }
+}
+
 pub struct LocalizerBlackboard<N: Float> {
     pub point_count: NonZeroUsize,
     pub start_std_dev: N,
@@ -133,6 +155,7 @@ pub struct LocalizerBlackboard<N: Float> {
     angular_velocity_std_devs: UnorderedQueue<N>,
 
     pub calibration_duration: Duration,
+    pub likelihood_table: LikelihoodTable<N>,
 
     recalibrate_sub: Subscriber<()>,
     calibrations: FxHashMap<RobotElementRef, CalibratedImu<N>>,
@@ -514,6 +537,26 @@ async fn run_localizer<N: Float>(
 
         let delta_duration = start.elapsed();
         let delta: N = nconvert(delta_duration.as_secs_f64());
+
+        let (pos_sum, vel_sum, accel_sum, ang_vel_sum, orient_sum) = particles.par_iter_mut().map(|p| {
+            p.position_weight *= (bb.likelihood_table.position)(p.position);
+            p.linear_velocity_weight *= (bb.likelihood_table.linear_velocity)(p.linear_velocity);
+            p.linear_acceleration_weight *= (bb.likelihood_table.linear_acceleration)(p.linear_acceleration);
+            p.angular_velocity_weight *= (bb.likelihood_table.angular_velocity)(p.angular_velocity);
+            p.orientation_weight *= (bb.likelihood_table.orientation)(p.orientation);
+            (p.position_weight, p.linear_velocity_weight, p.linear_acceleration_weight, p.angular_velocity_weight, p.orientation_weight)
+        }).reduce(
+            || (N::zero(), N::zero(), N::zero(), N::zero(), N::zero()),
+            |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3, a.4 + b.4),
+        );
+
+        particles.par_iter_mut().for_each(|p| {
+            p.position_weight /= pos_sum;
+            p.linear_velocity_weight /= vel_sum;
+            p.linear_acceleration_weight /= accel_sum;
+            p.angular_velocity_weight /= ang_vel_sum;
+            p.orientation_weight /= orient_sum;
+        });
 
         join(
             || {
