@@ -183,24 +183,25 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
                 position_pub.set(PositionFrame::rand(
                     Point3::new(x, 0.0, z),
-                    0.02,
+                    0.03,
                     debug_element.get_ref(),
                 ));
                 velocity_pub.set(VelocityFrame::rand(
                     Vector3::new(vx, 0.0, vz),
-                    0.02,
+                    0.03,
                     debug_element.get_ref(),
                 ));
+                let orientation = UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k));
                 orientation_pub.set(OrientationFrame::rand(
-                    UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)),
-                    0.03,
+                    orientation,
+                    0.0,
                     debug_element.get_ref(),
                 ));
                 imu_pub.set(IMUFrame::rand(
-                    Vector3::new(0.0, -9.81, 0.0),
+                    orientation * Vector3::new(0.0, -9.81, 0.0),
                     0.0,
                     UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)),
-                    0.03,
+                    0.0,
                     debug_element.get_ref(),
                 ));
 

@@ -8,7 +8,6 @@ pub(crate) struct UnorderedQueue<T> {
     index: usize,
 }
 
-
 impl<T> UnorderedQueue<T> {
     pub fn push(&mut self, value: T) {
         self.queue[self.index] = value;
@@ -27,7 +26,6 @@ impl<T> UnorderedQueue<T> {
     // }
 }
 
-
 impl<T> FromIterator<T> for UnorderedQueue<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         UnorderedQueue {
@@ -37,13 +35,21 @@ impl<T> FromIterator<T> for UnorderedQueue<T> {
     }
 }
 
-
-pub trait Float: RealField + Copy + Default + SupersetOf<f32> + SupersetOf<f64> + SubsetOf<f32> + SubsetOf<f64> + SupersetOf<usize> + Sum {
+pub trait Float:
+    RealField
+    + Copy
+    + Default
+    + SupersetOf<f32>
+    + SupersetOf<f64>
+    + SubsetOf<f32>
+    + SubsetOf<f64>
+    + SupersetOf<usize>
+    + Sum
+{
     fn to_f32(self) -> f32;
     fn to_f64(self) -> f64;
     fn is_nan(self) -> bool;
 }
-
 
 impl Float for f32 {
     fn to_f32(self) -> f32 {

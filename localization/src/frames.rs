@@ -1,6 +1,6 @@
 use std::ops::DerefMut;
 
-use nalgebra::{Point3, UnitQuaternion, Vector3, convert as nconvert};
+use nalgebra::{convert as nconvert, Point3, UnitQuaternion, Vector3};
 use rand_distr::{Distribution, Normal};
 use rig::RobotElementRef;
 use unros::rng::quick_rng;
@@ -25,7 +25,8 @@ impl<N: Float> PositionFrame<N> {
 
         Self {
             position: position
-                + random_unit_vector(rng.deref_mut()).scale(nconvert(distr.sample(rng.deref_mut()))),
+                + random_unit_vector(rng.deref_mut())
+                    .scale(nconvert(distr.sample(rng.deref_mut()))),
             variance,
             robot_element,
         }
@@ -50,7 +51,8 @@ impl<N: Float> VelocityFrame<N> {
 
         Self {
             velocity: velocity
-                + random_unit_vector(rng.deref_mut()).scale(nconvert(distr.sample(rng.deref_mut()))),
+                + random_unit_vector(rng.deref_mut())
+                    .scale(nconvert(distr.sample(rng.deref_mut()))),
             variance,
             robot_element,
         }
@@ -117,7 +119,8 @@ impl<N: Float> IMUFrame<N> {
 
         IMUFrame {
             acceleration: acceleration
-                + random_unit_vector(rng.deref_mut()).scale(nconvert(accel_distr.sample(rng.deref_mut()))),
+                + random_unit_vector(rng.deref_mut())
+                    .scale(nconvert(accel_distr.sample(rng.deref_mut()))),
             angular_velocity: UnitQuaternion::from_axis_angle(
                 &random_unit_vector(rng.deref_mut()),
                 nconvert(ang_vel_distr.sample(rng.deref_mut())),

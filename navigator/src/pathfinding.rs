@@ -1,8 +1,10 @@
 use std::{
-    marker::PhantomData, sync::{
+    marker::PhantomData,
+    sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
-    }, time::{Duration, Instant}
+    },
+    time::{Duration, Instant},
 };
 
 use costmap::Costmap;
@@ -332,14 +334,17 @@ where
                 cost / 2
             },
             |current| {
-                if current == &(CVec3 { inner: end.coords, resolution }) {
+                if current
+                    == &(CVec3 {
+                        inner: end.coords,
+                        resolution,
+                    })
+                {
                     true
-                }
-                else if !costmap.is_global_point_in_bounds(current.inner.into()) {
+                } else if !costmap.is_global_point_in_bounds(current.inner.into()) {
                     out_of_bounds = true;
                     true
-                }
-                else {
+                } else {
                     false
                 }
             },
