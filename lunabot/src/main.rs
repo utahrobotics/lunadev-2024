@@ -2,19 +2,17 @@ use std::{
     io::Write,
     net::SocketAddrV4,
     str::FromStr,
-    time::{Duration, Instant},
 };
 
 use apriltag::{AprilTagDetector, PoseObservation};
 use camera::discover_all_cameras;
 use costmap::CostmapGenerator;
 use fxhash::FxBuildHasher;
-use imu::open_imu;
 use localization::{
-    frames::{IMUFrame, OrientationFrame, PositionFrame},
+    frames::{OrientationFrame, PositionFrame},
     Localizer,
 };
-use nalgebra::{Isometry, Point3};
+use nalgebra::Point3;
 use navigator::{pathfinding::Pathfinder, DifferentialDriver};
 #[cfg(unix)]
 use realsense::{discover_all_realsense, PointCloud};
@@ -32,7 +30,7 @@ use crate::{actuators::Arms, drive::Drive};
 
 mod actuators;
 mod drive;
-mod imu;
+// mod imu;
 mod telemetry;
 
 #[unros::main]
@@ -41,7 +39,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;
     let camera_element = elements.remove("camera").unwrap();
     let robot_base_ref = robot_base.get_ref();
-    let imu01 = elements.remove("imu01").unwrap().get_ref();
+    // let imu01 = elements.remove("imu01").unwrap().get_ref();
 
     let costmap = CostmapGenerator::new(10);
 
@@ -181,14 +179,14 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 }),
         );
 
-    let imu01 = open_imu(
-        "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00",
-        imu01,
-    )
-    .await;
-    imu01
-        .msg_received_pub()
-        .accept_subscription(localizer.create_imu_sub().set_name("imu01"));
+    // let imu01 = open_imu(
+    //     "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00",
+    //     imu01,
+    // )
+    // .await;
+    // imu01
+    //     .msg_received_pub()
+    //     .accept_subscription(localizer.create_imu_sub().set_name("imu01"));
 
     #[cfg(unix)]
     {
@@ -214,41 +212,41 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         "imu_ax,imu_ay,imu_az,imu_rvw,imu_rvi,imu_rvj,imu_rvk,vx,vy,vz,x,y,z,w,i,j,k,delta"
     )
     .unwrap();
-    let imu_sub = Subscriber::<IMUFrame>::new(32);
+    // let imu_sub = Subscriber::<IMUFrame>::new(32);
     #[cfg(unix)]
     realsense_camera
         .imu_frame_received_pub()
         .accept_subscription(imu_sub.create_subscription());
-    app.add_task(|_| async move {
-    let start = Instant::now();
-    let mut elapsed = Duration::ZERO;
+//     app.add_task(|_| async move {
+//     let start = Instant::now();
+//     let mut elapsed = Duration::ZERO;
 
-    loop {
-        let imu = imu_sub.recv().await;
-        let Isometry {
-            translation: pos,
-            rotation,
-        } = robot_base_ref.get_isometry();
-        let vel = robot_base_ref.get_linear_velocity();
-        let now = start.elapsed();
-        writeln!(
-            data_dump,
-            "{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
-            imu.acceleration.x,
-            imu.acceleration.y,
-            imu.acceleration.z,
-            imu.angular_velocity.w,
-            imu.angular_velocity.i,
-            imu.angular_velocity.j,
-            imu.angular_velocity.k,
-            vel.x, vel.y, vel.z,
-            pos.x, pos.y, pos.z,
-            rotation.w, rotation.i, rotation.j, rotation.k,
-            (now - elapsed).as_secs_f32()
-        ).unwrap();
-        elapsed = now;
-    }
-}, "telemetry-dump");
+//     loop {
+//         let imu = imu_sub.recv().await;
+//         let Isometry {
+//             translation: pos,
+//             rotation,
+//         } = robot_base_ref.get_isometry();
+//         let vel = robot_base_ref.get_linear_velocity();
+//         let now = start.elapsed();
+//         writeln!(
+//             data_dump,
+//             "{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
+//             imu.acceleration.x,
+//             imu.acceleration.y,
+//             imu.acceleration.z,
+//             imu.angular_velocity.w,
+//             imu.angular_velocity.i,
+//             imu.angular_velocity.j,
+//             imu.angular_velocity.k,
+//             vel.x, vel.y, vel.z,
+//             pos.x, pos.y, pos.z,
+//             rotation.w, rotation.i, rotation.j, rotation.k,
+//             (now - elapsed).as_secs_f32()
+//         ).unwrap();
+//         elapsed = now;
+//     }
+// }, "telemetry-dump");
 
     app.add_node(apriltag);
     app.add_node(localizer);
