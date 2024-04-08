@@ -22,9 +22,9 @@ impl<T> UnorderedQueue<T> {
         &self.queue
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
-        &mut self.queue
-    }
+    // pub fn as_mut_slice(&mut self) -> &mut [T] {
+    //     &mut self.queue
+    // }
 }
 
 

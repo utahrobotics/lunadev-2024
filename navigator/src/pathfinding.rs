@@ -1,5 +1,5 @@
 use std::{
-    f64::consts::FRAC_1_SQRT_2, marker::PhantomData, sync::{
+    marker::PhantomData, sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
     }, time::{Duration, Instant}
