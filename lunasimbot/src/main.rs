@@ -194,14 +194,14 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 let orientation = UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k));
                 orientation_pub.set(OrientationFrame::rand(
                     orientation,
-                    0.0,
+                    0.03,
                     debug_element.get_ref(),
                 ));
                 imu_pub.set(IMUFrame::rand(
                     orientation * Vector3::new(0.0, -9.81, 0.0),
-                    0.0,
+                    0.03,
                     UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)),
-                    0.0,
+                    0.03,
                     debug_element.get_ref(),
                 ));
 
