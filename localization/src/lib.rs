@@ -9,17 +9,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use eigenvalues::{
-    lanczos::{HermitianLanczos, LanczosError},
-    SpectrumTarget,
-};
 use frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame};
 use fxhash::FxHashMap;
 use nalgebra::{
-    convert as nconvert, DMatrix, Isometry, Isometry3, Matrix4, Point3, Quaternion, RealField,
-    Translation3, UnitQuaternion, UnitVector3, Vector3,
+    convert as nconvert, Isometry3, RealField, Translation3, UnitQuaternion, UnitVector3, Vector3
 };
-use rand::{rngs::SmallRng, Rng};
+use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use rig::{RobotBase, RobotElementRef};
 use smach::{State, StateResult};
@@ -35,53 +30,48 @@ use unros::{
     rng::quick_rng,
     setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
 };
-use utils::UnorderedQueue;
+use utils::{UnorderedQueue, random_unit_vector, quat_mean};
 
 pub mod frames;
 mod utils;
 
-pub use utils::Float;
+pub use utils::{Float, gravity};
+
+use crate::utils::normal;
 
 /// A Node that can digest multiple streams of spatial input to
 /// determine where an object is in global space.
 ///
 /// Processing does not occur until the node is running.
 pub struct Localizer<N: Float> {
-    pub point_count: NonZeroUsize,
-    pub calibration_duration: Duration,
-    pub start_position: Point3<N>,
-    pub start_variance: N,
-    pub max_delta: Duration,
-    pub minimum_unnormalized_weight: N,
-    pub undeprivation_factor: N,
-
-    recalibrate_sub: Subscriber<()>,
-
-    imu_sub: Subscriber<IMUFrame<N>>,
-    position_sub: Subscriber<PositionFrame<N>>,
-    velocity_sub: Subscriber<VelocityFrame<N>>,
-    orientation_sub: Subscriber<OrientationFrame<N>>,
-
-    robot_base: RobotBase,
+    bb: LocalizerBlackboard<N>,
     intrinsics: NodeIntrinsics<Self>,
 }
 
 impl<N: Float> Localizer<N> {
     pub fn new(robot_base: RobotBase, start_variance: N) -> Self {
         Self {
-            point_count: NonZeroUsize::new(500).unwrap(),
-            start_position: Default::default(),
-            start_variance,
-            calibration_duration: Duration::from_secs(3),
-            recalibrate_sub: Subscriber::new(1),
-            minimum_unnormalized_weight: nconvert(0.6),
-            undeprivation_factor: nconvert(0.05),
-            imu_sub: Subscriber::new(1),
-            position_sub: Subscriber::new(1),
-            orientation_sub: Subscriber::new(1),
-            velocity_sub: Subscriber::new(1),
-            robot_base,
-            max_delta: Duration::from_millis(50),
+            bb: LocalizerBlackboard {
+                point_count: NonZeroUsize::new(500).unwrap(),
+                start_std_dev: start_variance.sqrt(),
+                calibration_duration: Duration::from_secs(3),
+                recalibrate_sub: Subscriber::new(1),
+                minimum_unnormalized_weight: nconvert(0.6),
+                undeprivation_factor: nconvert(0.05),
+                imu_sub: Subscriber::new(1),
+                position_sub: Subscriber::new(1),
+                orientation_sub: Subscriber::new(1),
+                velocity_sub: Subscriber::new(1),
+                robot_base,
+                max_delta: Duration::from_millis(50),
+                linear_acceleration_std_dev_count: 10,
+                angular_velocity_std_dev_count: 10,
+                linear_acceleration_std_devs: std::iter::repeat(N::zero()).take(10).collect(),
+                angular_velocity_std_devs: std::iter::repeat(N::zero()).take(10).collect(),
+                calibrations: Default::default(),
+                context: None,
+                start_orientation: UnitQuaternion::default(),
+            },
             intrinsics: Default::default(),
         }
     }
@@ -90,28 +80,28 @@ impl<N: Float> Localizer<N> {
     ///
     /// Some messages may be skipped if there are too many.
     pub fn create_imu_sub(&self) -> DirectSubscription<IMUFrame<N>> {
-        self.imu_sub.create_subscription()
+        self.bb.imu_sub.create_subscription()
     }
 
     /// Provide a position subscription.
     ///
     /// Some messages may be skipped if there are too many.
     pub fn create_position_sub(&self) -> DirectSubscription<PositionFrame<N>> {
-        self.position_sub.create_subscription()
+        self.bb.position_sub.create_subscription()
     }
 
     /// Provide a velocity subscription.
     ///
     /// Some messages may be skipped if there are too many.
     pub fn create_velocity_sub(&self) -> DirectSubscription<VelocityFrame<N>> {
-        self.velocity_sub.create_subscription()
+        self.bb.velocity_sub.create_subscription()
     }
 
     /// Provide an orientation subscription.
     ///
     /// Some messages may be skipped if there are too many.
     pub fn create_orientation_sub(&self) -> DirectSubscription<OrientationFrame<N>> {
-        self.orientation_sub.create_subscription()
+        self.bb.orientation_sub.create_subscription()
     }
 }
 
@@ -128,35 +118,35 @@ struct CalibratedImu<N: Float> {
     angular_velocity_bias: UnitQuaternion<N>,
 }
 
-struct LocalizerBlackboard<N: Float> {
-    point_count: usize,
-    start_position: nalgebra::Vector3<N>,
-    start_std_dev: N,
-    max_delta: Duration,
+pub struct LocalizerBlackboard<N: Float> {
+    pub point_count: NonZeroUsize,
+    pub start_std_dev: N,
+    pub max_delta: Duration,
 
-    minimum_unnormalized_weight: N,
-    undeprivation_factor: N,
+    pub minimum_unnormalized_weight: N,
+    pub undeprivation_factor: N,
 
-    linear_acceleration_std_dev_count: usize,
-    angular_velocity_std_dev_count: usize,
+    pub linear_acceleration_std_dev_count: usize,
+    pub angular_velocity_std_dev_count: usize,
 
     linear_acceleration_std_devs: UnorderedQueue<N>,
     angular_velocity_std_devs: UnorderedQueue<N>,
 
-    calibration_duration: Duration,
+    pub calibration_duration: Duration,
 
     recalibrate_sub: Subscriber<()>,
     calibrations: FxHashMap<RobotElementRef, CalibratedImu<N>>,
-    start_orientation: nalgebra::UnitQuaternion<N>,
 
     imu_sub: Subscriber<IMUFrame<N>>,
     position_sub: Subscriber<PositionFrame<N>>,
     velocity_sub: Subscriber<VelocityFrame<N>>,
     orientation_sub: Subscriber<OrientationFrame<N>>,
 
+    start_orientation: UnitQuaternion<N>,
+
     robot_base: RobotBase,
 
-    context: RuntimeContext,
+    context: Option<RuntimeContext>,
 }
 
 /// The calibration stage of the localizer.
@@ -165,7 +155,7 @@ struct LocalizerBlackboard<N: Float> {
 async fn calibrate_localizer<N: Float>(
     mut bb: LocalizerBlackboard<N>,
 ) -> StateResult<LocalizerBlackboard<N>> {
-    let context = bb.context;
+    let context = bb.context.unwrap();
     setup_logging!(context);
     info!("Calibrating localizer");
 
@@ -239,48 +229,8 @@ async fn calibrate_localizer<N: Float>(
         bb.start_orientation = Default::default();
     }
     info!("Localizer calibrated");
-    bb.context = context;
+    bb.context = Some(context);
     bb.into()
-}
-
-#[inline]
-fn normal<N: Float>(mean: N, std_dev: N, x: N) -> N {
-    let two = N::one() + N::one();
-    let e: N = nconvert(std::f64::consts::E);
-    let tau: N = nconvert(std::f64::consts::TAU);
-    e.powf(((x - mean) / std_dev).powi(2) / -two) / std_dev / tau.sqrt()
-}
-
-pub fn gravity<N: Float>() -> Vector3<N> {
-    Vector3::new(N::zero(), nconvert(-9.81), N::zero())
-}
-
-// #[inline]
-// fn rand_quat(rng: &mut QuickRng) -> UnitQuaternion {
-//     let u: Float = rng.gen_range(0.0..1.0);
-//     let v: Float = rng.gen_range(0.0..1.0);
-//     let w: Float = rng.gen_range(0.0..1.0);
-//     // h = ( sqrt(1-u) sin(2πv), sqrt(1-u) cos(2πv), sqrt(u) sin(2πw), sqrt(u) cos(2πw))
-//     UnitQuaternion::new_unchecked(Quaternion::new(
-//         (1.0 - u).sqrt() * (TAU * v).sin(),
-//         (1.0 - u).sqrt() * (TAU * v).cos(),
-//         u.sqrt() * (TAU * w).sin(),
-//         u.sqrt() * (TAU * w).cos(),
-//     ))
-// }
-
-#[inline]
-fn random_unit_vector<N: Float>(rng: &mut SmallRng) -> nalgebra::UnitVector3<N> {
-    loop {
-        let x = rng.gen_range(-1.0..1.0);
-        let y = rng.gen_range(-1.0..1.0);
-        let z = rng.gen_range(-1.0..1.0);
-        let vec: nalgebra::Vector3<N> = nconvert(Vector3::new(x, y, z));
-        let length = vec.magnitude();
-        if length <= N::one() {
-            break UnitVector3::new_unchecked(vec.unscale(length));
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -308,12 +258,12 @@ pub struct Particle<N: RealField> {
 async fn run_localizer<N: Float>(
     mut bb: LocalizerBlackboard<N>,
 ) -> StateResult<LocalizerBlackboard<N>> {
-    let context = bb.context;
+    let context = bb.context.unwrap();
     setup_logging!(context);
 
     let mut rng = quick_rng();
-    let default_weight = N::one() / nconvert(bb.point_count);
-    let mut particles: Vec<Particle<N>> = (0..bb.point_count)
+    let default_weight = N::one() / nconvert(bb.point_count.get());
+    let mut particles: Vec<Particle<N>> = (0..bb.point_count.get())
         .map(|_| {
             // let rotation = UnitQuaternion::from_axis_angle(
             //     &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
@@ -322,9 +272,10 @@ async fn run_localizer<N: Float>(
             // let rotation = UnitQuaternion::default();
 
             let trans_distr = Normal::new(0.0, bb.start_std_dev.to_f32()).unwrap();
+            let start_position = nconvert::<_, Vector3<N>>(bb.robot_base.get_isometry().translation.vector);
 
             Particle {
-                position: bb.start_position
+                position: start_position
                     + random_unit_vector(&mut rng)
                         .scale(nconvert(trans_distr.sample(rng.deref_mut()))),
                 position_weight: default_weight,
@@ -343,13 +294,13 @@ async fn run_localizer<N: Float>(
     drop(rng);
 
     let mut start = Instant::now();
-    let mut acceleration_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count);
-    let mut linear_velocity_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count);
-    let mut position_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count);
+    let mut acceleration_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count.get());
+    let mut linear_velocity_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count.get());
+    let mut position_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count.get());
 
     let mut angular_velocity_weights: Vec<(UnitQuaternion<N>, N)> =
-        Vec::with_capacity(bb.point_count);
-    let mut orientation_weights: Vec<(UnitQuaternion<N>, N)> = Vec::with_capacity(bb.point_count);
+        Vec::with_capacity(bb.point_count.get());
+    let mut orientation_weights: Vec<(UnitQuaternion<N>, N)> = Vec::with_capacity(bb.point_count.get());
 
     loop {
         // Simultaneously watch three different subscriptions at once.
@@ -740,9 +691,9 @@ async fn run_localizer<N: Float>(
                         |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2),
                     );
 
-                position.unscale_mut(nconvert(bb.point_count));
-                linear_velocity.unscale_mut(nconvert(bb.point_count));
-                acceleration.unscale_mut(nconvert(bb.point_count));
+                position.unscale_mut(nconvert(bb.point_count.get()));
+                linear_velocity.unscale_mut(nconvert(bb.point_count.get()));
+                acceleration.unscale_mut(nconvert(bb.point_count.get()));
 
                 (position, linear_velocity, acceleration)
             },
@@ -766,8 +717,7 @@ async fn run_localizer<N: Float>(
             },
         );
 
-        // println!("{acceleration:?}");
-        bb.robot_base.set_isometry(Isometry::from_parts(
+        bb.robot_base.set_isometry(Isometry3::from_parts(
             nconvert(Translation3::from(position)),
             nconvert(orientation),
         ));
@@ -775,7 +725,7 @@ async fn run_localizer<N: Float>(
 
         start += delta_duration;
     }
-    bb.context = context;
+    bb.context = Some(context);
     bb.into()
 }
 
@@ -788,30 +738,7 @@ impl<N: Float> Node for Localizer<N> {
     }
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
-        setup_logging!(context);
-
-        let bb = LocalizerBlackboard {
-            point_count: self.point_count.get(),
-            start_position: self.start_position.coords,
-            start_std_dev: self.start_variance.sqrt(),
-            calibration_duration: self.calibration_duration,
-            recalibrate_sub: self.recalibrate_sub,
-            calibrations: Default::default(),
-            imu_sub: self.imu_sub,
-            position_sub: self.position_sub,
-            orientation_sub: self.orientation_sub,
-            context,
-            minimum_unnormalized_weight: self.minimum_unnormalized_weight,
-            undeprivation_factor: self.undeprivation_factor,
-            robot_base: self.robot_base,
-            max_delta: self.max_delta,
-            velocity_sub: self.velocity_sub,
-            start_orientation: Default::default(),
-            linear_acceleration_std_dev_count: 10,
-            angular_velocity_std_dev_count: 10,
-            linear_acceleration_std_devs: std::iter::repeat(N::zero()).take(10).collect(),
-            angular_velocity_std_devs: std::iter::repeat(N::zero()).take(10).collect(),
-        };
+        self.bb.context = Some(context);
 
         let (calib, calib_trans) = State::new(calibrate_localizer);
         let (run, run_trans) = State::new(run_localizer);
@@ -821,90 +748,23 @@ impl<N: Float> Node for Localizer<N> {
         calib_trans.set_transition(move |_| Some(run.clone()));
         run_trans.set_transition(move |_| Some(calib.clone()));
 
-        start_state.start(bb).await;
+        start_state.start(self.bb).await;
         unreachable!()
     }
 }
 
-fn quat_mean<N, T, I>(quats: T) -> Option<Result<UnitQuaternion<N>, LanczosError>>
-where
-    N: Float,
-    T: IntoIterator<Item = UnitQuaternion<N>, IntoIter = I>,
-    I: ExactSizeIterator<Item = UnitQuaternion<N>>,
-{
-    let quats = quats.into_iter();
-    let n = quats.len();
-    if n == 0 {
-        return None;
-    }
 
-    let rotation_matrix: Matrix4<N> = quats
-        .map(|q| {
-            let q_vec = q.as_vector();
-            q_vec * q_vec.transpose() / nconvert::<_, N>(n)
-        })
-        .sum();
+impl<N: Float> std::ops::Deref for Localizer<N> {
+    type Target = LocalizerBlackboard<N>;
 
-    // https://math.stackexchange.com/questions/61146/averaging-quaternions
-    match HermitianLanczos::new::<DMatrix<f64>>(
-        nconvert(rotation_matrix),
-        10,
-        SpectrumTarget::Highest,
-    ) {
-        Ok(x) => {
-            let ev = x.eigenvectors.column(0);
-            Some(Ok(UnitQuaternion::new_normalize(Quaternion::new(
-                nconvert(ev[3]),
-                nconvert(ev[0]),
-                nconvert(ev[1]),
-                nconvert(ev[2]),
-            ))))
-        }
-        Err(e) => Some(Err(e)),
+    fn deref(&self) -> &Self::Target {
+        &self.bb
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use nalgebra::{UnitQuaternion, UnitVector3};
 
-    use crate::{quat_mean, Float, Vector3};
-
-    const EPSILON: Float = 0.001;
-
-    #[test]
-    fn quat_mean_zeroes() {
-        assert_eq!(
-            quat_mean([Default::default(); 30]).unwrap().unwrap(),
-            Default::default()
-        );
-    }
-
-    #[test]
-    fn quat_mean_all_equal() {
-        let quat = UnitQuaternion::from_axis_angle(
-            &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
-            0.4,
-        );
-        assert!(quat_mean([quat; 30]).unwrap().unwrap().angle_to(&quat) < EPSILON);
-    }
-
-    #[test]
-    fn quat_mean_all_opposing() {
-        let quat01 = UnitQuaternion::from_axis_angle(
-            &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
-            0.4,
-        );
-        let quat02 = UnitQuaternion::from_axis_angle(
-            &UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0)),
-            -0.4,
-        );
-        assert!(
-            quat_mean([quat01, quat02])
-                .unwrap()
-                .unwrap()
-                .angle_to(&Default::default())
-                < EPSILON
-        );
+impl<N: Float> std::ops::DerefMut for Localizer<N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bb
     }
 }
