@@ -25,6 +25,7 @@ image = { workspace = true }
 serde = { workspace = true }
 ordered-float = { workspace = true }
 py-repl = { path = "../py-repl" }
+base64 = "0.22.0"
 
 [target.'cfg(unix)'.dependencies]
 realsense = { path = "../realsense" }
