@@ -115,7 +115,7 @@ impl<
         }
         true
     }
-    
+
     pub fn is_global_point_in_bounds(&self, point: Point3<N>) -> bool {
         for frame in self.inner.frames.iter() {
             let point3d = frame.isometry.inverse_transform_point(&point);
@@ -125,7 +125,11 @@ impl<
             );
             point2d.x -= frame.min_x;
             point2d.y -= frame.min_y;
-            if point2d.x >= 0 && point2d.y >= 0 && point2d.x < frame.quadtree.width() as isize && point2d.y < frame.quadtree.height() as isize {
+            if point2d.x >= 0
+                && point2d.y >= 0
+                && point2d.x < frame.quadtree.width() as isize
+                && point2d.y < frame.quadtree.height() as isize
+            {
                 return true;
             }
         }

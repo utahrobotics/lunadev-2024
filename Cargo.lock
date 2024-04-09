@@ -2016,6 +2016,7 @@ dependencies = [
  "rand",
  "rand_distr",
  "rig",
+ "simba",
  "smach",
  "unros",
 ]

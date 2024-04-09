@@ -16,4 +16,5 @@ rand_distr = { workspace = true }
 rand = { workspace = true }
 eigenvalues = { path = "../eigenvalues" }
 crossbeam = { workspace = true }
+simba = { workspace = true }
 # ordered-float = { workspace = true }

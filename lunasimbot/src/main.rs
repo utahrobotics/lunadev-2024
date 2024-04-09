@@ -84,7 +84,21 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .accept_subscription(driver.create_path_sub());
     let nav_task = pathfinder.get_navigation_handle();
 
-    let localizer = Localizer::new(robot_base, 0.0);
+    let mut localizer = Localizer::new(robot_base, 0.0f32);
+    localizer.likelihood_table.position = Box::new(|pos| {
+        if pos.y.abs() >= 0.2 {
+            0.0
+        } else {
+            1.0
+        }
+    });
+    localizer.likelihood_table.linear_velocity = Box::new(|vel| {
+        if vel.magnitude() >= 0.5 {
+            0.0
+        } else {
+            1.0
+        }
+    });
 
     let position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));
@@ -183,22 +197,23 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
                 position_pub.set(PositionFrame::rand(
                     Point3::new(x, 0.0, z),
-                    0.02,
+                    0.03,
                     debug_element.get_ref(),
                 ));
                 velocity_pub.set(VelocityFrame::rand(
                     Vector3::new(vx, 0.0, vz),
-                    0.02,
+                    0.03,
                     debug_element.get_ref(),
                 ));
+                let orientation = UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k));
                 orientation_pub.set(OrientationFrame::rand(
-                    UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k)),
+                    orientation,
                     0.03,
                     debug_element.get_ref(),
                 ));
                 imu_pub.set(IMUFrame::rand(
-                    Vector3::new(0.0, -9.81, 0.0),
-                    0.0,
+                    orientation * Vector3::new(0.0, -9.81, 0.0),
+                    0.03,
                     UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)),
                     0.03,
                     debug_element.get_ref(),
