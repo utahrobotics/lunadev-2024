@@ -21,7 +21,7 @@ use telemetry::Telemetry;
 use unros::{
     anyhow,
     log::info,
-    logging::dump::{DataDump, VideoDataDump},
+    logging::dump::DataDump,
     pubsub::{subs::Subscription, Subscriber},
     Application, Node,
 };
@@ -217,10 +217,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     )
     .unwrap();
     // let imu_sub = Subscriber::<IMUFrame>::new(32);
-    #[cfg(unix)]
-    realsense_camera
-        .imu_frame_received_pub()
-        .accept_subscription(imu_sub.create_subscription());
+    // #[cfg(unix)]
+    // realsense_camera
+    //     .imu_frame_received_pub()
+    //     .accept_subscription(imu_sub.create_subscription());
 //     app.add_task(|_| async move {
 //     let start = Instant::now();
 //     let mut elapsed = Duration::ZERO;

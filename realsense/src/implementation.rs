@@ -63,7 +63,7 @@ pub struct RealSenseCamera {
     context: Arc<Mutex<Context>>,
     image_received: Publisher<Arc<DynamicImage>>,
     point_cloud_received: Publisher<PointCloud>,
-    imu_frame_received: Publisher<IMUFrame>,
+    imu_frame_received: Publisher<IMUFrame<f32>>,
     robot_element: Option<RobotElementRef>,
     pub focal_length_frac: f32,
     pub min_distance: f32,
@@ -116,7 +116,7 @@ impl RealSenseCamera {
 
     /// IMU frames are in global space, according to the rigid body
     /// provided to the RealSense camera.
-    pub fn imu_frame_received_pub(&self) -> PublisherRef<IMUFrame> {
+    pub fn imu_frame_received_pub(&self) -> PublisherRef<IMUFrame<f32>> {
         self.imu_frame_received.get_ref()
     }
 
