@@ -85,20 +85,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let nav_task = pathfinder.get_navigation_handle();
 
     let mut localizer = Localizer::new(robot_base, 0.0f32);
-    localizer.likelihood_table.position = Box::new(|pos| {
-        if pos.y.abs() >= 0.2 {
-            0.0
-        } else {
-            1.0
-        }
-    });
-    localizer.likelihood_table.linear_velocity = Box::new(|vel| {
-        if vel.magnitude() >= 0.5 {
-            0.0
-        } else {
-            1.0
-        }
-    });
+    localizer.likelihood_table.position =
+        Box::new(|pos| if pos.y.abs() >= 0.2 { 0.0 } else { 1.0 });
+    localizer.likelihood_table.linear_velocity =
+        Box::new(|vel| if vel.magnitude() >= 0.5 { 0.0 } else { 1.0 });
 
     let position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));

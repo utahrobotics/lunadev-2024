@@ -5,13 +5,11 @@ use eigenvalues::{
     SpectrumTarget,
 };
 use nalgebra::{
-    convert as nconvert,
-    DMatrix, Matrix4, Quaternion, RealField,
-    UnitQuaternion, UnitVector3, Vector3,
+    convert as nconvert, DMatrix, Matrix4, Quaternion, RealField, UnitQuaternion, UnitVector3,
+    Vector3,
 };
 use rand::{rngs::SmallRng, Rng};
 use simba::scalar::{SubsetOf, SupersetOf};
-
 
 pub(crate) struct UnorderedQueue<T> {
     queue: Box<[T]>,
@@ -166,7 +164,6 @@ pub fn random_unit_vector<N: Float>(rng: &mut SmallRng) -> nalgebra::UnitVector3
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

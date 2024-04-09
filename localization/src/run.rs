@@ -2,14 +2,10 @@
 //! of spatial input to determine where an object (presumably a
 //! robot) is in global space.
 
-use std::{
-    ops::DerefMut,
-    time::Instant,
-};
+use std::{ops::DerefMut, time::Instant};
 
-use nalgebra::{
-    convert as nconvert, Isometry3, Translation3, UnitQuaternion, Vector3
-};
+use crate::utils::{gravity, normal, quat_mean, random_unit_vector};
+use nalgebra::{convert as nconvert, Isometry3, Translation3, UnitQuaternion, Vector3};
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 use smach::StateResult;
@@ -21,9 +17,8 @@ use unros::{
         join,
     },
     rng::quick_rng,
-    setup_logging, tokio
+    setup_logging, tokio,
 };
-use crate::utils::{random_unit_vector, quat_mean, gravity, normal};
 
 use crate::{Float, LocalizerBlackboard};
 
@@ -66,7 +61,8 @@ pub(super) async fn run_localizer<N: Float>(
             // let rotation = UnitQuaternion::default();
 
             let trans_distr = Normal::new(0.0, bb.start_std_dev.to_f32()).unwrap();
-            let start_position = nconvert::<_, Vector3<N>>(bb.robot_base.get_isometry().translation.vector);
+            let start_position =
+                nconvert::<_, Vector3<N>>(bb.robot_base.get_isometry().translation.vector);
 
             Particle {
                 position: start_position
@@ -89,12 +85,14 @@ pub(super) async fn run_localizer<N: Float>(
 
     let mut start = Instant::now();
     let mut acceleration_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count.get());
-    let mut linear_velocity_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count.get());
+    let mut linear_velocity_weights: Vec<(Vector3<N>, N)> =
+        Vec::with_capacity(bb.point_count.get());
     let mut position_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count.get());
 
     let mut angular_velocity_weights: Vec<(UnitQuaternion<N>, N)> =
         Vec::with_capacity(bb.point_count.get());
-    let mut orientation_weights: Vec<(UnitQuaternion<N>, N)> = Vec::with_capacity(bb.point_count.get());
+    let mut orientation_weights: Vec<(UnitQuaternion<N>, N)> =
+        Vec::with_capacity(bb.point_count.get());
 
     loop {
         // Simultaneously watch three different subscriptions at once.
@@ -309,17 +307,29 @@ pub(super) async fn run_localizer<N: Float>(
         let delta_duration = start.elapsed();
         let delta: N = nconvert(delta_duration.as_secs_f64());
 
-        let (pos_sum, vel_sum, accel_sum, ang_vel_sum, orient_sum) = particles.par_iter_mut().map(|p| {
-            p.position_weight *= (bb.likelihood_table.position)(p.position);
-            p.linear_velocity_weight *= (bb.likelihood_table.linear_velocity)(p.linear_velocity);
-            p.linear_acceleration_weight *= (bb.likelihood_table.linear_acceleration)(p.linear_acceleration);
-            p.angular_velocity_weight *= (bb.likelihood_table.angular_velocity)(p.angular_velocity);
-            p.orientation_weight *= (bb.likelihood_table.orientation)(p.orientation);
-            (p.position_weight, p.linear_velocity_weight, p.linear_acceleration_weight, p.angular_velocity_weight, p.orientation_weight)
-        }).reduce(
-            || (N::zero(), N::zero(), N::zero(), N::zero(), N::zero()),
-            |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3, a.4 + b.4),
-        );
+        let (pos_sum, vel_sum, accel_sum, ang_vel_sum, orient_sum) = particles
+            .par_iter_mut()
+            .map(|p| {
+                p.position_weight *= (bb.likelihood_table.position)(p.position);
+                p.linear_velocity_weight *=
+                    (bb.likelihood_table.linear_velocity)(p.linear_velocity);
+                p.linear_acceleration_weight *=
+                    (bb.likelihood_table.linear_acceleration)(p.linear_acceleration);
+                p.angular_velocity_weight *=
+                    (bb.likelihood_table.angular_velocity)(p.angular_velocity);
+                p.orientation_weight *= (bb.likelihood_table.orientation)(p.orientation);
+                (
+                    p.position_weight,
+                    p.linear_velocity_weight,
+                    p.linear_acceleration_weight,
+                    p.angular_velocity_weight,
+                    p.orientation_weight,
+                )
+            })
+            .reduce(
+                || (N::zero(), N::zero(), N::zero(), N::zero(), N::zero()),
+                |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3, a.4 + b.4),
+            );
 
         particles.par_iter_mut().for_each(|p| {
             p.position_weight /= pos_sum;

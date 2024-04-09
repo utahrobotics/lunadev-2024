@@ -2,21 +2,15 @@
 //! of spatial input to determine where an object (presumably a
 //! robot) is in global space.
 
-use std::
-    collections::hash_map::Entry;
+use std::collections::hash_map::Entry;
 
 use fxhash::FxHashMap;
-use nalgebra::{
-    convert as nconvert, Isometry3, UnitQuaternion, UnitVector3, Vector3
-};
+use nalgebra::{convert as nconvert, Isometry3, UnitQuaternion, UnitVector3, Vector3};
 use rig::RobotElementRef;
 use smach::StateResult;
-use unros::{
-    setup_logging, tokio,
-};
+use unros::{setup_logging, tokio};
 
 use crate::{CalibratedImu, CalibratingImu, Float, LocalizerBlackboard};
-
 
 /// The calibration stage of the localizer.
 ///

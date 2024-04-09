@@ -2,33 +2,28 @@
 //! of spatial input to determine where an object (presumably a
 //! robot) is in global space.
 
-use std::{
-    num::NonZeroUsize,
-    time::Duration,
-};
+use std::{num::NonZeroUsize, time::Duration};
 
+use calib::calibrate_localizer;
 use frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame};
 use fxhash::FxHashMap;
-use nalgebra::{
-    convert as nconvert, UnitQuaternion, Vector3
-};
+use nalgebra::{convert as nconvert, UnitQuaternion, Vector3};
 use rig::{RobotBase, RobotElementRef};
+use run::run_localizer;
 use smach::State;
 use unros::{
     anyhow, async_trait,
     pubsub::{subs::DirectSubscription, Subscriber},
     Node, NodeIntrinsics, RuntimeContext,
 };
-use utils::{UnorderedQueue, random_unit_vector};
-use calib::calibrate_localizer;
-use run::run_localizer;
+use utils::{random_unit_vector, UnorderedQueue};
 
-pub mod frames;
-mod utils;
 mod calib;
+pub mod frames;
 mod run;
+mod utils;
 
-pub use utils::{Float, gravity};
+pub use utils::{gravity, Float};
 
 /// A Node that can digest multiple streams of spatial input to
 /// determine where an object is in global space.
@@ -187,7 +182,6 @@ impl<N: Float> Node for Localizer<N> {
     }
 }
 
-
 impl<N: Float> std::ops::Deref for Localizer<N> {
     type Target = LocalizerBlackboard<N>;
 
@@ -195,7 +189,6 @@ impl<N: Float> std::ops::Deref for Localizer<N> {
         &self.bb
     }
 }
-
 
 impl<N: Float> std::ops::DerefMut for Localizer<N> {
     fn deref_mut(&mut self) -> &mut Self::Target {

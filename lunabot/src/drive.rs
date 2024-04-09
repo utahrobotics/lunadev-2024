@@ -1,11 +1,13 @@
+use base64::prelude::*;
 use navigator::drive::Steering;
 use py_repl::PyRepl;
 use serde::Deserialize;
 use serial::SerialConnection;
 use unros::{
-    anyhow, async_trait, get_env, log, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, get_env, log,
+    pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber},
+    setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
 };
-use base64::prelude::*;
 
 pub struct Drive {
     steering_sub: Subscriber<Steering>,
