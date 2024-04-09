@@ -5,9 +5,7 @@ use nalgebra::{Point3, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    anyhow, async_trait, asyncify_run,
-    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
-    setup_logging, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, async_trait, asyncify_run, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
 };
 
 pub mod drive;
@@ -70,12 +68,17 @@ where
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
         let sleeper = spin_sleep::SpinSleeper::default();
+        let drop_check = DropCheck::default();
 
         loop {
             let mut path = self.path_sub.recv().await;
+            let drop_check = drop_check.get_observing();
 
             let (path_sub, steering_signal, robot_base, turn_fn) = asyncify_run(move || {
                 loop {
+                    if drop_check.has_dropped() {
+                        break;
+                    }
                     if let Some(new_path) = self.path_sub.try_recv() {
                         path = new_path;
                     }

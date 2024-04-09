@@ -31,6 +31,22 @@ impl<N: Float> PositionFrame<N> {
             robot_element,
         }
     }
+
+    pub fn to_f32(self) -> PositionFrame<f32> {
+        PositionFrame {
+            position: nconvert(self.position),
+            variance: self.variance.to_f32(),
+            robot_element: self.robot_element,
+        }
+    }
+
+    pub fn to_ff64(self) -> PositionFrame<f64> {
+        PositionFrame {
+            position: nconvert(self.position),
+            variance: self.variance.to_f64(),
+            robot_element: self.robot_element,
+        }
+    }
 }
 
 /// A position and variance measurement.
@@ -55,6 +71,22 @@ impl<N: Float> VelocityFrame<N> {
                     .scale(nconvert(distr.sample(rng.deref_mut()))),
             variance,
             robot_element,
+        }
+    }
+
+    pub fn to_f32(self) -> VelocityFrame<f32> {
+        VelocityFrame {
+            velocity: nconvert(self.velocity),
+            variance: self.variance.to_f32(),
+            robot_element: self.robot_element,
+        }
+    }
+
+    pub fn to_f64(self) -> VelocityFrame<f64> {
+        VelocityFrame {
+            velocity: nconvert(self.velocity),
+            variance: self.variance.to_f64(),
+            robot_element: self.robot_element,
         }
     }
 }
@@ -85,6 +117,22 @@ impl<N: Float> OrientationFrame<N> {
             ) * orientation,
             variance,
             robot_element,
+        }
+    }
+
+    pub fn to_f32(self) -> OrientationFrame<f32> {
+        OrientationFrame {
+            orientation: nconvert(self.orientation),
+            variance: self.variance.to_f32(),
+            robot_element: self.robot_element,
+        }
+    }
+
+    pub fn to_f64(self) -> OrientationFrame<f64> {
+        OrientationFrame {
+            orientation: nconvert(self.orientation),
+            variance: self.variance.to_f64(),
+            robot_element: self.robot_element,
         }
     }
 }
@@ -128,6 +176,26 @@ impl<N: Float> IMUFrame<N> {
             acceleration_variance,
             angular_velocity_variance,
             robot_element,
+        }
+    }
+
+    pub fn to_f32(self) -> IMUFrame<f32> {
+        IMUFrame {
+            acceleration: nconvert(self.acceleration),
+            acceleration_variance: self.acceleration_variance.to_f32(),
+            angular_velocity: nconvert(self.angular_velocity),
+            angular_velocity_variance: self.angular_velocity_variance.to_f32(),
+            robot_element: self.robot_element,
+        }
+    }
+
+    pub fn to_f64(self) -> IMUFrame<f64> {
+        IMUFrame {
+            acceleration: nconvert(self.acceleration),
+            acceleration_variance: self.acceleration_variance.to_f64(),
+            angular_velocity: nconvert(self.angular_velocity),
+            angular_velocity_variance: self.angular_velocity_variance.to_f64(),
+            robot_element: self.robot_element,
         }
     }
 }

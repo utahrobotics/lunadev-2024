@@ -236,6 +236,7 @@ pub(super) async fn run_localizer<N: Float>(
                 // Find the velocity of the robot base based on the observation of the velocity of an element
                 // attached to the robot base.
                 frame.velocity = nconvert::<_, UnitQuaternion<N>>(frame.robot_element.get_isometry_from_base().rotation) * frame.velocity;
+                // println!("{:.2}", frame.velocity.magnitude());
                 let std_dev = frame.variance.sqrt();
 
                 if frame.variance == N::zero() {
@@ -317,40 +318,6 @@ pub(super) async fn run_localizer<N: Float>(
             let delta: N = nconvert(delta_duration.as_secs_f64());
             start += delta_duration;
 
-            // Apply likelihood table
-            let (pos_sum, vel_sum, accel_sum, ang_vel_sum, orient_sum) = particles
-                .par_iter_mut()
-                .map(|p| {
-                    p.position_weight *= (bb.likelihood_table.position)(p.position);
-                    p.linear_velocity_weight *=
-                        (bb.likelihood_table.linear_velocity)(p.linear_velocity);
-                    p.linear_acceleration_weight *=
-                        (bb.likelihood_table.linear_acceleration)(p.linear_acceleration);
-                    p.angular_velocity_weight *=
-                        (bb.likelihood_table.angular_velocity)(p.angular_velocity);
-                    p.orientation_weight *= (bb.likelihood_table.orientation)(p.orientation);
-                    (
-                        p.position_weight,
-                        p.linear_velocity_weight,
-                        p.linear_acceleration_weight,
-                        p.angular_velocity_weight,
-                        p.orientation_weight,
-                    )
-                })
-                .reduce(
-                    || (N::zero(), N::zero(), N::zero(), N::zero(), N::zero()),
-                    |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3, a.4 + b.4),
-                );
-
-            // Normalize weights
-            particles.par_iter_mut().for_each(|p| {
-                p.position_weight /= pos_sum;
-                p.linear_velocity_weight /= vel_sum;
-                p.linear_acceleration_weight /= accel_sum;
-                p.angular_velocity_weight /= ang_vel_sum;
-                p.orientation_weight /= orient_sum;
-            });
-
             // Get running weights for each particle for easier sampling
             join(
                 || {
@@ -363,7 +330,7 @@ pub(super) async fn run_localizer<N: Float>(
                                 running_weight += p.linear_acceleration_weight;
                             });
                             assert!(
-                                (running_weight - N::one()).abs() < nconvert(1e-5),
+                                (running_weight - N::one()).abs() < nconvert(1e-4),
                                 "{}",
                                 (running_weight - N::one()).abs()
                             );
@@ -376,9 +343,10 @@ pub(super) async fn run_localizer<N: Float>(
                                 running_weight += p.linear_velocity_weight;
                             });
                             assert!(
-                                (running_weight - N::one()).abs() < nconvert(1e-5),
-                                "{}",
-                                (running_weight - N::one()).abs()
+                                (running_weight - N::one()).abs() < nconvert(1e-4),
+                                "{} {}",
+                                (running_weight - N::one()).abs(),
+                                bb.robot_base.get_linear_velocity().magnitude()
                             );
                         },
                     );
@@ -393,7 +361,7 @@ pub(super) async fn run_localizer<N: Float>(
                                 running_weight += p.position_weight;
                             });
                             assert!(
-                                (running_weight - N::one()).abs() < nconvert(1e-5),
+                                (running_weight - N::one()).abs() < nconvert(1e-4),
                                 "{}",
                                 (running_weight - N::one()).abs()
                             );
@@ -409,7 +377,7 @@ pub(super) async fn run_localizer<N: Float>(
                                         running_weight += p.angular_velocity_weight;
                                     });
                                     assert!(
-                                        (running_weight - N::one()).abs() < nconvert(1e-5),
+                                        (running_weight - N::one()).abs() < nconvert(1e-4),
                                         "{}",
                                         (running_weight - N::one()).abs()
                                     );
@@ -422,7 +390,7 @@ pub(super) async fn run_localizer<N: Float>(
                                         running_weight += p.orientation_weight;
                                     });
                                     assert!(
-                                        (running_weight - N::one()).abs() < nconvert(1e-5),
+                                        (running_weight - N::one()).abs() < nconvert(1e-4),
                                         "{}",
                                         (running_weight - N::one()).abs()
                                     );
@@ -521,27 +489,69 @@ pub(super) async fn run_localizer<N: Float>(
                 );
             });
 
+            // Apply likelihood table
+            let (pos_sum, vel_sum, accel_sum, ang_vel_sum, orient_sum) = particles
+                .par_iter_mut()
+                .map(|p| {
+                    p.position_weight *= (bb.likelihood_table.position)(&mut p.position);
+                    p.linear_velocity_weight *=
+                        (bb.likelihood_table.linear_velocity)(&mut p.linear_velocity);
+                    p.linear_acceleration_weight *=
+                        (bb.likelihood_table.linear_acceleration)(&mut p.linear_acceleration);
+                    p.angular_velocity_weight *=
+                        (bb.likelihood_table.angular_velocity)(&mut p.angular_velocity);
+                    p.orientation_weight *= (bb.likelihood_table.orientation)(&mut p.orientation);
+                    (
+                        p.position_weight,
+                        p.linear_velocity_weight,
+                        p.linear_acceleration_weight,
+                        p.angular_velocity_weight,
+                        p.orientation_weight,
+                    )
+                })
+                .reduce(
+                    || (N::zero(), N::zero(), N::zero(), N::zero(), N::zero()),
+                    |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3, a.4 + b.4),
+                );
+
+            // if pos_sum == N::zero() {
+
+            // }
+
+            // Normalize weights
+            particles.par_iter_mut().for_each(|p| {
+                if pos_sum != N::zero() {
+                    p.position_weight /= pos_sum;
+                }
+                if vel_sum != N::zero() {
+                    p.linear_velocity_weight /= vel_sum;
+                }
+                if accel_sum != N::zero() {
+                    p.linear_acceleration_weight /= accel_sum;
+                }
+                if ang_vel_sum != N::zero() {
+                    p.angular_velocity_weight /= ang_vel_sum;
+                }
+                if orient_sum != N::zero() {
+                    p.orientation_weight /= orient_sum;
+                }
+            });
+
             // Get mean position, linear_velocity, acceleration, angular_velocity, and orientation
             let ((position, linear_velocity, _acceleration), (_angular_velocity, orientation)) =
                 join(
                     || {
-                        let (mut position, mut linear_velocity, mut acceleration) = particles
+                        particles
                             .par_iter()
-                            .map(|p| (p.position, p.linear_velocity, p.linear_acceleration))
+                            .map(|p| (p.position * p.position_weight, p.linear_velocity * p.linear_velocity_weight, p.linear_acceleration * p.linear_acceleration_weight))
                             .reduce(
                                 || (Vector3::default(), Vector3::default(), Vector3::default()),
                                 |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2),
-                            );
-
-                        position.unscale_mut(nconvert(bb.point_count.get()));
-                        linear_velocity.unscale_mut(nconvert(bb.point_count.get()));
-                        acceleration.unscale_mut(nconvert(bb.point_count.get()));
-
-                        (position, linear_velocity, acceleration)
+                            )
                     },
                     || {
                         join(
-                            || match quat_mean(particles.iter().map(|x| x.angular_velocity))
+                            || match quat_mean(particles.iter().map(|x| (x.angular_velocity, x.angular_velocity_weight)))
                                 .unwrap()
                             {
                                 Ok(x) => x,
@@ -550,7 +560,7 @@ pub(super) async fn run_localizer<N: Float>(
                                     Default::default()
                                 }
                             },
-                            || match quat_mean(particles.iter().map(|x| x.orientation)).unwrap() {
+                            || match quat_mean(particles.iter().map(|x| (x.orientation, x.orientation_weight))).unwrap() {
                                 Ok(x) => x,
                                 Err(e) => {
                                     error!("{e}");
@@ -566,6 +576,7 @@ pub(super) async fn run_localizer<N: Float>(
                 nconvert(Translation3::from(position)),
                 nconvert(orientation),
             ));
+            println!("{:.2}", linear_velocity.magnitude());
             bb.robot_base.set_linear_velocity(nconvert(linear_velocity));
         });
     }

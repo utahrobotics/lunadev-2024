@@ -543,6 +543,7 @@ func _physics_process(delta: float) -> void:
 			conn.put_float(global_position.y)
 			conn.put_float(global_position.z)
 			var vel := user_velocity + Vector3.UP * 9.81
+			print(vel.length())
 			conn.put_float(vel.x)
 			conn.put_float(vel.y)
 			conn.put_float(vel.z)

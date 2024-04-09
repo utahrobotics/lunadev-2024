@@ -89,19 +89,15 @@ impl Float for f64 {
 pub fn quat_mean<N, T, I>(quats: T) -> Option<Result<UnitQuaternion<N>, LanczosError>>
 where
     N: Float,
-    T: IntoIterator<Item = UnitQuaternion<N>, IntoIter = I>,
-    I: ExactSizeIterator<Item = UnitQuaternion<N>>,
+    T: IntoIterator<Item = (UnitQuaternion<N>, N), IntoIter = I>,
+    I: Iterator<Item = (UnitQuaternion<N>, N)>,
 {
     let quats = quats.into_iter();
-    let n = quats.len();
-    if n == 0 {
-        return None;
-    }
 
     let rotation_matrix: Matrix4<N> = quats
-        .map(|q| {
+        .map(|(q, weight)| {
             let q_vec = q.as_vector();
-            q_vec * q_vec.transpose() / nconvert::<_, N>(n)
+            q_vec * q_vec.transpose() * weight
         })
         .sum();
 
