@@ -49,6 +49,8 @@ impl Node for Arms {
 
         let mut tilt_repl = MonoPublisher::from(self.tilt_conn.message_to_send_sub());
         let mut lift_repl = MonoPublisher::from(self.lift_conn.message_to_send_sub());
+        context.spawn_node(self.tilt_conn);
+        context.spawn_node(self.lift_conn);
 
         loop {
             let params = self.arm_sub.recv().await;

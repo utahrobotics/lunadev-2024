@@ -1,3 +1,7 @@
 # Configuration for lunabot
-left_port = "/dev/ttyACM0"
-right_port = "/dev/ttyACM1"
+left_port = "/dev/ttyACM2"
+right_port = "/dev/ttyACM3"
+left_invert = true
+right_invert = true
+tilt_port = "/dev/ttyACM0"
+lift_port = "/dev/ttyACM1"

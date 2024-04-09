@@ -23,7 +23,7 @@ use telemetry::Telemetry;
 use unros::{
     anyhow,
     log::info,
-    logging::dump::DataDump,
+    logging::dump::{DataDump, VideoDataDump},
     pubsub::{subs::Subscription, Subscriber},
     Application, Node,
 };
@@ -113,6 +113,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     teleop_camera
         .image_received_pub()
         .accept_subscription(telemetry.create_image_subscription());
+//     let mut vid_writer = VideoDataDump::new_file(1280, 720, 24);
+//     tokio::spawn(async move { loop {
+        
+// }});
 
     // let costmap_ref = costmap.clone();
 
@@ -181,14 +185,14 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 }),
         );
 
-    let imu01 = open_imu(
-        "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00",
-        imu01,
-    )
-    .await;
-    imu01
-        .msg_received_pub()
-        .accept_subscription(localizer.create_imu_sub().set_name("imu01"));
+    // let imu01 = open_imu(
+    //     "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00",
+    //     imu01,
+    // )
+    // .await;
+    // imu01
+    //     .msg_received_pub()
+    //     .accept_subscription(localizer.create_imu_sub().set_name("imu01"));
 
     #[cfg(unix)]
     {
