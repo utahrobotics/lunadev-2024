@@ -22,8 +22,6 @@ use unros::{
     Application, Node,
 };
 
-use crate::{actuators::Arms, drive::Drive};
-
 mod actuators;
 mod drive;
 mod serial;
@@ -32,7 +30,6 @@ mod telemetry;
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
-    serial::connect_to_serial()?;
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;
     let camera_element = elements.remove("camera").unwrap();
@@ -95,12 +92,11 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .into_logger(|x| format!("{x:?}"), "arms.logs")
         .await?;
 
-    let drive = Drive::new()?;
+    let (arms, drive) = serial::connect_to_serial()?;
     telemetry
         .steering_pub()
         .accept_subscription(drive.get_steering_sub());
 
-    let arms = Arms::new()?;
     telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
 
     let mut teleop_camera = cameras.remove(0);

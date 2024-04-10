@@ -1,20 +1,16 @@
 use unros::anyhow;
 
-use std::os::unix::ffi::OsStrExt;
 use crate::{actuators::Arms, drive::Drive};
 use std::fs::{self, DirEntry};
-use std::process::{Command, Stdio};
+use std::os::unix::ffi::OsStrExt;
+use std::process::Command;
 
 pub fn connect_to_serial() -> anyhow::Result<(Arms, Drive)> {
     let dev_directory = fs::read_dir("/dev")?;
     let acm_devices: Vec<DirEntry> = dev_directory
         .filter_map(|entry| {
             let entry = entry.ok()?;
-            if entry
-                .file_name()
-                .as_bytes()
-                .starts_with(b"ttyACM")
-            {
+            if entry.file_name().as_bytes().starts_with(b"ttyACM") {
                 Some(entry)
             } else {
                 None
@@ -37,7 +33,10 @@ pub fn connect_to_serial() -> anyhow::Result<(Arms, Drive)> {
     }
 
     if acm_devices.len() != 4 {
-        return Err(anyhow::anyhow!("Expected 4 ttyACM devices, got {}", acm_devices.len()));
+        return Err(anyhow::anyhow!(
+            "Expected 4 ttyACM devices, got {}",
+            acm_devices.len()
+        ));
     }
 
     let mut micro_python_paths = [None, None];
@@ -67,10 +66,20 @@ pub fn connect_to_serial() -> anyhow::Result<(Arms, Drive)> {
     }
 
     if micro_py_count < 2 {
-        return Err(anyhow::anyhow!("Expected 2 MicroPython devices, got {}", micro_py_count));
+        return Err(anyhow::anyhow!(
+            "Expected 2 MicroPython devices, got {}",
+            micro_py_count
+        ));
     }
 
-    let micro_python_paths = micro_python_paths.map(|x| x.unwrap());
-
-    todo!()
+    Ok((
+        Arms::new(
+            micro_python_paths[0].take().unwrap().to_string_lossy(),
+            micro_python_paths[1].take().unwrap().to_string_lossy(),
+        ),
+        Drive::new(
+            vesc_paths.pop().unwrap().to_string_lossy(),
+            vesc_paths.pop().unwrap().to_string_lossy(),
+        )?,
+    ))
 }

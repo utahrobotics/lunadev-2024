@@ -21,9 +21,6 @@ pub struct Drive {
 
 #[derive(Deserialize)]
 struct DriveConfig {
-    left_port: String,
-    right_port: String,
-
     #[serde(default)]
     left_invert: bool,
     #[serde(default)]
@@ -31,29 +28,9 @@ struct DriveConfig {
 }
 
 impl Drive {
-    pub fn new() -> anyhow::Result<Self> {
-        let mut vesc = PyRepl::new("lunabot/src")?;
-        let config: DriveConfig = get_env()?;
-
-        let msg = vesc.exec("from drive_vesc import *")?;
-        if !msg.trim().is_empty() {
-            log::error!("{msg}");
-        }
-
-        Ok(Self {
-            steering_sub: Subscriber::new(4),
-            intrinsics: Default::default(),
-            vesc,
-            left_invert: config.left_invert,
-            right_invert: config.right_invert,
-            left_conn: SerialConnection::new(config.left_port, 115200, true),
-            right_conn: SerialConnection::new(config.right_port, 115200, true),
-        })
-    }
-
-    pub fn new_with(
-        left_conn: SerialConnection,
-        right_conn: SerialConnection,
+    pub fn new(
+        left_port: impl Into<String>,
+        right_port: impl Into<String>,
     ) -> anyhow::Result<Self> {
         let mut vesc = PyRepl::new("lunabot/src")?;
         let config: DriveConfig = get_env()?;
@@ -69,8 +46,8 @@ impl Drive {
             vesc,
             left_invert: config.left_invert,
             right_invert: config.right_invert,
-            left_conn,
-            right_conn,
+            left_conn: SerialConnection::new(left_port, 115200, true),
+            right_conn: SerialConnection::new(right_port, 115200, true),
         })
     }
 
