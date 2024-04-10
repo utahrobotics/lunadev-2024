@@ -543,7 +543,13 @@ pub(super) async fn run_localizer<N: Float>(
                     || {
                         particles
                             .par_iter()
-                            .map(|p| (p.position * p.position_weight, p.linear_velocity * p.linear_velocity_weight, p.linear_acceleration * p.linear_acceleration_weight))
+                            .map(|p| {
+                                (
+                                    p.position * p.position_weight,
+                                    p.linear_velocity * p.linear_velocity_weight,
+                                    p.linear_acceleration * p.linear_acceleration_weight,
+                                )
+                            })
                             .reduce(
                                 || (Vector3::default(), Vector3::default(), Vector3::default()),
                                 |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2),
@@ -551,8 +557,12 @@ pub(super) async fn run_localizer<N: Float>(
                     },
                     || {
                         join(
-                            || match quat_mean(particles.iter().map(|x| (x.angular_velocity, x.angular_velocity_weight)))
-                                .unwrap()
+                            || match quat_mean(
+                                particles
+                                    .iter()
+                                    .map(|x| (x.angular_velocity, x.angular_velocity_weight)),
+                            )
+                            .unwrap()
                             {
                                 Ok(x) => x,
                                 Err(e) => {
@@ -560,7 +570,13 @@ pub(super) async fn run_localizer<N: Float>(
                                     Default::default()
                                 }
                             },
-                            || match quat_mean(particles.iter().map(|x| (x.orientation, x.orientation_weight))).unwrap() {
+                            || match quat_mean(
+                                particles
+                                    .iter()
+                                    .map(|x| (x.orientation, x.orientation_weight)),
+                            )
+                            .unwrap()
+                            {
                                 Ok(x) => x,
                                 Err(e) => {
                                     error!("{e}");

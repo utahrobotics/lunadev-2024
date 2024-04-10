@@ -5,7 +5,9 @@ use nalgebra::{Point3, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    anyhow, async_trait, asyncify_run, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait, asyncify_run,
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
+    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
 };
 
 pub mod drive;

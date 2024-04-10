@@ -51,6 +51,29 @@ impl Drive {
         })
     }
 
+    pub fn new_with(
+        left_conn: SerialConnection,
+        right_conn: SerialConnection,
+    ) -> anyhow::Result<Self> {
+        let mut vesc = PyRepl::new("lunabot/src")?;
+        let config: DriveConfig = get_env()?;
+
+        let msg = vesc.exec("from drive_vesc import *")?;
+        if !msg.trim().is_empty() {
+            log::error!("{msg}");
+        }
+
+        Ok(Self {
+            steering_sub: Subscriber::new(4),
+            intrinsics: Default::default(),
+            vesc,
+            left_invert: config.left_invert,
+            right_invert: config.right_invert,
+            left_conn,
+            right_conn,
+        })
+    }
+
     pub fn get_steering_sub(&self) -> DirectSubscription<Steering> {
         self.steering_sub.create_subscription()
     }

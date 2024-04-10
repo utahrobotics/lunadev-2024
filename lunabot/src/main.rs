@@ -26,11 +26,13 @@ use crate::{actuators::Arms, drive::Drive};
 
 mod actuators;
 mod drive;
+mod serial;
 // mod imu;
 mod telemetry;
 
 #[unros::main]
 async fn main(mut app: Application) -> anyhow::Result<Application> {
+    serial::connect_to_serial()?;
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;
     let camera_element = elements.remove("camera").unwrap();

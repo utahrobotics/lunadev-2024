@@ -31,6 +31,18 @@ impl Arms {
         })
     }
 
+    pub fn new_with(
+        tilt_conn: SerialConnection<String, String>,
+        lift_conn: SerialConnection<String, String>,
+    ) -> Self {
+        Self {
+            arm_sub: Subscriber::new(4),
+            intrinsics: Default::default(),
+            tilt_conn,
+            lift_conn,
+        }
+    }
+
     pub fn get_arm_sub(&self) -> DirectSubscription<ArmParameters> {
         self.arm_sub.create_subscription()
     }
