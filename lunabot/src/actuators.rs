@@ -53,6 +53,7 @@ impl Node for Arms {
                         // Do Nothing, we are correct already
                     } else if info.contains("INFO:\nRole: Lift\n") {
                         std::mem::swap(&mut tilt_repl, &mut lift_repl);
+                        info!("Arms were swapped");
                     } else {
                         break Err(anyhow::anyhow!("Unexpected response from arm: {}", info));
                     }
@@ -76,10 +77,10 @@ impl Node for Arms {
 
         self.tilt_conn
             .get_intrinsics()
-            .manually_run("left-vesc".into());
+            .manually_run("tilt-bucket".into());
         self.lift_conn
             .get_intrinsics()
-            .manually_run("right-vesc".into());
+            .manually_run("lift-arm".into());
 
         tokio::select! {
             res = arms_fut => res,
