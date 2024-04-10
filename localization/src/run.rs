@@ -236,7 +236,6 @@ pub(super) async fn run_localizer<N: Float>(
                 // Find the velocity of the robot base based on the observation of the velocity of an element
                 // attached to the robot base.
                 frame.velocity = nconvert::<_, UnitQuaternion<N>>(frame.robot_element.get_isometry_from_base().rotation) * frame.velocity;
-                // println!("{:.2}", frame.velocity.magnitude());
                 let std_dev = frame.variance.sqrt();
 
                 if frame.variance == N::zero() {
@@ -592,8 +591,23 @@ pub(super) async fn run_localizer<N: Float>(
                 nconvert(Translation3::from(position)),
                 nconvert(orientation),
             ));
-            println!("{:.2}", linear_velocity.magnitude());
             bb.robot_base.set_linear_velocity(nconvert(linear_velocity));
+
+            // Calculate the sum of squared differences from the mean
+            let sum_squared_diff = particles
+                .par_iter_mut()
+                .map(|p| {
+                    let diff = p.linear_velocity - linear_velocity;
+                    diff.component_mul(&diff)
+                })
+                .reduce(
+                    || Vector3::default(),
+                    |a, b| a + b,
+                );
+
+            // Calculate the variance
+            let variance = sum_squared_diff / nconvert::<_, N>((bb.point_count.get() - 1).max(1));
+            println!("{:.2} {:.2} {:.2}", variance.x, variance.y, variance.z);
         });
     }
     bb.context = Some(context);
