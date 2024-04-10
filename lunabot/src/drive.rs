@@ -2,7 +2,7 @@ use base64::prelude::*;
 use navigator::drive::Steering;
 use py_repl::PyRepl;
 use serde::Deserialize;
-use serial::SerialConnection;
+use serial::{Bytes, SerialConnection};
 use unros::{
     anyhow, async_trait, get_env, log,
     pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber},
@@ -17,6 +17,8 @@ pub struct Drive {
     intrinsics: NodeIntrinsics<Self>,
     left_invert: bool,
     right_invert: bool,
+    get_values_respose_len: usize,
+    get_values_request: Bytes
 }
 
 #[derive(Deserialize)]
@@ -39,6 +41,8 @@ impl Drive {
         if !msg.trim().is_empty() {
             log::error!("{msg}");
         }
+        let get_values_respose_len: usize = vesc.exec("GET_VALUES_MSG_LENGTH")?.parse()?;
+        let get_values_request = BASE64_STANDARD.decode(vesc.exec("get_GET_VALUES()")?)?.into();
 
         Ok(Self {
             steering_sub: Subscriber::new(4),
@@ -48,6 +52,8 @@ impl Drive {
             right_invert: config.right_invert,
             left_conn: SerialConnection::new(left_port, 115200, true),
             right_conn: SerialConnection::new(right_port, 115200, true),
+            get_values_respose_len,
+            get_values_request
         })
     }
 
@@ -67,10 +73,30 @@ impl Node for Drive {
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
-        let mut left_duty = MonoPublisher::from(self.left_conn.message_to_send_sub());
-        let mut right_duty = MonoPublisher::from(self.right_conn.message_to_send_sub());
+        let mut left_pub = MonoPublisher::from(self.left_conn.message_to_send_sub());
+        let left_sub = Subscriber::new(8);
+        self.left_conn.msg_received_pub().accept_subscription(left_sub.create_subscription());
+        let mut right_pub = MonoPublisher::from(self.right_conn.message_to_send_sub());
 
         let steering_fut = async {
+            left_pub.set(self.get_values_request.clone());
+            let mut get_values_buf = Vec::with_capacity(self.get_values_respose_len);
+            let mut read_bytes = 0usize;
+
+            while read_bytes < self.get_values_respose_len {
+                let bytes = left_sub.recv().await;
+                let bytes_len = bytes.len();
+                get_values_buf.extend_from_slice(&bytes);
+                read_bytes += bytes_len;
+            }
+
+            let app_controller_id = self.vesc.exec(&format!(
+                r#"decode_get_values({})"#,
+                BASE64_STANDARD.encode(&get_values_buf)
+            ))?;
+
+            println!("Left VESC ID: {}", app_controller_id);
+
             loop {
                 let steering = self.steering_sub.recv().await;
 
@@ -88,8 +114,8 @@ impl Node for Drive {
                 let left_vesc_msg = BASE64_STANDARD.decode(left_b64)?;
                 let right_vesc_msg = BASE64_STANDARD.decode(right_b64)?;
 
-                left_duty.set(left_vesc_msg.into());
-                right_duty.set(right_vesc_msg.into());
+                left_pub.set(left_vesc_msg.into());
+                right_pub.set(right_vesc_msg.into());
             }
         };
 
