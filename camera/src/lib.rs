@@ -22,9 +22,7 @@ use eye::hal::{
 use image::codecs::jpeg::JpegDecoder;
 use image::{imageops::FilterType, DynamicImage};
 use unros::{
-    anyhow, async_trait,
-    pubsub::{Publisher, PublisherRef},
-    setup_logging, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, node::SyncNode, pubsub::{Publisher, PublisherRef}, setup_logging, DontDrop, runtime::RuntimeContext
 };
 #[cfg(not(unix))]
 pub struct Description {
@@ -38,10 +36,7 @@ static PLATFORM: Mutex<Option<PlatformContext>> = Mutex::new(None);
 /// A pending connection to a camera.
 ///
 /// The connection is not created until this `Node` is ran.
-pub struct Camera<F = fn(DynamicImage, u32, u32) -> DynamicImage>
-where
-    F: FnMut(DynamicImage, u32, u32) -> DynamicImage + Send + 'static,
-{
+pub struct Camera<F = fn(DynamicImage, u32, u32) -> DynamicImage> {
     pub fps: u32,
     pub res_x: u32,
     pub res_y: u32,
@@ -49,7 +44,7 @@ where
     device: Mutex<Device<'static>>,
     description: Description,
     image_received: Publisher<Arc<DynamicImage>>,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
     #[allow(dead_code)]
     resizer: F,
 }
@@ -82,9 +77,9 @@ impl Camera {
             res_y: 0,
             #[cfg(unix)]
             device: Mutex::new(platform.open_device(&description.uri)?),
-            description,
             image_received: Default::default(),
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new(description.product.clone()),
+            description,
             resizer: crop_resize,
         })
     }
@@ -105,20 +100,16 @@ impl<F: FnMut(DynamicImage, u32, u32) -> DynamicImage + Send> Camera<F> {
     }
 }
 
-#[async_trait]
-impl<F> Node for Camera<F>
+impl<F> SyncNode for Camera<F>
 where
     F: FnMut(DynamicImage, u32, u32) -> DynamicImage + Send + 'static,
 {
-    const DEFAULT_NAME: &'static str = "camera";
-
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
-    }
+    type Result = anyhow::Result<()>;
 
     #[cfg(unix)]
-    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+    fn run(mut self, context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
+        self.dont_drop.ignore_drop = true;
         let device = self.device.get_mut().unwrap();
         let streams = device.streams()?;
 
@@ -146,15 +137,12 @@ where
 
         let mut stream = device.start_stream(&stream_desc)?;
 
-        let drop_check = unros::DropCheck::default();
-        let drop_obs = drop_check.get_observing();
-
-        unros::asyncify_run(move || loop {
+        loop {
             let Some(result) = stream.next() else {
                 break Ok(());
             };
             let frame = result?;
-            if drop_obs.has_dropped() {
+            if context.is_runtime_exiting() {
                 break Ok(());
             }
 
@@ -180,8 +168,7 @@ where
             } else {
                 self.image_received.set(Arc::new(img));
             }
-        })
-        .await
+        }
         // let index = CameraIndex::Index(self.camera_index);
 
         // let requested = if self.fps > 0 {
@@ -206,8 +193,9 @@ where
         // let res_y = self.res_y;
     }
     #[cfg(not(unix))]
-    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+    fn run(mut self, context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
+        self.dont_drop.ignore_drop = true;
         warn!("Camera node is not supported on this platform");
         Ok(())
     }
