@@ -105,6 +105,17 @@ struct CalibratedImu<N: Float> {
     angular_velocity_bias: UnitQuaternion<N>,
 }
 
+/// A collection of functions that can be used to incorporate the likelihoods of more nuanced scenarios.
+/// 
+/// For example, you may know the top speed of your robot, so you can assign all velocities
+/// above that speed a likelihood of zero. Do not that a likelihood of 1 *does not* mean 100% possible,
+/// whereas a likelihood of 0 *does* mean impossible. The effect of non-zero likelihoods depends on
+/// how the likelihood function works against all values in the filter.
+/// 
+/// If there are two particles in the filter, and a likelihood function returns 1000 for the velocity
+/// of both particles, it means that both particles are equally likely to be true. This would be true
+/// even if the likelihood was 1 for both, or even 0.00001 for both. In other words, the ratio between
+/// likelihoods matters more than the magnitude.
 pub struct LikelihoodTable<N: Float> {
     pub position: Box<dyn Fn(&mut Vector3<N>) -> N + Send + Sync>,
     pub linear_velocity: Box<dyn Fn(&mut Vector3<N>) -> N + Send + Sync>,

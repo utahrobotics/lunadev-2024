@@ -67,17 +67,15 @@ pub(super) async fn run_localizer<N: Float>(
 
             Particle {
                 position: start_position
-                    + random_unit_vector(&mut rng)
-                        .scale(nconvert(trans_distr.sample(rng.deref_mut()))),
+                    + random_unit_vector(&mut rng).scale(nconvert(trans_distr.sample(rng.deref_mut()))),
                 position_weight: default_weight,
                 orientation: bb.start_orientation,
                 orientation_weight: default_weight,
-                linear_velocity: random_unit_vector(&mut rng)
-                    .scale(nconvert(trans_distr.sample(rng.deref_mut()))),
+                linear_velocity: random_unit_vector(&mut rng).scale(nconvert(trans_distr.sample(rng.deref_mut()))),
                 linear_velocity_weight: default_weight,
                 angular_velocity: Default::default(),
                 angular_velocity_weight: default_weight,
-                linear_acceleration: gravity(),
+                linear_acceleration: gravity() + random_unit_vector(&mut rng).scale(nconvert(trans_distr.sample(rng.deref_mut()))),
                 linear_acceleration_weight: default_weight,
             }
         })

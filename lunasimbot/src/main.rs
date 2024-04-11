@@ -85,10 +85,10 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let nav_task = pathfinder.get_navigation_handle();
 
     let mut localizer = Localizer::new(robot_base, 0.0f32);
-    localizer.likelihood_table.position =
-        Box::new(|pos| if pos.y.abs() >= 0.2 { 0.0 } else { 1.0 });
-    localizer.likelihood_table.linear_velocity =
-        Box::new(|vel| if vel.magnitude() > 0.75 { 0.0 } else { 1.0 });
+    // localizer.likelihood_table.position =
+    //     Box::new(|pos| if pos.y.abs() >= 0.2 { 0.0 } else { 1.0 });
+    // localizer.likelihood_table.linear_velocity =
+    //     Box::new(|vel| if vel.magnitude() > 0.75 { 0.0 } else { 1.0 });
 
     let position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));
@@ -136,11 +136,23 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                     .read_f32_le()
                     .await
                     .expect("Failed to receive packet") as Float;
-                let _vy = stream
+                let vy = stream
                     .read_f32_le()
                     .await
                     .expect("Failed to receive packet") as Float;
                 let vz = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let ax = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let ay = stream
+                    .read_f32_le()
+                    .await
+                    .expect("Failed to receive packet") as Float;
+                let az = stream
                     .read_f32_le()
                     .await
                     .expect("Failed to receive packet") as Float;
@@ -190,11 +202,11 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                     0.03,
                     debug_element.get_ref(),
                 ));
-                velocity_pub.set(VelocityFrame::rand(
-                    Vector3::new(vx, 0.0, vz),
-                    0.03,
-                    debug_element.get_ref(),
-                ));
+                // velocity_pub.set(VelocityFrame::rand(
+                //     Vector3::new(vx, vy, vz),
+                //     0.03,
+                //     debug_element.get_ref(),
+                // ));
                 let orientation = UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k));
                 orientation_pub.set(OrientationFrame::rand(
                     orientation,
@@ -202,7 +214,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                     debug_element.get_ref(),
                 ));
                 imu_pub.set(IMUFrame::rand(
-                    orientation * Vector3::new(0.0, -9.81, 0.0),
+                    Vector3::new(ax, ay, az),
                     0.03,
                     UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)),
                     0.03,
