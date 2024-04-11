@@ -13,6 +13,7 @@ unros = { path = "../unros" }
 rig = { path = "../rig" }
 nalgebra = { workspace = true }
 fxhash = { workspace = true }
+crossbeam = { workspace = true }
 
 [dev-dependencies]
 camera = { path = "../camera" }

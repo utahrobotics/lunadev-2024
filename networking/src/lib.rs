@@ -19,14 +19,10 @@ use negotiation::{FromPeer, Negotiation};
 use peer::{AwaitingNegotiationReq, NetworkPublisher};
 use spin_sleep::SpinSleeper;
 use unros::{
-    anyhow, async_trait, asyncify_run,
-    pubsub::{
+    anyhow, node::SyncNode, pubsub::{
         subs::{DirectSubscription, Subscription},
         MonoPublisher, Subscriber,
-    },
-    setup_logging,
-    tokio::{self, sync::oneshot},
-    DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    }, runtime::RuntimeContext, setup_logging, tokio::{self, sync::oneshot}, DontDrop
 };
 
 use crate::peer::{PeerStateMachine, Retention};
@@ -131,10 +127,10 @@ impl NetworkConnector {
 pub struct NetworkNode {
     pub service_duration: Duration,
     pub peer_buffer_size: usize,
-    intrinsics: NodeIntrinsics<Self>,
     socket: Socket,
     peer_pub: MonoPublisher<(Packet, NetworkPeer)>,
     address_receiver: Receiver<(Packet, tokio::sync::oneshot::Sender<NetworkPeer>)>,
+    dont_drop: DontDrop,
 }
 
 pub fn new_client() -> laminar::Result<(NetworkNode, NetworkConnector)> {
@@ -145,8 +141,8 @@ pub fn new_client() -> laminar::Result<(NetworkNode, NetworkConnector)> {
             service_duration: Duration::from_millis(20),
             peer_buffer_size: 8,
             peer_pub: MonoPublisher::new(),
-            intrinsics: NodeIntrinsics::default(),
             address_receiver,
+            dont_drop: DontDrop::new("network-client"),
         },
         NetworkConnector { address_sender },
     ))
@@ -180,31 +176,29 @@ where
                     })
                     .boxed(),
             ),
-            intrinsics: NodeIntrinsics::default(),
             address_receiver,
+            dont_drop: DontDrop::new("network-client"),
         },
         NetworkConnector { address_sender },
     ))
 }
 
-#[async_trait]
-impl Node for NetworkNode {
-    const DEFAULT_NAME: &'static str = "networking";
+impl SyncNode for NetworkNode {
+    type Result = anyhow::Result<()>;
 
-    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+    fn run(mut self, context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
+        self.dont_drop.ignore_drop = true;
 
-        let drop_check = DropCheck::default();
-        let _drop_check = drop_check.clone();
         let mut conns: FxHashMap<SocketAddr, PeerStateMachine> = FxHashMap::default();
         let mut socket = self.socket;
         let spin_sleeper = SpinSleeper::default();
         let mut now = Instant::now();
 
-        asyncify_run(move || loop {
+        loop {
             now += now.elapsed();
             socket.manual_poll(now);
-            if drop_check.has_dropped() {
+            if context.is_runtime_exiting() {
                 for (addr, _) in conns {
                     let mut payload = bitcode::encode(&SpecialMessage::Disconnect).unwrap();
                     payload.push(0);
@@ -312,11 +306,6 @@ impl Node for NetworkNode {
             }
 
             spin_sleeper.sleep(self.service_duration.saturating_sub(now.elapsed()));
-        })
-        .await
-    }
-
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
+        }
     }
 }

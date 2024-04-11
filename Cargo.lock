@@ -127,6 +127,7 @@ dependencies = [
  "apriltag-image",
  "apriltag-nalgebra",
  "camera",
+ "crossbeam",
  "fxhash",
  "nalgebra",
  "rig",

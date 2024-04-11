@@ -4,22 +4,18 @@
 use std::{
     f64::consts::PI,
     fmt::{Debug, Display},
-    sync::{mpsc::sync_channel, Arc},
-    // time::Instant,
+    sync::Arc,
 };
 
 use apriltag_image::{image::DynamicImage, ImageExt};
 use apriltag_inner::{families::Tag16h5, DetectorBuilder, Image, TagParams};
 use apriltag_nalgebra::PoseExt;
+use crossbeam::utils::Backoff;
 use fxhash::FxHashMap;
 use nalgebra::{Isometry3, Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros::{
-    anyhow, async_trait,
-    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
-    rayon, setup_logging,
-    tokio::{self, sync::mpsc::channel},
-    Node, NodeIntrinsics, RuntimeContext,
+    anyhow, node::SyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, DontDrop
 };
 
 /// An observation of the global orientation and position
@@ -70,7 +66,7 @@ pub struct AprilTagDetector {
     image_height: u32,
     robot_element: RobotElementRef,
     pub velocity_window: usize,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
 }
 
 impl AprilTagDetector {
@@ -98,7 +94,7 @@ impl AprilTagDetector {
             image_height,
             robot_element,
             velocity_window: 200,
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new("apriltag-detector"),
         }
     }
 
@@ -137,117 +133,95 @@ impl AprilTagDetector {
     }
 }
 
-#[async_trait]
-impl Node for AprilTagDetector {
-    const DEFAULT_NAME: &'static str = "apriltag";
+impl SyncNode for AprilTagDetector {
+    type Result = anyhow::Result<()>;
 
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
-    }
+    fn run(mut self, context: RuntimeContext) -> Self::Result {
+        setup_logging!(context);
+        self.dont_drop.ignore_drop = true;
 
-    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
-        let (err_sender, mut err_receiver) = channel(1);
-        let (img_sender, img_receiver) = sync_channel::<Arc<DynamicImage>>(0);
+        let mut detector = DetectorBuilder::new()
+            .add_family_bits(Tag16h5::default(), 1)
+            .build()?;
 
-        rayon::spawn(move || {
-            setup_logging!(context);
-
-            macro_rules! unwrap {
-                ($result: expr) => {
-                    match $result {
-                        Ok(x) => x,
-                        Err(e) => {
-                            let _ = err_sender.blocking_send(e.into());
-                            return;
-                        }
-                    }
-                };
-            }
-            let mut detector = unwrap!(DetectorBuilder::new()
-                .add_family_bits(Tag16h5::default(), 1)
-                .build());
-
-            // let mut seen: FxHashMap<usize, (Instant, Vector3<f64>)> = FxHashMap::default();
-
-            while let Ok(img) = img_receiver.recv() {
-                let img = img.to_luma8();
-                if img.width() != self.image_width || img.height() != self.image_height {
-                    error!(
-                        "Received incorrectly sized image: {}x{}",
-                        img.width(),
-                        img.height()
-                    );
-                    continue;
-                }
-                let img = Image::from_image_buffer(&img);
-
-                for detection in detector.detect(&img) {
-                    if detection.decision_margin() < 130.0 {
-                        continue;
-                    }
-                    let Some(known) = self.known_tags.get(&detection.id()) else {
-                        continue;
-                    };
-                    let Some(robot_pose) = detection.estimate_tag_pose(&known.tag_params) else {
-                        warn!("Failed to estimate pose of {}", detection.id());
-                        continue;
-                    };
-
-                    let mut robot_pose = robot_pose.to_na();
-
-                    robot_pose.translation.vector = known.pose.translation.vector
-                        + known.pose.rotation
-                            * robot_pose.rotation.inverse()
-                            * robot_pose.translation.vector;
-                    robot_pose.rotation = known.pose.rotation
-                        * UnitQuaternion::from_axis_angle(
-                            &(robot_pose.rotation * Vector3::y_axis()),
-                            PI,
-                        )
-                        * robot_pose.rotation;
-                    // let velocity;
-
-                    // if let Some((time, old_pos)) = seen.get_mut(&detection.id()) {
-                    //     let elapsed = time.elapsed().as_millis();
-
-                    //     if elapsed >= 100 {
-                    //         if elapsed <= self.velocity_window as u128 {
-                    //             velocity = Some(
-                    //                 (robot_pose.translation.vector - *old_pos) * (1000.0 / elapsed as f64),
-                    //             );
-                    //         } else {
-                    //             velocity = None;
-                    //         }
-                    //         *time = Instant::now();
-                    //         *old_pos = robot_pose.translation.vector;
-                    //     } else {
-                    //         velocity = None;
-                    //     }
-                    // } else {
-                    //     seen.insert(detection.id(), (Instant::now(), robot_pose.translation.vector));
-                    //     velocity = None;
-                    // }
-
-                    self.tag_detected.set(PoseObservation {
-                        pose: robot_pose,
-                        // velocity,
-                        decision_margin: detection.decision_margin(),
-                        robot_element: self.robot_element.clone(),
-                    });
-                }
-            }
-        });
+        let backoff = Backoff::new();
 
         loop {
-            tokio::select! {
-                img = self.image_sub.recv() => {
-                    let _ = img_sender.try_send(img);
+            let Some(img) = self.image_sub.try_recv() else {
+                if self.image_sub.get_pub_count() == 0 {
+                    break;
                 }
-                result = err_receiver.recv() => {
-                    let e = result.unwrap();
-                    break Err(e);
+                backoff.snooze();
+                continue;
+            };
+            backoff.reset();
+            let img = img.to_luma8();
+            if img.width() != self.image_width || img.height() != self.image_height {
+                error!(
+                    "Received incorrectly sized image: {}x{}",
+                    img.width(),
+                    img.height()
+                );
+                continue;
+            }
+            let img = Image::from_image_buffer(&img);
+
+            for detection in detector.detect(&img) {
+                if detection.decision_margin() < 130.0 {
+                    continue;
                 }
+                let Some(known) = self.known_tags.get(&detection.id()) else {
+                    continue;
+                };
+                let Some(robot_pose) = detection.estimate_tag_pose(&known.tag_params) else {
+                    warn!("Failed to estimate pose of {}", detection.id());
+                    continue;
+                };
+
+                let mut robot_pose = robot_pose.to_na();
+
+                robot_pose.translation.vector = known.pose.translation.vector
+                    + known.pose.rotation
+                        * robot_pose.rotation.inverse()
+                        * robot_pose.translation.vector;
+                robot_pose.rotation = known.pose.rotation
+                    * UnitQuaternion::from_axis_angle(
+                        &(robot_pose.rotation * Vector3::y_axis()),
+                        PI,
+                    )
+                    * robot_pose.rotation;
+                // let velocity;
+
+                // if let Some((time, old_pos)) = seen.get_mut(&detection.id()) {
+                //     let elapsed = time.elapsed().as_millis();
+
+                //     if elapsed >= 100 {
+                //         if elapsed <= self.velocity_window as u128 {
+                //             velocity = Some(
+                //                 (robot_pose.translation.vector - *old_pos) * (1000.0 / elapsed as f64),
+                //             );
+                //         } else {
+                //             velocity = None;
+                //         }
+                //         *time = Instant::now();
+                //         *old_pos = robot_pose.translation.vector;
+                //     } else {
+                //         velocity = None;
+                //     }
+                // } else {
+                //     seen.insert(detection.id(), (Instant::now(), robot_pose.translation.vector));
+                //     velocity = None;
+                // }
+
+                self.tag_detected.set(PoseObservation {
+                    pose: robot_pose,
+                    // velocity,
+                    decision_margin: detection.decision_margin(),
+                    robot_element: self.robot_element.clone(),
+                });
             }
         }
+
+        Ok(())
     }
 }

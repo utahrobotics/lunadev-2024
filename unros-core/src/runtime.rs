@@ -1,5 +1,5 @@
 use std::{
-    backtrace::Backtrace, borrow::Cow, future::Future, io::Read, ops::Deref, path::{Path, PathBuf}, sync::{atomic::{AtomicBool, Ordering}, Arc, OnceLock, Weak}, thread::JoinHandle as SyncJoinHandle, time::{Duration, Instant}
+    backtrace::Backtrace, borrow::Cow, future::Future, io::BufRead, ops::Deref, path::{Path, PathBuf}, sync::{atomic::{AtomicBool, Ordering}, Arc, OnceLock, Weak}, thread::JoinHandle as SyncJoinHandle, time::{Duration, Instant}
 };
 
 use chrono::{DateTime, Datelike, Local, Timelike};
@@ -129,7 +129,7 @@ impl MainRuntimeContext {
 
             loop {
                 buffer.clear();
-                if stdin.read_to_string(&mut buffer).is_err() {
+                if stdin.read_line(&mut buffer).is_err() {
                     break;
                 }
                 repl(buffer.trim());
