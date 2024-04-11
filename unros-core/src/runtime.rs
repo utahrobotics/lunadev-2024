@@ -120,7 +120,7 @@ impl MainRuntimeContext {
         let _ = self.inner.exiting.clone().changed().await;
     }
 
-    pub async fn wait_for_exit_with_repl(self, mut repl: impl FnMut(&[&str]) + Send + 'static) {
+    pub async fn wait_for_exit_with_repl(self, mut repl: impl FnMut(&str) + Send + 'static) {
         HAS_REPL.store(true, Ordering::Release);
         std::thread::spawn(move || {
             let stdin = std::io::stdin();
@@ -132,8 +132,7 @@ impl MainRuntimeContext {
                 if stdin.read_to_string(&mut buffer).is_err() {
                     break;
                 }
-                let tokens: Vec<_> = buffer.trim().split_whitespace().collect();
-                repl(&tokens);
+                repl(buffer.trim());
             }
         });
         let _ = self.inner.exiting.clone().changed().await;
@@ -317,11 +316,13 @@ pub fn start_unros_runtime<T: Send + 'static, F: Future<Output = T> + Send + 'st
         log::info!("Runtime started with pid: {pid}");
         tokio::select! {
             res = tokio::spawn(main(main_run_ctx)) => {
+                HAS_REPL.store(false, Ordering::Release);
                 log::warn!("Exiting from main");
                 res.ok()
             }
             _ = cpu_fut => unreachable!(),
             end = end_sub.recv() => {
+                HAS_REPL.store(false, Ordering::Release);
                 match end {
                     EndCondition::CtrlC => log::warn!("Ctrl-C received. Exiting..."),
                     EndCondition::QuitOnDrop => {}

@@ -11,3 +11,4 @@ publishing/
 lunabase/camera.sdp
 *.zst
 *.pyc
+dump/

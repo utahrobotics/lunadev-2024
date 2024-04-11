@@ -1,14 +1,12 @@
-use std::io::{stdin, stdout, BufRead, Write};
+use std::io::{stdout, Write};
 
 use serial::{Bytes, SerialConnection};
 use unros::{
-    anyhow,
-    pubsub::{Publisher, Subscriber},
-    spawn_persistent_thread, tokio, Application,
+    pubsub::{Publisher, Subscriber}, runtime::MainRuntimeContext, tokio, node::AsyncNode
 };
 
 #[unros::main]
-async fn main(mut app: Application) -> anyhow::Result<Application> {
+async fn main(ctx: MainRuntimeContext) {
     // "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00"
     let serial = SerialConnection::new(
         "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00",
@@ -32,22 +30,12 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     });
     let write_signal: Publisher<_> = Default::default();
     write_signal.accept_subscription(serial.message_to_send_sub());
+    serial.spawn(ctx.make_context("serial"));
 
-    spawn_persistent_thread(move || {
-        let stdin = stdin();
-        let mut stdin = stdin.lock();
+    let carriage_return_bytes = Bytes::from_static(b"\r");
 
-        let mut line = String::new();
-        loop {
-            line.clear();
-            stdin.read_line(&mut line).expect("Failed to read a line");
-            line += "\r";
-            let line = line.clone().into_bytes();
-            write_signal.set(line.into());
-        }
-    });
-
-    app.add_node(serial);
-
-    Ok(app)
+    ctx.wait_for_exit_with_repl(move |line| {
+        write_signal.set(line.to_string().into_bytes().into());
+        write_signal.set(carriage_return_bytes.clone());
+    }).await;
 }

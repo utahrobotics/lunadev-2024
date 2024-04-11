@@ -3781,7 +3781,6 @@ name = "unros-core"
 version = "0.1.2"
 dependencies = [
  "anyhow",
- "async-trait",
  "chrono",
  "color-eyre",
  "config",

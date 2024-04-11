@@ -14,16 +14,15 @@
 //! 5. The Service framework (analagous to ROS actions and services)
 
 #![allow(clippy::type_complexity)]
-#![feature(once_cell_try, result_flattening, div_duration)]
+#![feature(once_cell_try)]
 #![feature(ptr_metadata)]
 #![feature(alloc_layout_extra)]
 
 use std::{
-    path::Path,
-    sync::{
+    borrow::Cow, path::Path, sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
-    },
+    }
 };
 
 pub mod logging;
@@ -35,7 +34,6 @@ pub mod service;
 pub mod utils;
 
 pub use anyhow;
-pub use async_trait::async_trait;
 use config::Config;
 pub use log;
 pub use rand;
@@ -136,4 +134,28 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
         .clone()
         .try_deserialize()
         .map_err(Into::into)
+}
+
+pub struct DontDrop {
+    pub name: Cow<'static, str>,
+    pub ignore_drop: bool
+}
+
+
+impl DontDrop {
+    pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            name: name.into(),
+            ignore_drop: false,
+        }
+    }
+}
+
+
+impl Drop for DontDrop {
+    fn drop(&mut self) {
+        if !self.ignore_drop {
+            log::warn!("{} was dropped", self.name);
+        }
+    }
 }

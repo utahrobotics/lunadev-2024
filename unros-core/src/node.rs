@@ -13,12 +13,12 @@ impl NodeResult for () {
     }
 }
 
-impl<T: NodeResult, E: std::error::Error + Send + 'static> NodeResult for Result<T, E> {
+impl<T: NodeResult, E: std::fmt::Debug + Send + 'static> NodeResult for Result<T, E> {
     fn finish(self, context: RuntimeContext) {
         setup_logging!(context);
         match self {
             Ok(result) => result.finish(context),
-            Err(err) => error!("Node finished with error: {}", err),
+            Err(err) => error!("Node finished with error: {:?}", err),
         }
     }
 }

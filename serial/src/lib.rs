@@ -6,18 +6,14 @@ use std::{ops::Deref, sync::Arc, time::Duration};
 pub use bytes::Bytes;
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros::{
-    anyhow, async_trait,
-    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
-    setup_logging,
-    tokio::{
+    anyhow, node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
-    },
-    Node, NodeIntrinsics, RuntimeContext,
+    }, DontDrop
 };
 
 /// A single duplex connection to a serial port
-pub struct SerialConnection<I: Send + Clone + 'static = Bytes, O: Send + Clone + 'static = Bytes> {
+pub struct SerialConnection<I=Bytes, O=Bytes> {
     path: Arc<str>,
     baud_rate: u32,
 
@@ -27,7 +23,7 @@ pub struct SerialConnection<I: Send + Clone + 'static = Bytes, O: Send + Clone +
     serial_output: Publisher<O>,
     serial_input: Subscriber<I>,
     tolerate_error: bool,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
 }
 
 impl SerialConnection {
@@ -37,15 +33,16 @@ impl SerialConnection {
     /// If `tolerate_error` is `true`, then errors are ignored and
     /// actions are retried.
     pub fn new<'a>(path: impl Into<String>, baud_rate: u32, tolerate_error: bool) -> Self {
+        let path: Arc<str> = path.into().into_boxed_str().into();
         Self {
-            path: path.into().into_boxed_str().into(),
             baud_rate,
             output_map: Box::new(Some),
             input_map: Box::new(|x| x),
             serial_output: Publisher::default(),
             serial_input: Subscriber::new(8),
             tolerate_error,
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new(path.to_string()),
+            path,
         }
     }
 
@@ -112,10 +109,9 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
     }
 
     pub fn map_input<NewI: Send + Clone + 'static>(
-        mut self,
+        self,
         input_map: impl FnMut(NewI) -> Bytes + Send + 'static,
     ) -> SerialConnection<NewI, O> {
-        self.intrinsics.ignore_drop();
         SerialConnection {
             path: self.path,
             baud_rate: self.baud_rate,
@@ -124,15 +120,14 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
             serial_output: self.serial_output,
             serial_input: Subscriber::new(self.serial_input.get_size()),
             tolerate_error: self.tolerate_error,
-            intrinsics: NodeIntrinsics::default(),
+            dont_drop: self.dont_drop,
         }
     }
 
     pub fn map_output<NewO: Send + Clone + 'static>(
-        mut self,
+        self,
         output_map: impl FnMut(Bytes) -> Option<NewO> + Send + 'static,
     ) -> SerialConnection<I, NewO> {
-        self.intrinsics.ignore_drop();
         SerialConnection {
             path: self.path,
             baud_rate: self.baud_rate,
@@ -141,21 +136,17 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
             serial_output: Publisher::default(),
             serial_input: self.serial_input,
             tolerate_error: self.tolerate_error,
-            intrinsics: NodeIntrinsics::default(),
+            dont_drop: self.dont_drop,
         }
     }
 }
 
-#[async_trait]
-impl<I: Send + Clone + 'static, O: Send + Clone + 'static> Node for SerialConnection<I, O> {
-    const DEFAULT_NAME: &'static str = "serial_connection";
-
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
-    }
+impl<I: Send + Clone + 'static, O: Send + Clone + 'static> AsyncNode for SerialConnection<I, O> {
+    type Result = anyhow::Result<()>;
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
+        self.dont_drop.ignore_drop = true;
 
         loop {
             let Some(mut stream) = self.connect(&context).await? else {
