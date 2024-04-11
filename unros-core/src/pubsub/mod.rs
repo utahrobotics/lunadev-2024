@@ -23,7 +23,7 @@ use tokio::sync::Notify;
 
 pub mod subs;
 
-use crate::logging::{dump::DataDump, START_TIME};
+use crate::{logging::{dump::DataDump, START_TIME}, runtime::RuntimeContextExt};
 
 use self::subs::{BoxedSubscription, DirectSubscription, PublisherToken, Subscription};
 
@@ -292,8 +292,9 @@ impl<T: Send + 'static> Subscriber<T> {
         self,
         mut display: impl FnMut(T) -> String + Send + 'static,
         path: impl AsRef<Path>,
+        context: &impl RuntimeContextExt,
     ) -> std::io::Result<()> {
-        let mut dump = DataDump::new_file(path).await?;
+        let mut dump = DataDump::new_file(path, context).await?;
         tokio::spawn(async move {
             loop {
                 let Some(value) = self.recv_or_closed().await else {
@@ -430,17 +431,5 @@ impl<T: Clone + Send + 'static> WatchSubscriber<T> {
     /// There is no benefit to having a queue size of more than 1.
     pub fn create_subscription(&self) -> DirectSubscription<T> {
         self.inner.create_subscription()
-    }
-
-    /// Convert this `WatchSubscriber` into a logger that logs
-    /// all received messages formatted using the `display` function.
-    ///
-    /// Logs are saved to `path` using a `DataDump`.
-    pub async fn into_logger(
-        self,
-        display: impl FnMut(T) -> String + Send + 'static,
-        path: impl AsRef<Path>,
-    ) -> std::io::Result<()> {
-        self.inner.into_logger(display, path).await
     }
 }

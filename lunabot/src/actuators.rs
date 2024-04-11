@@ -1,7 +1,9 @@
 use lunabot::ArmParameters;
 use serial::SerialConnection;
 use unros::{
-    anyhow, async_trait, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext
+    anyhow, async_trait,
+    pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber},
+    setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
 };
 
 pub struct Arms {
@@ -39,7 +41,9 @@ impl Node for Arms {
 
         let mut tilt_repl = MonoPublisher::from(self.tilt_conn.message_to_send_sub());
         let tilt_repl_sub = Subscriber::new(1);
-        self.tilt_conn.msg_received_pub().accept_subscription(tilt_repl_sub.create_subscription());
+        self.tilt_conn
+            .msg_received_pub()
+            .accept_subscription(tilt_repl_sub.create_subscription());
         let mut lift_repl = MonoPublisher::from(self.lift_conn.message_to_send_sub());
 
         let arms_fut = async {

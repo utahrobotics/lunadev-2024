@@ -18,7 +18,7 @@ pub struct Drive {
     left_invert: bool,
     right_invert: bool,
     get_values_respose_len: usize,
-    get_values_request: Bytes
+    get_values_request: Bytes,
 }
 
 #[derive(Deserialize)]
@@ -42,7 +42,9 @@ impl Drive {
             log::error!("{msg}");
         }
         let get_values_respose_len: usize = vesc.exec("GET_VALUES_MSG_LENGTH")?.parse()?;
-        let get_values_request = BASE64_STANDARD.decode(vesc.exec("get_GET_VALUES()")?)?.into();
+        let get_values_request = BASE64_STANDARD
+            .decode(vesc.exec("get_GET_VALUES()")?)?
+            .into();
 
         Ok(Self {
             steering_sub: Subscriber::new(4),
@@ -53,7 +55,7 @@ impl Drive {
             left_conn: SerialConnection::new(left_port, 115200, true),
             right_conn: SerialConnection::new(right_port, 115200, true),
             get_values_respose_len,
-            get_values_request
+            get_values_request,
         })
     }
 
@@ -75,7 +77,9 @@ impl Node for Drive {
 
         let mut left_pub = MonoPublisher::from(self.left_conn.message_to_send_sub());
         let left_sub = Subscriber::new(8);
-        self.left_conn.msg_received_pub().accept_subscription(left_sub.create_subscription());
+        self.left_conn
+            .msg_received_pub()
+            .accept_subscription(left_sub.create_subscription());
         let mut right_pub = MonoPublisher::from(self.right_conn.message_to_send_sub());
 
         let steering_fut = async {

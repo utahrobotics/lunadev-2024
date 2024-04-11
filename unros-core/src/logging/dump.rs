@@ -27,7 +27,7 @@ use tokio::{
     sync::mpsc,
 };
 
-use crate::{spawn_persistent_thread, DropCheck};
+use crate::{runtime::RuntimeContextExt, DropCheck};
 
 use super::SUB_LOGGING_DIR;
 
@@ -59,7 +59,7 @@ impl DataDump {
     /// sub-logging directory. If a logging implementation has not been initialized
     /// through `init_logger`, `async_run_all`, or `run_all`, then this method will
     /// return a `NotFound` io error.
-    pub async fn new_file(path: impl AsRef<Path>) -> std::io::Result<Self> {
+    pub async fn new_file(path: impl AsRef<Path>, context: &impl RuntimeContextExt) -> std::io::Result<Self> {
         let file = if path.as_ref().is_absolute() {
             File::create(path.as_ref()).await?
         } else {
@@ -68,48 +68,42 @@ impl DataDump {
             };
             File::create(PathBuf::from(sub_log_dir).join(path.as_ref())).await?
         };
-        Self::new(BufWriter::new(file), path.as_ref().to_string_lossy())
+        Self::new(BufWriter::new(file), path.as_ref().to_string_lossy(), context)
     }
 
     /// Create a `DataDump` that writes to the network address.
     ///
     /// For logging purposes, the address is used as the name of the dump.
-    pub async fn new_tcp(addr: SocketAddr) -> std::io::Result<Self> {
+    pub async fn new_tcp(addr: SocketAddr, context: &impl RuntimeContextExt) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
-        Self::new(BufWriter::new(stream), addr.to_string())
+        Self::new(BufWriter::new(stream), addr.to_string(), context)
     }
 
     /// Create a `DataDump` that writes to the given writer.
     ///
     /// For logging purposes, the given name is used as the name of the dump.
-    pub fn new<A>(mut writer: A, name: impl Into<String>) -> std::io::Result<Self>
+    pub fn new<A>(mut writer: A, name: impl Into<String>, context: &impl RuntimeContextExt) -> std::io::Result<Self>
     where
         A: AsyncWrite + Unpin + Send + 'static,
     {
         let name = name.into();
         let (empty_vecs_sender, empty_vecs) = mpsc::unbounded_channel();
         let (writer_sender, mut reader) = mpsc::unbounded_channel::<Vec<_>>();
-        spawn_persistent_thread(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_io()
-                .build()
-                .unwrap()
-                .block_on(async move {
-                    loop {
-                        let Some(mut bytes) = reader.recv().await else {
-                            break;
-                        };
-                        if let Err(e) = writer.write_all(&bytes).await {
-                            error!("Failed to write to {name:?}: {e}");
-                            return;
-                        }
-                        bytes.clear();
-                        let _ = empty_vecs_sender.send(bytes);
-                    }
-                    if let Err(e) = writer.flush().await {
-                        error!("Failed to flush to {name:?}: {e}");
-                    }
-                });
+        context.spawn_persistent_async(async move {
+            loop {
+                let Some(mut bytes) = reader.recv().await else {
+                    break;
+                };
+                if let Err(e) = writer.write_all(&bytes).await {
+                    error!("Failed to write to {name:?}: {e}");
+                    return;
+                }
+                bytes.clear();
+                let _ = empty_vecs_sender.send(bytes);
+            }
+            if let Err(e) = writer.flush().await {
+                error!("Failed to flush to {name:?}: {e}");
+            }
         });
         Ok(Self(Some(DataDumpInner {
             writer: writer_sender,
@@ -293,6 +287,7 @@ a=fmtp:96 packetization-mode=1",
         in_width: u32,
         in_height: u32,
         fps: usize,
+        context: &impl RuntimeContextExt
     ) -> Result<Self, VideoDumpInitError> {
         let cmd = Command::new("ffplay")
             .args([
@@ -322,7 +317,7 @@ a=fmtp:96 packetization-mode=1",
 
         let backoff = Backoff::new();
 
-        spawn_persistent_thread(move || loop {
+        context.spawn_persistent_sync(move || loop {
             if reader_drop.has_dropped() {
                 if let Err(e) = video_out.flush() {
                     error!("Failed to flush Display: {e}");
@@ -363,6 +358,7 @@ a=fmtp:96 packetization-mode=1",
         scale_filter: ScalingFilter,
         path: impl AsRef<Path>,
         fps: usize,
+        context: &impl RuntimeContextExt
     ) -> Result<Self, VideoDumpInitError> {
         ffmpeg_sidecar::download::auto_download()
             .map_err(|e| VideoDumpInitError::FFMPEGInstallError(e.to_string()))?;
@@ -402,6 +398,7 @@ a=fmtp:96 packetization-mode=1",
             in_height,
             VideoDataDumpType::File(pathbuf),
             output,
+            context
         )
     }
 
@@ -414,6 +411,7 @@ a=fmtp:96 packetization-mode=1",
         scale_filter: ScalingFilter,
         addr: SocketAddrV4,
         fps: usize,
+        context: &impl RuntimeContextExt
     ) -> Result<Self, VideoDumpInitError> {
         ffmpeg_sidecar::download::auto_download()
             .map_err(|e| VideoDumpInitError::FFMPEGInstallError(e.to_string()))?;
@@ -453,7 +451,7 @@ a=fmtp:96 packetization-mode=1",
             .spawn()
             .map_err(VideoDumpInitError::IOError)?;
 
-        Self::new(in_width, in_height, VideoDataDumpType::Rtp(addr), output)
+        Self::new(in_width, in_height, VideoDataDumpType::Rtp(addr), output, context)
     }
 
     fn new(
@@ -461,6 +459,7 @@ a=fmtp:96 packetization-mode=1",
         in_height: u32,
         dump_type: VideoDataDumpType,
         mut output: FfmpegChild,
+        context: &impl RuntimeContextExt
     ) -> Result<Self, VideoDumpInitError> {
         let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();
@@ -475,7 +474,7 @@ a=fmtp:96 packetization-mode=1",
 
         let dump_type2 = dump_type.clone();
 
-        spawn_persistent_thread(move || {
+        context.spawn_persistent_sync(move || {
             events.for_each(|event| {
                 if let FfmpegEvent::Log(level, msg) = event {
                     match level {
@@ -491,7 +490,7 @@ a=fmtp:96 packetization-mode=1",
         let dump_type2 = dump_type.clone();
         let backoff = Backoff::new();
 
-        spawn_persistent_thread(move || loop {
+        context.spawn_persistent_sync(move || loop {
             if reader_drop.has_dropped() {
                 if let Err(e) = video_out.flush() {
                     error!("Failed to flush {}: {e}", dump_type2);

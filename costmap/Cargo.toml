@@ -14,4 +14,4 @@ ordered-float = { workspace = true }
 simba = { workspace = true }
 quadtree_rs = "0.1"
 rig = { path = "../rig" }
-dst-init = "0.4.0"
+dst-init = { workspace = true }

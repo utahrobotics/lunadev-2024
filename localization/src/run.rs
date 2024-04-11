@@ -67,15 +67,19 @@ pub(super) async fn run_localizer<N: Float>(
 
             Particle {
                 position: start_position
-                    + random_unit_vector(&mut rng).scale(nconvert(trans_distr.sample(rng.deref_mut()))),
+                    + random_unit_vector(&mut rng)
+                        .scale(nconvert(trans_distr.sample(rng.deref_mut()))),
                 position_weight: default_weight,
                 orientation: bb.start_orientation,
                 orientation_weight: default_weight,
-                linear_velocity: random_unit_vector(&mut rng).scale(nconvert(trans_distr.sample(rng.deref_mut()))),
+                linear_velocity: random_unit_vector(&mut rng)
+                    .scale(nconvert(trans_distr.sample(rng.deref_mut()))),
                 linear_velocity_weight: default_weight,
                 angular_velocity: Default::default(),
                 angular_velocity_weight: default_weight,
-                linear_acceleration: gravity() + random_unit_vector(&mut rng).scale(nconvert(trans_distr.sample(rng.deref_mut()))),
+                linear_acceleration: gravity()
+                    + random_unit_vector(&mut rng)
+                        .scale(nconvert(trans_distr.sample(rng.deref_mut()))),
                 linear_acceleration_weight: default_weight,
             }
         })
@@ -598,10 +602,7 @@ pub(super) async fn run_localizer<N: Float>(
                     let diff = p.linear_velocity - linear_velocity;
                     diff.component_mul(&diff)
                 })
-                .reduce(
-                    || Vector3::default(),
-                    |a, b| a + b,
-                );
+                .reduce(|| Vector3::default(), |a, b| a + b);
 
             // Calculate the variance
             let variance = sum_squared_diff / nconvert::<_, N>((bb.point_count.get() - 1).max(1));

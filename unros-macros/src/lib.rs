@@ -55,12 +55,22 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     // }
 
     quote! {
-        fn main() -> unros::anyhow::Result<()> {
+        fn main() -> std::process::ExitCode {
             #input
-            unros::start_unros_runtime(
+            let Some(result) = unros::start_unros_runtime(
                 #ident,
-                unros::default_run_options!(),
-            )
+                |builder| {
+                    builder.dump_path = unros::runtime::DumpPath {
+                        Default {
+                            application_name: env!("CARGO_PKG_NAME").into()
+                        }
+                    };
+                },
+            ) else {
+                return std::process::ExitCode::SUCCESS;
+            };
+
+            std::process::Termination::report(result)
         }
     }
     .into()

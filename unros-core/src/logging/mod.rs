@@ -5,25 +5,21 @@
 //! the goal of Unros, and this module provides that.
 
 use std::{
-    panic::catch_unwind,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    path::PathBuf,
+    sync::{Arc, Mutex, Once, OnceLock},
     time::Instant,
+    fmt::Write
 };
 
-use anyhow::Context;
-use chrono::{Datelike, Timelike};
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
 
 use crate::{
-    logging::eyre::UnrosEyreMessage,
     pubsub::{Publisher, PublisherRef},
-    RunOptions,
+    runtime::{has_repl, MainRuntimeContext},
 };
 
 pub mod dump;
-mod eyre;
 pub mod rate;
 
 /// Sets up a locally available set of logging macros.
@@ -113,6 +109,8 @@ impl log::Log for LogPub {
     fn flush(&self) {}
 }
 
+static LOG_INIT: Once = Once::new();
+
 /// Initializes the default logging implementation.
 ///
 /// This is called automatically in `run_all` and `async_run_all`, but
@@ -120,50 +118,42 @@ impl log::Log for LogPub {
 /// be ignored if the logger was not set up yet. As such, you may call this
 /// method manually, when needed. Calling this multiple times is safe and
 /// will not return errors.
-pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
-    const LOGS_DIR: &str = "logs";
+pub(crate) fn init_default_logger(context: &MainRuntimeContext) {
+    LOG_INIT.call_once(|| {
+        let (panic_hook, eyre_hook) = color_eyre::config::HookBuilder::default().into_hooks();
+        let panic_hook = panic_hook.into_panic_hook();
+        eyre_hook.install().expect("Failed to install eyre hook");
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let mut log = String::new();
+            writeln!(log, "The application panicked (crashed).").unwrap();
 
-    SUB_LOGGING_DIR.get_or_try_init::<_, anyhow::Error>(|| {
-        color_eyre::config::HookBuilder::default()
-            .panic_message(UnrosEyreMessage)
-            .install()
-            .map_err(|e| anyhow::anyhow!(e))?;
+            // Print panic message.
+            let payload = panic_info
+                .payload()
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic_info.payload().downcast_ref::<&str>().copied())
+                .unwrap_or("<non string panic payload>");
 
-        if !AsRef::<Path>::as_ref(LOGS_DIR)
-            .try_exists()
-            .context("Failed to check if logging directory exists. Do we have permissions?")?
-        {
-            std::fs::DirBuilder::new()
-                .create(LOGS_DIR)
-                .context("Failed to create logging directory. Do we have permissions?")?;
-        }
-        let mut runtime_name = run_options.runtime_name.to_string();
-        if !runtime_name.is_empty() {
-            runtime_name = "=".to_string() + &runtime_name;
-        }
+            writeln!(log, "\tMessage:  {payload}").unwrap();
 
-        let datetime = chrono::Local::now();
-        let log_folder_name = format!(
-            "{}-{:0>2}-{:0>2}={:0>2}-{:0>2}-{:0>2}{}",
-            datetime.year(),
-            datetime.month(),
-            datetime.day(),
-            datetime.hour(),
-            datetime.minute(),
-            datetime.second(),
-            runtime_name,
-        );
+            // If known, print panic location.
+            write!(log, "\tLocation: ").unwrap();
 
-        let log_folder_name = PathBuf::from(LOGS_DIR).join(log_folder_name);
+            if let Some(loc) = panic_info.location() {
+                write!(log, "{}:{}", loc.file(), loc.line())
+            } else {
+                write!(log, "<unknown>")
+            }.unwrap();
 
-        std::fs::DirBuilder::new()
-            .create(&log_folder_name)
-            .context("Failed to create sub-logging directory. Do we have permissions?")?;
+            log::error!(target: "panic", "{log}");
+            panic_hook(panic_info);
+        }));
 
         let colors = ColoredLevelConfig::new()
-            .warn(Color::Yellow)
-            .error(Color::Red)
-            .trace(Color::BrightBlack);
+        .warn(Color::Yellow)
+        .error(Color::Red)
+        .trace(Color::BrightBlack);
 
         let _ = START_TIME.set(Instant::now());
 
@@ -171,7 +161,7 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
         let _ = LOG_PUB.set(log_pub.publisher.get_mut().unwrap().get_ref());
         let log_pub: Box<dyn log::Log> = Box::new(log_pub);
 
-        fern::Dispatch::new()
+        let _ = fern::Dispatch::new()
             // Add blanket level filter -
             .level(log::LevelFilter::Debug)
             // Output to stdout, files, and other Dispatch configurations
@@ -189,14 +179,15 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                         ));
                     })
                     .chain(
-                        fern::log_file(log_folder_name.join(".log"))
-                            .context("Failed to create log file. Do we have permissions?")?,
+                        fern::log_file(context.get_dump_path().join(".log"))
+                            .expect("Failed to create log file. Do we have permissions?"),
                     )
                     .chain(log_pub),
             )
             .chain(
                 fern::Dispatch::new()
                     .level(log::LevelFilter::Info)
+                    .filter(|_| !has_repl())
                     // This filter is to avoid logging panics to the console, since rust already does that.
                     // Note that the 'panic' target is set by us in eyre.rs.
                     .filter(|x| x.target() != "panic")
@@ -217,16 +208,6 @@ pub(super) fn init_logger(run_options: &RunOptions) -> anyhow::Result<()> {
                     .chain(std::io::stdout()),
             )
             // Apply globally
-            .apply()
-            .context("Logger should have initialized correctly")?;
-
-        if run_options.enable_console_subscriber {
-            if let Err(e) = catch_unwind(console_subscriber::init) {
-                log::error!("Failed to initialize console subscriber: {e:?}");
-            }
-        }
-        Ok(log_folder_name)
-    })?;
-
-    Ok(())
+            .apply();
+        });
 }
