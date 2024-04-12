@@ -56,7 +56,7 @@ pub(crate) struct RuntimeContextInner {
     exiting: watch::Receiver<bool>,
     end_pub: Publisher<EndCondition>,
     dump_path: PathBuf,
-    runtime_handle: Handle
+    pub(crate) runtime_handle: Handle
 }
 
 #[derive(Clone)]

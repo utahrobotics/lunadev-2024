@@ -25,15 +25,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string_pretty, to_writer_pretty};
 use sub::Undistorter;
 use unros::{
-    anyhow::{self, Context},
-    log,
-    pubsub::{
+    anyhow::{self, Context}, log, pubsub::{
         subs::{DirectSubscription, Subscription},
         Publisher, Subscriber,
-    },
-    setup_logging,
-    tokio::{self, task::JoinHandle},
-    Application,
+    }, runtime::MainRuntimeContext, setup_logging, tokio::{self, task::JoinHandle}, node::SyncNode
 };
 
 pub mod sub;
@@ -163,7 +158,7 @@ struct FocalLengthEstimate {
 
 /// <https://raw.githubusercontent.com/opencv/opencv/4.x/doc/pattern.png>
 pub async fn interactive_examine(
-    app: &mut Application,
+    context: MainRuntimeContext,
     accept_sub: impl FnOnce(DirectSubscription<Arc<DynamicImage>>),
     camera_name: String,
 ) {
@@ -269,9 +264,11 @@ pub async fn interactive_examine(
     let camera_sub = Subscriber::new(1);
     accept_sub(camera_sub.create_subscription());
 
-    app.add_task(
-        move |context| async move {
-            setup_logging!(context);
+    let context2 = context.make_context("examiner");
+
+    tokio::spawn(
+        async move {
+            setup_logging!(context2);
 
             let Some(img) = camera_sub.recv_or_closed().await else {
                 return Err(anyhow::anyhow!("Camera did not produce any frames!"));
@@ -413,7 +410,7 @@ pub async fn interactive_examine(
                     apriltag
                         .tag_detected_pub()
                         .accept_subscription(pose_sub.create_subscription());
-                    context.spawn_node(apriltag);
+                    apriltag.spawn(context2.clone_new_name("apriltag"));
 
                     if first {
                         first = false;
@@ -555,6 +552,7 @@ pub async fn interactive_examine(
 
             Ok(())
         },
-        "examiner",
     );
+
+    context.wait_for_exit().await;
 }

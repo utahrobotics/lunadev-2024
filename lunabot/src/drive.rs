@@ -4,9 +4,7 @@ use py_repl::PyRepl;
 use serde::Deserialize;
 use serial::{Bytes, SerialConnection};
 use unros::{
-    anyhow, async_trait, get_env, log,
-    pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber},
-    setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, get_env, log, node::AsyncNode, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, runtime::RuntimeContext, setup_logging, tokio, DontDrop
 };
 
 pub struct Drive {
@@ -14,7 +12,7 @@ pub struct Drive {
     vesc: PyRepl,
     left_conn: SerialConnection,
     right_conn: SerialConnection,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
     left_invert: bool,
     right_invert: bool,
     get_values_respose_len: usize,
@@ -48,7 +46,7 @@ impl Drive {
 
         Ok(Self {
             steering_sub: Subscriber::new(4),
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new("drive"),
             vesc,
             left_invert: config.left_invert,
             right_invert: config.right_invert,
@@ -64,16 +62,12 @@ impl Drive {
     }
 }
 
-#[async_trait]
-impl Node for Drive {
-    const DEFAULT_NAME: &'static str = "drive";
-
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
-    }
+impl AsyncNode for Drive {
+    type Result = anyhow::Result<()>;
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
+        self.dont_drop.ignore_drop = true;
 
         let mut left_pub = MonoPublisher::from(self.left_conn.message_to_send_sub());
         let left_sub = Subscriber::new(8);
@@ -123,12 +117,12 @@ impl Node for Drive {
             }
         };
 
-        self.left_conn
-            .get_intrinsics()
-            .manually_run("left-vesc".into());
-        self.right_conn
-            .get_intrinsics()
-            .manually_run("right-vesc".into());
+        // self.left_conn
+        //     .get_intrinsics()
+        //     .manually_run("left-vesc".into());
+        // self.right_conn
+        //     .get_intrinsics()
+        //     .manually_run("right-vesc".into());
 
         tokio::select! {
             res = steering_fut => res,

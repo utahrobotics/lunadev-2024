@@ -1,4 +1,4 @@
-use std::{io::Write, net::SocketAddrV4, str::FromStr};
+use std::{net::SocketAddrV4, str::FromStr};
 
 use apriltag::{AprilTagDetector, PoseObservation};
 use camera::discover_all_cameras;
@@ -17,9 +17,8 @@ use telemetry::Telemetry;
 use unros::{
     anyhow,
     log::info,
-    logging::dump::DataDump,
-    pubsub::{subs::Subscription, Subscriber},
-    Application, Node,
+    pubsub::{subs::Subscription, Subscriber}, runtime::MainRuntimeContext,
+    node::{AsyncNode, SyncNode}
 };
 
 mod actuators;
@@ -29,7 +28,7 @@ mod serial;
 mod telemetry;
 
 #[unros::main]
-async fn main(mut app: Application) -> anyhow::Result<Application> {
+async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;
     let camera_element = elements.remove("camera").unwrap();
@@ -42,13 +41,13 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     let costmap = costmap;
 
     let mut cameras: Vec<_> = discover_all_cameras()?
-        .map(|mut x| {
+        .map(|x| {
             info!(
                 "Discovered {} at {}",
                 x.get_camera_name(),
                 x.get_camera_uri()
             );
-            x.get_intrinsics().ignore_drop();
+            // x.get_intrinsics().ignore_drop();
             x
         })
         .collect();
@@ -89,7 +88,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .arm_pub()
         .accept_subscription(arm_sub.create_subscription());
     arm_sub
-        .into_logger(|x| format!("{x:?}"), "arms.logs")
+        .into_logger(|x| format!("{x:?}"), "arms.logs", &context)
         .await?;
 
     let (arms, drive) = serial::connect_to_serial()?;
@@ -204,12 +203,12 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
 
     // pathfinder.get_path_pub().accept_subscription(driver.create_path_sub());
 
-    let mut data_dump = DataDump::new_file("motion.csv").await?;
-    writeln!(
-        data_dump,
-        "imu_ax,imu_ay,imu_az,imu_rvw,imu_rvi,imu_rvj,imu_rvk,vx,vy,vz,x,y,z,w,i,j,k,delta"
-    )
-    .unwrap();
+    // let mut data_dump = DataDump::new_file("motion.csv", &context).await?;
+    // writeln!(
+    //     data_dump,
+    //     "imu_ax,imu_ay,imu_az,imu_rvw,imu_rvi,imu_rvj,imu_rvk,vx,vy,vz,x,y,z,w,i,j,k,delta"
+    // )
+    // .unwrap();
     // let imu_sub = Subscriber::<IMUFrame>::new(32);
     // #[cfg(unix)]
     // realsense_camera
@@ -246,18 +245,18 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
     //     }
     // }, "telemetry-dump");
 
-    app.add_node(apriltag);
-    app.add_node(localizer);
-    app.add_node(driver);
-    app.add_node(pathfinder);
-    app.add_node(telemetry);
-    app.add_node(teleop_camera);
-    // app.add_node(imu01);
-    app.add_node(drive);
-    app.add_node(arms);
-    app.add_node(costmap);
+    apriltag.spawn(context.make_context("apriltag"));
+    localizer.spawn(context.make_context("localizer"));
+    driver.spawn(context.make_context("driver"));
+    pathfinder.spawn(context.make_context("pathfinder"));
+    telemetry.spawn(context.make_context("telemetry"));
+    teleop_camera.spawn(context.make_context("teleop_camera"));
+    drive.spawn(context.make_context("drive"));
+    arms.spawn(context.make_context("arms"));
+    costmap.spawn(context.make_context("costmap"));
     #[cfg(unix)]
-    app.add_node(realsense_camera);
-
-    Ok(app)
+    realsense_camera.spawn(context.make_context("realsense_camera"));
+    
+    context.wait_for_exit().await;
+    Ok(())
 }

@@ -105,6 +105,7 @@ where
     F: FnMut(DynamicImage, u32, u32) -> DynamicImage + Send + 'static,
 {
     type Result = anyhow::Result<()>;
+    const PERSISTENT: bool = true;
 
     #[cfg(unix)]
     fn run(mut self, context: RuntimeContext) -> Self::Result {

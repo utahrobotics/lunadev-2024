@@ -14,9 +14,7 @@ use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
 use lunabot::{make_negotiation, ArmParameters, ControlsPacket, ImportantMessage};
 use networking::new_server;
 use unros::{
-    default_run_options,
-    pubsub::{MonoPublisher, Subscriber},
-    setup_logging, start_unros_runtime, tokio, Application,
+    anyhow, node::SyncNode, pubsub::{MonoPublisher, Subscriber}, runtime::{start_unros_runtime, MainRuntimeContext}, setup_logging, tokio
 };
 
 struct LunabotShared {
@@ -67,282 +65,274 @@ impl INode for LunabotConn {
         std::fs::File::create("camera-ffmpeg.log").expect("camera-ffmpeg.log should be writable");
         let shared = self.shared.clone().unwrap();
 
-        let main = |mut app: Application| async move {
+        let main = |context: MainRuntimeContext| async move {
             let peer_sub = Subscriber::new(1);
             let (network_node, _) = new_server::<u8, _>(
                 SocketAddrV4::new(Ipv4Addr::from_bits(0), LunabotConn::RECV_FROM),
                 peer_sub.create_subscription(),
             )?;
+            network_node.spawn(context.make_context("conn-sender"));
 
-            app.add_task(|mut context| async move {
-                context.set_quit_on_drop(true);
-                setup_logging!(context);
-                let negotiation = make_negotiation();
+            setup_logging!(context);
+            let negotiation = make_negotiation();
 
-                loop {
-                    let peer;
-                    tokio::select! {
-                        result = peer_sub.recv_or_closed() => {
-                            let Some(result) = result else {
-                                error!("Server closed itself");
-                                godot_error!("Server closed itself");
-                                break Ok(());
-                            };
-
-                            peer = match result {
-                                Ok((_, x)) => x,
-                                Err(e) => {
-                                    error!("Invalid init data: {e}");
-                                    godot_error!("Invalid init data: {e}");
-                                    continue;
-                                }
-                            };
-                        }
-                        _ = async {
-                            loop {
-                                tokio::time::sleep(Duration::from_millis(100)).await;
-                                if Arc::strong_count(&shared) == 1 {
-                                    break;
-                                }
-                            }
-                        } => {
+            loop {
+                let peer;
+                tokio::select! {
+                    result = peer_sub.recv_or_closed() => {
+                        let Some(result) = result else {
+                            error!("Server closed itself");
+                            godot_error!("Server closed itself");
                             break Ok(());
-                        }
-                    }
+                        };
 
-                    let (important, camera, _odometry, controls, logs) = match peer.negotiate(&negotiation).await {
-                        Ok(x) => x,
-                        Err(e) => {
-                            error!("Failed to negotiate with lunabot! {e:?}");
-                            godot_error!("Failed to negotiate with lunabot! {e:?}");
-                            continue;
-                        }
-                    };
-
-                    shared.base_mut_queue.push(Box::new(|mut base| {
-                        base.emit_signal("connected".into(), &[]);
-                    }));
-                    shared.echo_controls.store(false, Ordering::Relaxed);
-                    shared.connected.store(true, Ordering::Relaxed);
-                    let mut last_receive_time = Instant::now();
-                    let mut ffplay: Option<std::process::Child> = None;
-                    let mut ffplay_stderr: Option<JoinHandle<std::io::Result<u64>>> = None;
-
-                    let logs_sub = Subscriber::new(32);
-                    logs.accept_subscription(logs_sub.create_subscription());
-
-                    let camera_sub = Subscriber::new(1);
-                    camera.accept_subscription(camera_sub.create_subscription());
-
-                    let mut controls_pub = MonoPublisher::from(controls.create_unreliable_subscription());
-                    let controls_sub = Subscriber::new(1);
-                    controls.accept_subscription(controls_sub.create_subscription());
-
-                    let mut important_pub = MonoPublisher::from(important.create_reliable_subscription());
-                    let important_sub = Subscriber::new(8);
-                    important.accept_subscription(important_sub.create_subscription());
-
-                    let mut last_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
-
-                    macro_rules! kill_ffplay {
-                        () => {
-                            if let Some(mut ffplay) = ffplay {
-                                match ffplay.kill() {
-                                    Ok(()) => match ffplay.wait() {
-                                        Ok(x) => info!("ffplay exited with {x}"),
-                                        Err(e) => error!("ffplay failed to exit {e}")
-                                    }
-                                    Err(e) => error!("ffplay failed to be killed {e}")
-                                }
+                        peer = match result {
+                            Ok((_, x)) => x,
+                            Err(e) => {
+                                error!("Invalid init data: {e}");
+                                godot_error!("Invalid init data: {e}");
+                                continue;
                             }
                         };
                     }
-
-                    loop {
-                        macro_rules! received {
-                            () => {{
-                                let tmp = last_receive_time.elapsed();
-                                last_receive_time += tmp;
-                                shared.base_mut_queue.push(Box::new(|mut base| {
-                                    base.emit_signal("something_received".into(), &[]);
-                                }));
-                            }};
-                        }
-                        macro_rules! make_ffplay {
-                            () => {{
-                                let mut child = std::process::Command::new("ffplay")
-                                .args([
-                                    "-protocol_whitelist",
-                                    "file,rtp,udp",
-                                    "-i",
-                                    "camera.sdp",
-                                    "-flags",
-                                    "low_delay",
-                                    "-avioflags",
-                                    "direct",
-                                    "-probesize",
-                                    "32",
-                                    "-analyzeduration",
-                                    "0",
-                                    "-sync",
-                                    "ext",
-                                    "-framedrop",
-                                ])
-                                .stderr(Stdio::piped())
-                                .spawn()
-                                .expect("Failed to init ffplay process");
-
-                            if let Some(mut ffplay) = ffplay.take() {
-                                let _ = ffplay.kill();
+                    _ = async {
+                        loop {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            if Arc::strong_count(&shared) == 1 {
+                                break;
                             }
+                        }
+                    } => {
+                        break Ok(());
+                    }
+                }
 
-                            let mut stderr = child.stderr.take().unwrap();
-                            ffplay = Some(child);
+                let (important, camera, _odometry, controls, logs) = match peer.negotiate(&negotiation).await {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!("Failed to negotiate with lunabot! {e:?}");
+                        godot_error!("Failed to negotiate with lunabot! {e:?}");
+                        continue;
+                    }
+                };
 
-                            ffplay_stderr = Some(
-                            std::thread::spawn(move || {
-                                std::io::copy(
-                                    &mut stderr,
-                                    &mut std::fs::OpenOptions::new()
-                                        .append(true)
-                                        .create(true)
-                                        .open("camera-ffmpeg.log")
-                                        .expect("camera-ffmpeg.log should be writable"),
-                                )
+                shared.base_mut_queue.push(Box::new(|mut base| {
+                    base.emit_signal("connected".into(), &[]);
+                }));
+                shared.echo_controls.store(false, Ordering::Relaxed);
+                shared.connected.store(true, Ordering::Relaxed);
+                let mut last_receive_time = Instant::now();
+                let mut ffplay: Option<std::process::Child> = None;
+                let mut ffplay_stderr: Option<JoinHandle<std::io::Result<u64>>> = None;
+
+                let logs_sub = Subscriber::new(32);
+                logs.accept_subscription(logs_sub.create_subscription());
+
+                let camera_sub = Subscriber::new(1);
+                camera.accept_subscription(camera_sub.create_subscription());
+
+                let mut controls_pub = MonoPublisher::from(controls.create_unreliable_subscription());
+                let controls_sub = Subscriber::new(1);
+                controls.accept_subscription(controls_sub.create_subscription());
+
+                let mut important_pub = MonoPublisher::from(important.create_reliable_subscription());
+                let important_sub = Subscriber::new(8);
+                important.accept_subscription(important_sub.create_subscription());
+
+                let mut last_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
+
+                macro_rules! kill_ffplay {
+                    () => {
+                        if let Some(mut ffplay) = ffplay {
+                            match ffplay.kill() {
+                                Ok(()) => match ffplay.wait() {
+                                    Ok(x) => info!("ffplay exited with {x}"),
+                                    Err(e) => error!("ffplay failed to exit {e}")
+                                }
+                                Err(e) => error!("ffplay failed to be killed {e}")
+                            }
+                        }
+                    };
+                }
+
+                loop {
+                    macro_rules! received {
+                        () => {{
+                            let tmp = last_receive_time.elapsed();
+                            last_receive_time += tmp;
+                            shared.base_mut_queue.push(Box::new(|mut base| {
+                                base.emit_signal("something_received".into(), &[]);
                             }));
-                            }};
+                        }};
+                    }
+                    macro_rules! make_ffplay {
+                        () => {{
+                            let mut child = std::process::Command::new("ffplay")
+                            .args([
+                                "-protocol_whitelist",
+                                "file,rtp,udp",
+                                "-i",
+                                "camera.sdp",
+                                "-flags",
+                                "low_delay",
+                                "-avioflags",
+                                "direct",
+                                "-probesize",
+                                "32",
+                                "-analyzeduration",
+                                "0",
+                                "-sync",
+                                "ext",
+                                "-framedrop",
+                            ])
+                            .stderr(Stdio::piped())
+                            .spawn()
+                            .expect("Failed to init ffplay process");
+
+                        if let Some(mut ffplay) = ffplay.take() {
+                            let _ = ffplay.kill();
                         }
-                        tokio::select! {
-                            result = important_sub.recv_or_closed() => {
-                                let Some(result) = result else {
-                                    godot_error!("important_sub closed");
-                                    error!("important_sub closed");
-                                    break;
-                                };
-                                received!();
 
-                                let msg = match result {
-                                    Ok(x) => x,
-                                    Err(e) => {
-                                        godot_error!("Failed to parse incoming log: {e}");
-                                        continue;
-                                    }
-                                };
+                        let mut stderr = child.stderr.take().unwrap();
+                        ffplay = Some(child);
 
-                                match msg {
-                                    _ => {}
+                        ffplay_stderr = Some(
+                        std::thread::spawn(move || {
+                            std::io::copy(
+                                &mut stderr,
+                                &mut std::fs::OpenOptions::new()
+                                    .append(true)
+                                    .create(true)
+                                    .open("camera-ffmpeg.log")
+                                    .expect("camera-ffmpeg.log should be writable"),
+                            )
+                        }));
+                        }};
+                    }
+                    tokio::select! {
+                        result = important_sub.recv_or_closed() => {
+                            let Some(result) = result else {
+                                godot_error!("important_sub closed");
+                                error!("important_sub closed");
+                                break;
+                            };
+                            received!();
+
+                            let msg = match result {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    godot_error!("Failed to parse incoming log: {e}");
+                                    continue;
                                 }
+                            };
+
+                            match msg {
+                                _ => {}
                             }
-                            result = logs_sub.recv_or_closed() => {
-                                let Some(result) = result else {
-                                    godot_error!("logs_sub closed");
-                                    error!("logs_sub closed");
-                                    break;
-                                };
-                                received!();
-
-                                let log = match result {
-                                    Ok(x) => x,
-                                    Err(e) => {
-                                        godot_error!("Failed to parse incoming log: {e}");
-                                        continue;
-                                    }
-                                };
-
-                                godot_print!("{log}");
-                            }
-                            result = camera_sub.recv_or_closed() => {
-                                let Some(result) = result else {
-                                    godot_error!("camera_sub closed");
-                                    error!("camera_sub closed");
-                                    break;
-                                };
-                                received!();
-
-                                let sdp = match result {
-                                    Ok(x) => x,
-                                    Err(e) => {
-                                        godot_error!("Failed to parse incoming sdp: {e}");
-                                        error!("Failed to parse incoming sdp: {e}");
-                                        continue;
-                                    }
-                                };
-
-                                std::fs::write("camera.sdp", sdp.as_bytes())
-                                            .expect("camera.sdp should be writable");
-
-                                make_ffplay!();
-                            }
-                            result = controls_sub.recv_or_closed() => {
-                                let Some(result) = result else {
-                                    godot_error!("controls_sub closed");
-                                    error!("controls_sub closed");
-                                    break;
-                                };
-                                received!();
-
-                                let controls = match result {
-                                    Ok(x) => x,
-                                    Err(e) => {
-                                        godot_error!("Failed to parse incoming controls: {e}");
-                                        continue;
-                                    }
-                                };
-
-                                shared.echo_controls.store(controls != shared.controls_data.load(), Ordering::Relaxed);
-                            }
-                            _ = tokio::time::sleep(Duration::from_millis(50)) => {}
                         }
+                        result = logs_sub.recv_or_closed() => {
+                            let Some(result) = result else {
+                                godot_error!("logs_sub closed");
+                                error!("logs_sub closed");
+                                break;
+                            };
+                            received!();
 
-                        if Arc::strong_count(&shared) == 1 {
-                            kill_ffplay!();
-                            return Ok(());
-                        }
-
-                        if shared.echo_controls.load(Ordering::Relaxed) {
-                            controls_pub.set(shared.controls_data.load());
-                        }
-
-                        if let Some(inner) = &mut ffplay_stderr {
-                            if inner.is_finished() {
-                                if let Err(e) = ffplay_stderr.take().unwrap().join().unwrap() {
-                                    error!("{e}");
-                                    godot_error!("{e}");
+                            let log = match result {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    godot_error!("Failed to parse incoming log: {e}");
+                                    continue;
                                 }
-                            }
+                            };
+
+                            godot_print!("{log}");
                         }
+                        result = camera_sub.recv_or_closed() => {
+                            let Some(result) = result else {
+                                godot_error!("camera_sub closed");
+                                error!("camera_sub closed");
+                                break;
+                            };
+                            received!();
 
-                        let current_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
-                        if current_enable_camera != last_enable_camera {
-                            last_enable_camera = current_enable_camera;
-                            if current_enable_camera {
-                                important_pub.set(ImportantMessage::EnableCamera);
-
-                                if ffplay_stderr.is_none() {
-                                    make_ffplay!();
+                            let sdp = match result {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    godot_error!("Failed to parse incoming sdp: {e}");
+                                    error!("Failed to parse incoming sdp: {e}");
+                                    continue;
                                 }
-                            } else {
-                                important_pub.set(ImportantMessage::DisableCamera);
+                            };
+
+                            std::fs::write("camera.sdp", sdp.as_bytes())
+                                        .expect("camera.sdp should be writable");
+
+                            make_ffplay!();
+                        }
+                        result = controls_sub.recv_or_closed() => {
+                            let Some(result) = result else {
+                                godot_error!("controls_sub closed");
+                                error!("controls_sub closed");
+                                break;
+                            };
+                            received!();
+
+                            let controls = match result {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    godot_error!("Failed to parse incoming controls: {e}");
+                                    continue;
+                                }
+                            };
+
+                            shared.echo_controls.store(controls != shared.controls_data.load(), Ordering::Relaxed);
+                        }
+                        _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+                    }
+
+                    if Arc::strong_count(&shared) == 1 {
+                        kill_ffplay!();
+                        return Ok(());
+                    }
+
+                    if shared.echo_controls.load(Ordering::Relaxed) {
+                        controls_pub.set(shared.controls_data.load());
+                    }
+
+                    if let Some(inner) = &mut ffplay_stderr {
+                        if inner.is_finished() {
+                            if let Err(e) = ffplay_stderr.take().unwrap().join().unwrap() {
+                                error!("{e}");
+                                godot_error!("{e}");
                             }
                         }
                     }
 
-                    shared.connected.store(false, Ordering::Relaxed);
-                    shared.base_mut_queue.push(Box::new(|mut base| {
-                        base.emit_signal("disconnected".into(), &[]);
-                    }));
-                    kill_ffplay!();
-                }
-            }, "conn-receiver");
+                    let current_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
+                    if current_enable_camera != last_enable_camera {
+                        last_enable_camera = current_enable_camera;
+                        if current_enable_camera {
+                            important_pub.set(ImportantMessage::EnableCamera);
 
-            app.add_node(network_node);
-            Ok(app)
+                            if ffplay_stderr.is_none() {
+                                make_ffplay!();
+                            }
+                        } else {
+                            important_pub.set(ImportantMessage::DisableCamera);
+                        }
+                    }
+                }
+
+                shared.connected.store(false, Ordering::Relaxed);
+                shared.base_mut_queue.push(Box::new(|mut base| {
+                    base.emit_signal("disconnected".into(), &[]);
+                }));
+                kill_ffplay!();
+            }
         };
         self.thr = Some(std::thread::spawn(|| {
-            let mut run_options = default_run_options!();
-            run_options.enable_console_subscriber = false;
-            run_options.auxilliary_control = false;
-            if let Err(e) = start_unros_runtime(main, run_options) {
+            if let Some(Err(e)) = start_unros_runtime::<anyhow::Result<()>, _>(main, |_| {}) {
                 godot_error!("{e}");
                 unros::log::error!("{e}");
             }

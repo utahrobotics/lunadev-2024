@@ -1,23 +1,21 @@
 use lunabot::ArmParameters;
 use serial::SerialConnection;
 use unros::{
-    anyhow, async_trait,
-    pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber},
-    setup_logging, tokio, Node, NodeIntrinsics, RuntimeContext,
+    anyhow, node::AsyncNode, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, runtime::RuntimeContext, setup_logging, tokio, DontDrop
 };
 
 pub struct Arms {
     arm_sub: Subscriber<ArmParameters>,
     tilt_conn: SerialConnection<String, String>,
     lift_conn: SerialConnection<String, String>,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
 }
 
 impl Arms {
     pub fn new(tilt_port: impl Into<String>, lift_port: impl Into<String>) -> Self {
         Self {
             arm_sub: Subscriber::new(4),
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new("arms"),
             tilt_conn: SerialConnection::new(tilt_port, 115200, true).map_to_string(),
             lift_conn: SerialConnection::new(lift_port, 115200, true).map_to_string(),
         }
@@ -28,17 +26,13 @@ impl Arms {
     }
 }
 
-#[async_trait]
-impl Node for Arms {
-    const DEFAULT_NAME: &'static str = "arms";
-
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
-    }
+impl AsyncNode for Arms {
+    type Result = anyhow::Result<()>;
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
 
+        self.dont_drop.ignore_drop = true;
         let mut tilt_repl = MonoPublisher::from(self.tilt_conn.message_to_send_sub());
         let tilt_repl_sub = Subscriber::new(1);
         self.tilt_conn
@@ -79,12 +73,12 @@ impl Node for Arms {
             }
         };
 
-        self.tilt_conn
-            .get_intrinsics()
-            .manually_run("tilt-bucket".into());
-        self.lift_conn
-            .get_intrinsics()
-            .manually_run("lift-arm".into());
+        // self.tilt_conn
+        //     .get_intrinsics()
+        //     .manually_run("tilt-bucket".into());
+        // self.lift_conn
+        //     .get_intrinsics()
+        //     .manually_run("lift-arm".into());
 
         tokio::select! {
             res = arms_fut => res,

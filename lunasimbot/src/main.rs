@@ -12,22 +12,18 @@ use navigator::{pathfinding::Pathfinder, DifferentialDriver};
 use rand_distr::{Distribution, Normal};
 use rig::Robot;
 use unros::{
-    anyhow, log,
-    pubsub::{subs::Subscription, Publisher, Subscriber},
-    rayon,
-    rng::quick_rng,
-    tokio::{
+    anyhow, log, pubsub::{subs::Subscription, Publisher, Subscriber}, rayon, rng::quick_rng, runtime::MainRuntimeContext, tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt, BufStream},
         net::TcpListener,
     },
-    Application,
+    node::{AsyncNode, SyncNode}
 };
 
 type Float = f32;
 
 #[unros::main]
-async fn main(mut app: Application) -> anyhow::Result<Application> {
+async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "debug"])?;
     let mut camera = elements.remove("camera").unwrap();
@@ -47,7 +43,7 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .get_costmap_pub()
         .accept_subscription(costmap_sub.create_subscription());
 
-    let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(400, 400, 24)?;
+    let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(400, 400, 24, &context)?;
     let debug_element_ref = debug_element.get_ref();
 
     rayon::spawn(move || {
@@ -108,8 +104,8 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
         .accept_subscription(steering_sub.create_subscription());
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
-    app.add_task(
-        |_| async move {
+    tokio::spawn(
+         async move {
             let (stream, _) = tcp_listener
                 .accept()
                 .await
@@ -352,13 +348,13 @@ async fn main(mut app: Application) -> anyhow::Result<Application> {
                 stream.flush().await.expect("Failed to write path");
             }
         },
-        "telemetry",
     );
 
-    app.add_node(driver);
-    app.add_node(pathfinder);
-    app.add_node(localizer);
-    app.add_node(costmap);
+    driver.spawn(context.make_context("driver"));
+    pathfinder.spawn(context.make_context("pathfinder"));
+    localizer.spawn(context.make_context("localizer"));
+    costmap.spawn(context.make_context("costmap"));
 
-    Ok(app)
+    context.wait_for_exit().await;
+    Ok(())
 }

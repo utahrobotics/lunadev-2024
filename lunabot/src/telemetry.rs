@@ -19,13 +19,10 @@ use networking::{
 use ordered_float::NotNan;
 use spin_sleep::SpinSleeper;
 use unros::{
-    anyhow, async_trait, asyncify_run,
-    logging::{
+    anyhow, logging::{
         dump::{ScalingFilter, VideoDataDump},
         get_log_pub,
-    },
-    pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber},
-    setup_logging, tokio, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    }, node::{AsyncNode, SyncNode}, pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::{self, task::spawn_blocking}, DontDrop, DropCheck
 };
 
 /// A remote connection to `Lunabase`
@@ -37,7 +34,7 @@ pub struct Telemetry {
     steering_signal: Publisher<Steering>,
     arm_signal: Publisher<ArmParameters>,
     image_subscriptions: Subscriber<Arc<DynamicImage>>,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
     negotiation: Negotiation<(
         ChannelNegotiation<ImportantMessage>,
         ChannelNegotiation<Arc<str>>,
@@ -72,7 +69,7 @@ impl Telemetry {
             image_subscriptions: Subscriber::new(1),
             arm_signal: Publisher::default(),
             camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new("telemetry"),
             negotiation: make_negotiation(),
             cam_width,
             cam_height,
@@ -94,19 +91,15 @@ impl Telemetry {
     }
 }
 
-#[async_trait]
-impl Node for Telemetry {
-    const DEFAULT_NAME: &'static str = "telemetry";
-
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
-    }
+impl AsyncNode for Telemetry {
+    type Result = anyhow::Result<()>;
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
-        self.network_node
-            .get_intrinsics()
-            .manually_run(context.get_name().clone());
+        // self.network_node
+        //     .get_intrinsics()
+        //     .manually_run(context.get_name().clone());
 
+        self.dont_drop.ignore_drop = true;
         let sdp: Arc<str> =
             Arc::from(VideoDataDump::generate_sdp(self.video_addr).into_boxed_str());
         let enable_camera = Arc::new(AtomicBool::default());
@@ -116,7 +109,7 @@ impl Node for Telemetry {
         let drop_observe = drop_check.get_observing();
         let context2 = context.clone();
 
-        let cam_fut = asyncify_run(move || {
+        let cam_fut = spawn_blocking(move || {
             setup_logging!(context2);
             let sleeper = SpinSleeper::default();
 
@@ -136,6 +129,7 @@ impl Node for Telemetry {
                                 ScalingFilter::FastBilinear,
                                 self.video_addr,
                                 self.cam_fps,
+                                &context2
                             ) {
                                 Ok(x) => {
                                     video_dump = x;
@@ -294,9 +288,9 @@ impl Node for Telemetry {
         };
 
         tokio::select! {
-            res = cam_fut => res,
+            res = cam_fut => res.unwrap(),
             res = peer_fut => res,
-            res = self.network_node.run(context) => res,
+            res = spawn_blocking(|| self.network_node.run(context)) => res.unwrap(),
         }
     }
 }
