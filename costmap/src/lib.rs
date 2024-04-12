@@ -12,10 +12,7 @@ use quadtree_rs::{area::AreaBuilder, Quadtree};
 use rig::RobotElementRef;
 use simba::scalar::{SubsetOf, SupersetOf};
 use unros::{
-    anyhow, async_trait,
-    pubsub::{subs::Subscription, Publisher, PublisherRef, Subscriber},
-    rayon::iter::{IntoParallelIterator, ParallelIterator},
-    setup_logging, Node, NodeIntrinsics, RuntimeContext,
+    node::AsyncNode, pubsub::{subs::Subscription, Publisher, PublisherRef, Subscriber}, rayon::iter::{IntoParallelIterator, ParallelIterator}, runtime::RuntimeContext, setup_logging, DontDrop
 };
 
 #[derive(Clone, Copy)]
@@ -263,7 +260,7 @@ pub struct CostmapGenerator<N: RealField + Copy = f32> {
     pub threshold: N,
     pub window_length: usize,
     quadtree_sub: Subscriber<CostmapFrame<N>>,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
     costmap_pub: Publisher<Costmap<N>>,
 }
 
@@ -273,7 +270,7 @@ impl CostmapGenerator {
             threshold: 0.5,
             window_length: 10,
             quadtree_sub: Subscriber::new(frame_buffer_size),
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new("costmap-generator"),
             costmap_pub: Default::default(),
         }
     }
@@ -406,12 +403,12 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
     }
 }
 
-#[async_trait]
-impl<N: RealField + Copy> Node for CostmapGenerator<N> {
-    const DEFAULT_NAME: &'static str = "costmap-generator";
+impl<N: RealField + Copy> AsyncNode for CostmapGenerator<N> {
+    type Result = ();
 
-    async fn run(self, context: RuntimeContext) -> anyhow::Result<()> {
+    async fn run(mut self, context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
+        self.dont_drop.ignore_drop = true;
         let mut costmap_frames: Box<[Arc<CostmapFrame<N>>]> = std::iter::repeat_with(|| {
             Arc::new(CostmapFrame {
                 quadtree: Quadtree::new(0),
@@ -441,7 +438,7 @@ impl<N: RealField + Copy> Node for CostmapGenerator<N> {
             });
 
             let Some(frame) = self.quadtree_sub.recv_or_closed().await else {
-                break Ok(());
+                break;
             };
             costmap_frames[frame_index] = Arc::new(frame);
             frame_index += 1;
@@ -449,9 +446,5 @@ impl<N: RealField + Copy> Node for CostmapGenerator<N> {
                 frame_index = 0;
             }
         }
-    }
-
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
     }
 }

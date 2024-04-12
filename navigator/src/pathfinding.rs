@@ -13,10 +13,7 @@ use pathfinding::directed::{astar::astar, bfs::bfs};
 use rig::RobotBaseRef;
 use simba::scalar::SupersetOf;
 use unros::{
-    anyhow, async_trait, asyncify_run,
-    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
-    service::{new_service, Service, ServiceHandle},
-    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    node::SyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, runtime::RuntimeContext, service::{new_service, Service, ServiceHandle}, setup_logging, tokio::sync::oneshot, DontDrop, DropCheck
 };
 
 #[derive(Debug)]
@@ -82,7 +79,7 @@ pub struct Pathfinder<
 > {
     engine: E,
     costmap_sub: Subscriber<Costmap<N>>,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
     service: Service<Point3<N>, NavigationError, NavigationProgress, Result<(), NavigationError>>,
     service_handle: NavigationServiceHandle<N>,
     robot_base: RobotBaseRef,
@@ -100,7 +97,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
         Self {
             engine,
             costmap_sub: Subscriber::new(1),
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new("pathfinder"),
             service,
             service_handle,
             robot_base,
@@ -126,25 +123,30 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
     }
 }
 
-#[async_trait]
-impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Node for Pathfinder<N, E> {
-    const DEFAULT_NAME: &'static str = "pathfinder";
+impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode for Pathfinder<N, E> {
+    type Result = ();
 
-    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+    fn run(mut self, context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
         drop(self.service_handle);
-        let Ok(mut costmap) = self.costmap_sub.into_watch_or_closed().await else {
+        self.dont_drop.ignore_drop = true;
+        let (costmap_sender, costmap_receiver) = oneshot::channel();
+        context.spawn_async(async move {
+            let Ok(costmap) = self.costmap_sub.into_watch_or_closed().await else { return; };
+            let _ = costmap_sender.send(costmap);
+        });
+        let Ok(mut costmap) = costmap_receiver.blocking_recv() else {
             warn!("Costmap dropped before we could start");
-            return Ok(());
+            return;
         };
         let sleeper = spin_sleep::SpinSleeper::default();
         let mut start_time = Instant::now();
         let drop_check = DropCheck::default();
         let _drop_check = drop_check.clone();
 
-        asyncify_run(move || loop {
+        loop {
             let Some(mut req) = self.service.blocking_wait_for_request() else {
-                break Ok(());
+                break;
             };
 
             let end = req.take_input().unwrap();
@@ -160,7 +162,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Node for Pa
             loop {
                 start_time += start_time.elapsed();
                 if drop_check.has_dropped() {
-                    return Ok(());
+                    return;
                 }
                 let start: Vector3<N> =
                     nalgebra::convert(self.robot_base.get_isometry().translation.vector);
@@ -186,12 +188,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Node for Pa
 
                 sleeper.sleep(self.refresh_rate.saturating_sub(start_time.elapsed()));
             }
-        })
-        .await
-    }
-
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
+        }
     }
 }
 

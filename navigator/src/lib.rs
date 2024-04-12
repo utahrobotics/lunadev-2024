@@ -5,9 +5,7 @@ use nalgebra::{Point3, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    anyhow, async_trait, asyncify_run,
-    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
-    setup_logging, DropCheck, Node, NodeIntrinsics, RuntimeContext,
+    node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::task::block_in_place, DontDrop, DropCheck
 };
 
 pub mod drive;
@@ -27,7 +25,7 @@ pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
     pub can_reverse: bool,
     pub full_turn_angle: Float,
     pub turn_fn: F,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
 }
 
 impl DifferentialDriver<fn(Float) -> Float> {
@@ -41,7 +39,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
             // 30 degrees
             full_turn_angle: std::f64::consts::FRAC_PI_6 as Float,
             turn_fn: |frac| -2.0 * frac + 1.0,
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new("diff-driver"),
         }
     }
 }
@@ -56,19 +54,15 @@ impl<F: FnMut(Float) -> Float + Send + 'static> DifferentialDriver<F> {
     }
 }
 
-#[async_trait]
-impl<F> Node for DifferentialDriver<F>
+impl<F> AsyncNode for DifferentialDriver<F>
 where
     F: FnMut(Float) -> Float + Send + 'static,
 {
-    const DEFAULT_NAME: &'static str = "waypoint-driver";
+    type Result = ();
 
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
-    }
-
-    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+    async fn run(mut self, context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
+        self.dont_drop.ignore_drop = true;
         let sleeper = spin_sleep::SpinSleeper::default();
         let drop_check = DropCheck::default();
 
@@ -76,7 +70,7 @@ where
             let mut path = self.path_sub.recv().await;
             let drop_check = drop_check.get_observing();
 
-            let (path_sub, steering_signal, robot_base, turn_fn) = asyncify_run(move || {
+            let (path_sub, steering_signal, robot_base, turn_fn) = block_in_place(move || {
                 loop {
                     if drop_check.has_dropped() {
                         break;
@@ -146,15 +140,13 @@ where
                 }
                 self.steering_signal.set(Steering::new(0.0, 0.0));
 
-                Ok((
+                (
                     self.path_sub,
                     self.steering_signal,
                     self.robot_base,
                     self.turn_fn,
-                ))
-            })
-            .await
-            .unwrap();
+                )
+            });
 
             self.path_sub = path_sub;
             self.steering_signal = steering_signal;

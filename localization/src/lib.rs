@@ -12,9 +12,7 @@ use rig::{RobotBase, RobotElementRef};
 use run::run_localizer;
 use smach::State;
 use unros::{
-    anyhow, async_trait,
-    pubsub::{subs::DirectSubscription, Subscriber},
-    Node, NodeIntrinsics, RuntimeContext,
+    node::AsyncNode, pubsub::{subs::DirectSubscription, Subscriber}, runtime::RuntimeContext, DontDrop
 };
 use utils::{random_unit_vector, UnorderedQueue};
 
@@ -31,7 +29,7 @@ pub use utils::{gravity, Float};
 /// Processing does not occur until the node is running.
 pub struct Localizer<N: Float> {
     bb: LocalizerBlackboard<N>,
-    intrinsics: NodeIntrinsics<Self>,
+    dont_drop: DontDrop,
 }
 
 impl<N: Float> Localizer<N> {
@@ -59,7 +57,7 @@ impl<N: Float> Localizer<N> {
                 context: None,
                 start_orientation: UnitQuaternion::default(),
             },
-            intrinsics: Default::default(),
+            dont_drop: DontDrop::new("localizer"),
         }
     }
 
@@ -202,15 +200,11 @@ pub struct LocalizerBlackboard<N: Float> {
     context: Option<RuntimeContext>,
 }
 
-#[async_trait]
-impl<N: Float> Node for Localizer<N> {
-    const DEFAULT_NAME: &'static str = "positioning";
+impl<N: Float> AsyncNode for Localizer<N> {
+    type Result = ();
 
-    fn get_intrinsics(&mut self) -> &mut NodeIntrinsics<Self> {
-        &mut self.intrinsics
-    }
-
-    async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+    async fn run(mut self, context: RuntimeContext) -> Self::Result {
+        self.dont_drop.ignore_drop = true;
         self.bb.context = Some(context);
 
         let (calib, calib_trans) = State::new(calibrate_localizer);

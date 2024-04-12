@@ -16,7 +16,7 @@ use log::Level;
 
 use crate::{
     pubsub::{Publisher, PublisherRef},
-    runtime::{has_repl, MainRuntimeContext},
+    runtime::{has_repl, MainRuntimeContext, RuntimeContextExt},
 };
 
 pub mod dump;
@@ -38,6 +38,7 @@ macro_rules! setup_logging {
         setup_logging!($context $)
     };
     ($context: ident $dol:tt) => {
+        use $crate::runtime::RuntimeContextExt;
         let _context = &$context;
         #[allow(unused_macros)]
         macro_rules! info {

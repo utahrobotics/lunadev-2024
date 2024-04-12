@@ -136,6 +136,7 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
         .map_err(Into::into)
 }
 
+#[derive(Clone, Debug)]
 pub struct DontDrop {
     pub name: Cow<'static, str>,
     pub ignore_drop: bool
