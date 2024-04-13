@@ -23,7 +23,7 @@ use unros::{
     anyhow, logging::{
         dump::{ScalingFilter, VideoDataDump},
         get_log_pub,
-    }, node::{AsyncNode, SyncNode}, pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::{self, task::spawn_blocking}, DontDrop, DropCheck
+    }, node::{AsyncNode, SyncNode}, pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::{self, task::spawn_blocking}, DontDrop, ShouldNotDrop
 };
 
 
@@ -34,6 +34,7 @@ struct TelemetryConfig {
 
 
 /// A remote connection to `Lunabase`
+#[derive(ShouldNotDrop)]
 pub struct Telemetry {
     network_node: NetworkNode,
     network_connector: NetworkConnector,
@@ -42,7 +43,7 @@ pub struct Telemetry {
     steering_signal: Publisher<Steering>,
     arm_signal: Publisher<ArmParameters>,
     image_subscriptions: Subscriber<Arc<DynamicImage>>,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
     negotiation: Negotiation<(
         ChannelNegotiation<ImportantMessage>,
         ChannelNegotiation<Arc<str>>,
@@ -112,8 +113,6 @@ impl AsyncNode for Telemetry {
         let enable_camera = Arc::new(AtomicBool::default());
         let enable_camera2 = enable_camera.clone();
 
-        let drop_check = DropCheck::default();
-        let drop_observe = drop_check.get_observing();
         let context2 = context.clone();
 
         let cam_fut = spawn_blocking(move || {
@@ -123,7 +122,7 @@ impl AsyncNode for Telemetry {
             loop {
                 let mut video_dump;
                 loop {
-                    if drop_observe.has_dropped() {
+                    if context2.is_runtime_exiting() {
                         return Ok(());
                     }
                     if enable_camera.load(Ordering::Relaxed) {
@@ -146,7 +145,7 @@ impl AsyncNode for Telemetry {
                             }
                             let start_service = Instant::now();
                             while start_service.elapsed().as_millis() < 2000 {
-                                if drop_observe.has_dropped() {
+                                if context2.is_runtime_exiting() {
                                     return Ok(());
                                 }
                                 sleeper.sleep(self.camera_delta);
@@ -158,7 +157,7 @@ impl AsyncNode for Telemetry {
                 }
                 let mut start_service = Instant::now();
                 loop {
-                    if drop_observe.has_dropped() {
+                    if context2.is_runtime_exiting() {
                         return Ok(());
                     }
                     if !enable_camera.load(Ordering::Relaxed) {

@@ -1,14 +1,15 @@
 use lunabot::ArmParameters;
 use serial::SerialConnection;
 use unros::{
-    anyhow, node::AsyncNode, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, runtime::RuntimeContext, setup_logging, tokio, DontDrop
+    anyhow, node::AsyncNode, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, runtime::RuntimeContext, setup_logging, tokio, DontDrop, ShouldNotDrop
 };
 
+#[derive(ShouldNotDrop)]
 pub struct Arms {
     arm_sub: Subscriber<ArmParameters>,
     tilt_conn: SerialConnection<String, String>,
     lift_conn: SerialConnection<String, String>,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
 }
 
 impl Arms {

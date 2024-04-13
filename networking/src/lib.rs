@@ -22,7 +22,7 @@ use unros::{
     anyhow, node::SyncNode, pubsub::{
         subs::{DirectSubscription, Subscription},
         MonoPublisher, Subscriber,
-    }, runtime::RuntimeContext, setup_logging, tokio::{self, sync::oneshot}, DontDrop
+    }, runtime::RuntimeContext, setup_logging, tokio::{self, sync::oneshot}, DontDrop, ShouldNotDrop
 };
 
 use crate::peer::{PeerStateMachine, Retention};
@@ -124,13 +124,14 @@ impl NetworkConnector {
     }
 }
 
+#[derive(ShouldNotDrop)]
 pub struct NetworkNode {
     pub service_duration: Duration,
     pub peer_buffer_size: usize,
     socket: Socket,
     peer_pub: MonoPublisher<(Packet, NetworkPeer)>,
     address_receiver: Receiver<(Packet, tokio::sync::oneshot::Sender<NetworkPeer>)>,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
 }
 
 pub fn new_client() -> laminar::Result<(NetworkNode, NetworkConnector)> {

@@ -12,7 +12,7 @@ use quadtree_rs::{area::AreaBuilder, Quadtree};
 use rig::RobotElementRef;
 use simba::scalar::{SubsetOf, SupersetOf};
 use unros::{
-    node::AsyncNode, pubsub::{subs::Subscription, Publisher, PublisherRef, Subscriber}, rayon::iter::{IntoParallelIterator, ParallelIterator}, runtime::RuntimeContext, setup_logging, DontDrop
+    node::AsyncNode, pubsub::{subs::Subscription, Publisher, PublisherRef, Subscriber}, rayon::iter::{IntoParallelIterator, ParallelIterator}, runtime::RuntimeContext, setup_logging, DontDrop, ShouldNotDrop
 };
 
 #[derive(Clone, Copy)]
@@ -256,11 +256,12 @@ impl<
     }
 }
 
+#[derive(ShouldNotDrop)]
 pub struct CostmapGenerator<N: RealField + Copy = f32> {
     pub threshold: N,
     pub window_length: usize,
     quadtree_sub: Subscriber<CostmapFrame<N>>,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
     costmap_pub: Publisher<Costmap<N>>,
 }
 

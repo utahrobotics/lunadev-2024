@@ -5,7 +5,7 @@ use nalgebra::{Point3, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::task::block_in_place, DontDrop, DropCheck
+    node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::task::block_in_place, DontDrop, ShouldNotDrop
 };
 
 pub mod drive;
@@ -17,6 +17,7 @@ type Float = f32;
 
 const PI: Float = std::f64::consts::PI as Float;
 
+#[derive(ShouldNotDrop)]
 pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
     path_sub: Subscriber<Arc<[Point3<Float>]>>,
     steering_signal: Publisher<Steering>,
@@ -25,7 +26,7 @@ pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
     pub can_reverse: bool,
     pub full_turn_angle: Float,
     pub turn_fn: F,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
 }
 
 impl DifferentialDriver<fn(Float) -> Float> {
@@ -60,19 +61,17 @@ where
 {
     type Result = ();
 
-    async fn run(mut self, context: RuntimeContext) -> Self::Result {
+    async fn run(mut self, mut context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
         self.dont_drop.ignore_drop = true;
         let sleeper = spin_sleep::SpinSleeper::default();
-        let drop_check = DropCheck::default();
 
         loop {
             let mut path = self.path_sub.recv().await;
-            let drop_check = drop_check.get_observing();
 
-            let (path_sub, steering_signal, robot_base, turn_fn) = block_in_place(move || {
+            let (path_sub, steering_signal, robot_base, turn_fn, tmp_context) = block_in_place(move || {
                 loop {
-                    if drop_check.has_dropped() {
+                    if context.is_runtime_exiting() {
                         break;
                     }
                     if let Some(new_path) = self.path_sub.try_recv() {
@@ -145,6 +144,7 @@ where
                     self.steering_signal,
                     self.robot_base,
                     self.turn_fn,
+                    context
                 )
             });
 
@@ -152,6 +152,7 @@ where
             self.steering_signal = steering_signal;
             self.robot_base = robot_base;
             self.turn_fn = turn_fn;
+            context = tmp_context;
 
             // if let Some(goal_forward) = goal_forward {
             //     // Turn to goal orientation

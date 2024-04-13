@@ -27,7 +27,7 @@ use tokio::{
     sync::mpsc,
 };
 
-use crate::{runtime::RuntimeContextExt, DropCheck};
+use crate::runtime::RuntimeContextExt;
 
 
 struct DataDumpInner {
@@ -195,7 +195,6 @@ impl std::fmt::Display for VideoDataDumpType {
 /// automatically.
 pub struct VideoDataDump {
     video_writer: Arc<ArrayQueue<Arc<DynamicImage>>>,
-    writer_drop: DropCheck,
     width: u32,
     height: u32,
     dump_type: VideoDataDumpType,
@@ -309,21 +308,19 @@ a=fmtp:96 packetization-mode=1",
 
         let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();
-        let writer_drop = DropCheck::default();
-        let reader_drop = writer_drop.clone();
 
         let mut video_out = cmd.stdin.unwrap();
 
         let backoff = Backoff::new();
 
         context.spawn_persistent_sync(move || loop {
-            if reader_drop.has_dropped() {
-                if let Err(e) = video_out.flush() {
-                    error!("Failed to flush Display: {e}");
-                }
-                break;
-            }
             let Some(frame) = queue_receiver.pop() else {
+                if Arc::strong_count(&queue_receiver) == 1 {
+                    if let Err(e) = video_out.flush() {
+                        error!("Failed to flush Display: {e}");
+                    }
+                    break;
+                }
                 backoff.snooze();
                 continue;
             };
@@ -341,7 +338,6 @@ a=fmtp:96 packetization-mode=1",
 
         Ok(Self {
             video_writer: queue_sender,
-            writer_drop,
             width: in_width,
             height: in_height,
             dump_type: VideoDataDumpType::Display,
@@ -462,8 +458,6 @@ a=fmtp:96 packetization-mode=1",
     ) -> Result<Self, VideoDumpInitError> {
         let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();
-        let writer_drop = DropCheck::default();
-        let reader_drop = writer_drop.clone();
 
         let mut video_out = output.take_stdin().unwrap();
 
@@ -490,13 +484,13 @@ a=fmtp:96 packetization-mode=1",
         let backoff = Backoff::new();
 
         context.spawn_persistent_sync(move || loop {
-            if reader_drop.has_dropped() {
-                if let Err(e) = video_out.flush() {
-                    error!("Failed to flush {}: {e}", dump_type2);
-                }
-                break;
-            }
             let Some(frame) = queue_receiver.pop() else {
+                if Arc::strong_count(&queue_receiver) == 1 {
+                    if let Err(e) = video_out.flush() {
+                        error!("Failed to flush {}: {e}", dump_type2);
+                    }
+                    break;
+                }
                 backoff.snooze();
                 continue;
             };
@@ -517,7 +511,6 @@ a=fmtp:96 packetization-mode=1",
 
         Ok(Self {
             video_writer: queue_sender,
-            writer_drop,
             width: in_width,
             height: in_height,
             dump_type, // start: Instant::now(),
@@ -536,7 +529,7 @@ a=fmtp:96 packetization-mode=1",
             });
         }
 
-        if self.writer_drop.has_dropped() {
+        if Arc::strong_count(&self.video_writer) == 1 {
             return Err(VideoWriteError::Unknown);
         }
         match self.video_writer.force_push(frame) {
@@ -561,7 +554,7 @@ a=fmtp:96 packetization-mode=1",
             });
         }
 
-        if self.writer_drop.has_dropped() {
+        if Arc::strong_count(&self.video_writer) == 1 {
             return Err(VideoWriteError::Unknown);
         }
         self.video_writer.force_push(frame);

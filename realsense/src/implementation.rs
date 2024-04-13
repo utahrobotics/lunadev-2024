@@ -30,7 +30,7 @@ use unros::{
     anyhow, node::SyncNode, pubsub::{Publisher, PublisherRef}, rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
-    }, runtime::RuntimeContext, setup_logging, DontDrop
+    }, runtime::RuntimeContext, setup_logging, DontDrop, ShouldNotDrop
 };
 
 #[derive(Clone)]
@@ -55,6 +55,7 @@ impl PointCloud {
 }
 
 /// A connection to a RealSense Camera.
+#[derive(ShouldNotDrop)]
 pub struct RealSenseCamera {
     device: Device,
     context: Arc<Mutex<Context>>,
@@ -64,7 +65,7 @@ pub struct RealSenseCamera {
     robot_element: Option<RobotElementRef>,
     pub focal_length_frac: f32,
     pub min_distance: f32,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
 }
 
 impl RealSenseCamera {

@@ -22,7 +22,7 @@ use eye::hal::{
 use image::codecs::jpeg::JpegDecoder;
 use image::{imageops::FilterType, DynamicImage};
 use unros::{
-    anyhow, node::SyncNode, pubsub::{Publisher, PublisherRef}, setup_logging, DontDrop, runtime::RuntimeContext
+    anyhow, node::SyncNode, pubsub::{Publisher, PublisherRef}, runtime::RuntimeContext, setup_logging, DontDrop, ShouldNotDrop
 };
 #[cfg(not(unix))]
 pub struct Description {
@@ -36,6 +36,7 @@ static PLATFORM: Mutex<Option<PlatformContext>> = Mutex::new(None);
 /// A pending connection to a camera.
 ///
 /// The connection is not created until this `Node` is ran.
+#[derive(ShouldNotDrop)]
 pub struct Camera<F = fn(DynamicImage, u32, u32) -> DynamicImage> {
     pub fps: u32,
     pub res_x: u32,
@@ -44,7 +45,7 @@ pub struct Camera<F = fn(DynamicImage, u32, u32) -> DynamicImage> {
     device: Mutex<Device<'static>>,
     description: Description,
     image_received: Publisher<Arc<DynamicImage>>,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
     #[allow(dead_code)]
     resizer: F,
 }

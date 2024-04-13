@@ -4,15 +4,16 @@ use py_repl::PyRepl;
 use serde::Deserialize;
 use serial::{Bytes, SerialConnection};
 use unros::{
-    anyhow, get_env, log, node::AsyncNode, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, runtime::RuntimeContext, setup_logging, tokio, DontDrop
+    anyhow, get_env, log, node::AsyncNode, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, runtime::RuntimeContext, setup_logging, tokio, DontDrop, ShouldNotDrop
 };
 
+#[derive(ShouldNotDrop)]
 pub struct Drive {
     steering_sub: Subscriber<Steering>,
     vesc: PyRepl,
     left_conn: SerialConnection,
     right_conn: SerialConnection,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
     left_invert: bool,
     right_invert: bool,
     get_values_respose_len: usize,

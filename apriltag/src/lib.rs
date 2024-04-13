@@ -15,7 +15,7 @@ use fxhash::FxHashMap;
 use nalgebra::{Isometry3, Point3, UnitQuaternion, Vector3};
 use rig::RobotElementRef;
 use unros::{
-    anyhow, node::SyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, DontDrop
+    anyhow, node::SyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, DontDrop, ShouldNotDrop
 };
 
 /// An observation of the global orientation and position
@@ -57,6 +57,7 @@ struct KnownTag {
 ///
 /// Actual detection does not occur until the node
 /// is running.
+#[derive(ShouldNotDrop)]
 pub struct AprilTagDetector {
     image_sub: Subscriber<Arc<DynamicImage>>,
     tag_detected: Publisher<PoseObservation>,
@@ -66,7 +67,7 @@ pub struct AprilTagDetector {
     image_height: u32,
     robot_element: RobotElementRef,
     pub velocity_window: usize,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
 }
 
 impl AprilTagDetector {

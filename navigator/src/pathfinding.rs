@@ -13,7 +13,7 @@ use pathfinding::directed::{astar::astar, bfs::bfs};
 use rig::RobotBaseRef;
 use simba::scalar::SupersetOf;
 use unros::{
-    node::SyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, runtime::RuntimeContext, service::{new_service, Service, ServiceHandle}, setup_logging, tokio::sync::oneshot, DontDrop, DropCheck
+    node::SyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, runtime::RuntimeContext, service::{new_service, Service, ServiceHandle}, setup_logging, tokio::{self, sync::oneshot}, DontDrop, ShouldNotDrop
 };
 
 #[derive(Debug)]
@@ -73,13 +73,14 @@ pub trait PathfindingEngine<N: RealField>: Send + 'static {
     ) -> Option<Vec<Point3<N>>>;
 }
 
+#[derive(ShouldNotDrop)]
 pub struct Pathfinder<
     N: RealField + SupersetOf<f32> + Copy = f32,
     E: PathfindingEngine<N> = DirectPathfinder<N>,
 > {
     engine: E,
     costmap_sub: Subscriber<Costmap<N>>,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
     service: Service<Point3<N>, NavigationError, NavigationProgress, Result<(), NavigationError>>,
     service_handle: NavigationServiceHandle<N>,
     robot_base: RobotBaseRef,
@@ -131,7 +132,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode fo
         drop(self.service_handle);
         self.dont_drop.ignore_drop = true;
         let (costmap_sender, costmap_receiver) = oneshot::channel();
-        context.spawn_async(async move {
+        tokio::spawn(async move {
             let Ok(costmap) = self.costmap_sub.into_watch_or_closed().await else { return; };
             let _ = costmap_sender.send(costmap);
         });
@@ -141,8 +142,6 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode fo
         };
         let sleeper = spin_sleep::SpinSleeper::default();
         let mut start_time = Instant::now();
-        let drop_check = DropCheck::default();
-        let _drop_check = drop_check.clone();
 
         loop {
             let Some(mut req) = self.service.blocking_wait_for_request() else {
@@ -161,7 +160,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode fo
 
             loop {
                 start_time += start_time.elapsed();
-                if drop_check.has_dropped() {
+                if context.is_runtime_exiting() {
                     return;
                 }
                 let start: Vector3<N> =

@@ -12,7 +12,7 @@ use rig::{RobotBase, RobotElementRef};
 use run::run_localizer;
 use smach::State;
 use unros::{
-    node::AsyncNode, pubsub::{subs::DirectSubscription, Subscriber}, runtime::RuntimeContext, DontDrop
+    node::AsyncNode, pubsub::{subs::DirectSubscription, Subscriber}, runtime::RuntimeContext, DontDrop, ShouldNotDrop
 };
 use utils::{random_unit_vector, UnorderedQueue};
 
@@ -27,9 +27,10 @@ pub use utils::{gravity, Float};
 /// determine where an object is in global space.
 ///
 /// Processing does not occur until the node is running.
+#[derive(ShouldNotDrop)]
 pub struct Localizer<N: Float> {
     bb: LocalizerBlackboard<N>,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
 }
 
 impl<N: Float> Localizer<N> {

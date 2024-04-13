@@ -19,10 +19,7 @@
 #![feature(alloc_layout_extra)]
 
 use std::{
-    borrow::Cow, path::Path, sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
-    }
+    borrow::Cow, marker::PhantomData, path::Path, sync::OnceLock
 };
 
 pub mod logging;
@@ -41,82 +38,6 @@ pub use rayon;
 use serde::Deserialize;
 pub use tokio;
 
-
-/// A simple primitive for tracking when clones of itself have been dropped.
-///
-/// Clones of this are all connected such that if any clone is dropped, all other
-/// clones will be aware of that. For an object that only tracks if its clones were
-/// dropped without updating them when itself is dropped, refer to `ObservingDropCheck`.
-#[derive(Clone)]
-pub struct DropCheck {
-    dropped: Arc<AtomicBool>,
-    update_on_drop: bool,
-}
-
-impl Default for DropCheck {
-    fn default() -> Self {
-        Self {
-            dropped: Arc::default(),
-            update_on_drop: true,
-        }
-    }
-}
-
-impl Drop for DropCheck {
-    fn drop(&mut self) {
-        if self.update_on_drop {
-            self.dropped.store(true, Ordering::SeqCst);
-        }
-    }
-}
-
-impl DropCheck {
-    /// Returns true iff a clone has been dropped.
-    #[must_use]
-    pub fn has_dropped(&self) -> bool {
-        self.dropped.load(Ordering::SeqCst)
-    }
-
-    /// Forget if a clone has been dropped.
-    pub fn reset(&self) {
-        self.dropped.store(true, Ordering::SeqCst);
-    }
-
-    /// Ensures that this `DropCheck` will update its clones when dropped.
-    pub fn update_on_drop(&mut self) {
-        self.update_on_drop = true;
-    }
-
-    /// Ensures that this `DropCheck` will *not* update its clones when dropped.
-    pub fn dont_update_on_drop(&mut self) {
-        self.update_on_drop = true;
-    }
-
-    /// Get an observer to this `DropCheck` and its clones.
-    pub fn get_observing(&self) -> ObservingDropCheck {
-        ObservingDropCheck {
-            dropped: self.dropped.clone(),
-        }
-    }
-}
-
-/// A similar object to `DropCheck`, however, none of its clones
-/// will be updated when this is dropped.
-///
-/// This is equivalent to calling `dont_update_on_drop` on `DropCheck`,
-/// except that this is enforced statically.
-#[derive(Clone)]
-pub struct ObservingDropCheck {
-    dropped: Arc<AtomicBool>,
-}
-
-impl ObservingDropCheck {
-    /// Returns true iff a clone has been dropped.
-    #[must_use]
-    pub fn has_dropped(&self) -> bool {
-        self.dropped.load(Ordering::SeqCst)
-    }
-}
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
@@ -137,26 +58,47 @@ pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
 }
 
 #[derive(Clone, Debug)]
-pub struct DontDrop {
+pub struct DontDrop<T: ShouldNotDrop + ?Sized> {
     pub name: Cow<'static, str>,
-    pub ignore_drop: bool
+    pub ignore_drop: bool,
+    phantom: PhantomData<T>,
 }
 
 
-impl DontDrop {
+impl<T: ShouldNotDrop + ?Sized> DontDrop<T> {
     pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
         Self {
             name: name.into(),
             ignore_drop: false,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn remap<T2: ShouldNotDrop + ?Sized>(mut self) -> DontDrop<T2> {
+        let ignore_drop = self.ignore_drop;
+        self.ignore_drop = true;
+        DontDrop {
+            name: std::mem::take(&mut self.name),
+            ignore_drop,
+            phantom: PhantomData,
         }
     }
 }
 
 
-impl Drop for DontDrop {
+impl<T: ShouldNotDrop + ?Sized> Drop for DontDrop<T> {
     fn drop(&mut self) {
         if !self.ignore_drop {
             log::warn!("{} was dropped", self.name);
         }
+    }
+}
+
+
+pub trait ShouldNotDrop {
+    fn get_dont_drop(&mut self) -> &mut DontDrop<Self>;
+
+    fn ignore_drop(&mut self) {
+        self.get_dont_drop().ignore_drop = true;
     }
 }

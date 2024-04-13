@@ -9,10 +9,11 @@ use unros::{
     anyhow, node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
-    }, DontDrop
+    }, DontDrop, ShouldNotDrop
 };
 
 /// A single duplex connection to a serial port
+#[derive(ShouldNotDrop)]
 pub struct SerialConnection<I=Bytes, O=Bytes> {
     path: Arc<str>,
     baud_rate: u32,
@@ -23,7 +24,7 @@ pub struct SerialConnection<I=Bytes, O=Bytes> {
     serial_output: Publisher<O>,
     serial_input: Subscriber<I>,
     tolerate_error: bool,
-    dont_drop: DontDrop,
+    dont_drop: DontDrop<Self>,
 }
 
 impl SerialConnection {
@@ -122,7 +123,7 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
             serial_output: self.serial_output,
             serial_input: Subscriber::new(self.serial_input.get_size()),
             tolerate_error: self.tolerate_error,
-            dont_drop: self.dont_drop,
+            dont_drop: self.dont_drop.remap(),
         }
     }
 
@@ -138,7 +139,7 @@ impl<I: Send + Clone + 'static, O: Send + Clone + 'static> SerialConnection<I, O
             serial_output: Publisher::default(),
             serial_input: self.serial_input,
             tolerate_error: self.tolerate_error,
-            dont_drop: self.dont_drop,
+            dont_drop: self.dont_drop.remap(),
         }
     }
 }
