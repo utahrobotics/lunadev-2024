@@ -1,8 +1,7 @@
 //! Several utilities that complement the Unros framework.
 
 use std::{
-    ops::{Deref, DerefMut},
-    sync::OnceLock,
+    cell::Cell, ops::{Deref, DerefMut}, sync::OnceLock, thread::LocalKey
 };
 
 use crossbeam::queue::ArrayQueue;
@@ -213,6 +212,71 @@ impl<'a, T> Drop for ResourceGuard<'a, T> {
     fn drop(&mut self) {
         if let Some(inner) = self.inner.take() {
             self.queue.queue.get().unwrap().force_push(inner);
+        }
+    }
+}
+
+
+pub struct ThreadLocalResource<T> {
+    inner: Cell<Option<T>>,
+    init: fn() -> T
+}
+
+
+impl<T> ThreadLocalResource<T> {
+    pub const fn new(init: fn() -> T) -> Self {
+        Self {
+            inner: Cell::new(None),
+            init
+        }
+    }
+}
+
+
+pub struct ThreadLocalResourceGuard<T: 'static> {
+    inner: Option<T>,
+    tls: &'static LocalKey<ThreadLocalResource<T>>
+}
+
+
+impl<T> Deref for ThreadLocalResourceGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref().unwrap()
+    }
+}
+
+
+impl<T> DerefMut for ThreadLocalResourceGuard<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.as_mut().unwrap()
+    }
+}
+
+
+impl<T> Drop for ThreadLocalResourceGuard<T> {
+    fn drop(&mut self) {
+        self.tls.with(|tls| {
+            tls.inner.set(self.inner.take());
+        });
+    }
+}
+
+
+pub trait ThreadLocalResourceExt<T> {
+    fn take(&'static self) -> ThreadLocalResourceGuard<T>;
+}
+
+
+impl<T> ThreadLocalResourceExt<T> for LocalKey<ThreadLocalResource<T>> {
+    fn take(&'static self) -> ThreadLocalResourceGuard<T> {
+        let inner = self.with(|tls| {
+            tls.inner.take().unwrap_or_else(|| (tls.init)())
+        });
+        ThreadLocalResourceGuard {
+            inner: Some(inner),
+            tls: self
         }
     }
 }

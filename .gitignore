@@ -12,3 +12,7 @@ lunabase/camera.sdp
 *.zst
 *.pyc
 dump/
+
+neura-filter-academy/*=*
+neura-filter-academy/test
+neura-filter-academy/train
