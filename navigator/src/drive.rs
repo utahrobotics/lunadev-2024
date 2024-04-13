@@ -2,7 +2,7 @@ use core::{fmt::Debug, ops::Deref};
 
 use ordered_float::NotNan;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub struct Steering {
     pub left: NotNan<f32>,
     pub right: NotNan<f32>,

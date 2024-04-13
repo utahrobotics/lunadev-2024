@@ -288,6 +288,8 @@ impl AsyncNode for Telemetry {
                     _ = camera_fut => {}
                     _ = important_fut => {}
                 }
+                self.steering_signal.set(Steering::default());
+                self.arm_signal.set(ArmParameters::Stop);
                 error!("Disconnected from lunabase!");
                 enable_camera.store(false, Ordering::Relaxed);
             }
