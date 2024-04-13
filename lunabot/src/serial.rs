@@ -42,7 +42,7 @@ pub fn connect_to_serial() -> anyhow::Result<(Arms, Drive)> {
     let mut micro_python_paths = [None, None];
     let mut vesc_paths = Vec::with_capacity(2);
     let mut micro_py_count = 0usize;
-    for entry in acm_devices.iter().take(2) {
+    for entry in &acm_devices {
         let path = entry.path();
         let output = Command::new("udevadm")
             .arg("info")

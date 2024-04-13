@@ -53,7 +53,9 @@ impl SerialConnection {
             .map_output(move |bytes: Bytes| {
                 output_buf.extend_from_slice(&bytes);
                 if let Ok(msg) = std::str::from_utf8(&output_buf) {
-                    Some(msg.into())
+                    let msg = String::from(msg);
+                    output_buf.clear();
+                    Some(msg)
                 } else {
                     output_buf.clear();
                     None

@@ -17,6 +17,7 @@ use networking::{
     new_client, ConnectionError, NetworkConnector, NetworkNode,
 };
 use ordered_float::NotNan;
+use serde::Deserialize;
 use spin_sleep::SpinSleeper;
 use unros::{
     anyhow, logging::{
@@ -24,6 +25,13 @@ use unros::{
         get_log_pub,
     }, node::{AsyncNode, SyncNode}, pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::{self, task::spawn_blocking}, DontDrop, DropCheck
 };
+
+
+#[derive(Deserialize)]
+struct TelemetryConfig {
+    server_addr: SocketAddrV4,
+}
+
 
 /// A remote connection to `Lunabase`
 pub struct Telemetry {
@@ -50,13 +58,12 @@ pub struct Telemetry {
 
 impl Telemetry {
     pub async fn new(
-        server_addr: impl Into<SocketAddrV4>,
         cam_width: u32,
         cam_height: u32,
         cam_fps: usize,
     ) -> anyhow::Result<Self> {
-        let server_addr = server_addr.into();
-        let mut video_addr = server_addr;
+        let config: TelemetryConfig = unros::get_env()?;
+        let mut video_addr = config.server_addr;
         video_addr.set_port(video_addr.port() + 1);
 
         let (network_node, network_connector) = new_client()?;
@@ -64,7 +71,7 @@ impl Telemetry {
         Ok(Self {
             network_node,
             network_connector,
-            server_addr,
+            server_addr: config.server_addr,
             steering_signal: Publisher::default(),
             image_subscriptions: Subscriber::new(1),
             arm_signal: Publisher::default(),

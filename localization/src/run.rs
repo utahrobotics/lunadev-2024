@@ -596,17 +596,17 @@ pub(super) async fn run_localizer<N: Float>(
             bb.robot_base.set_linear_velocity(nconvert(linear_velocity));
 
             // Calculate the sum of squared differences from the mean
-            let sum_squared_diff = particles
-                .par_iter_mut()
-                .map(|p| {
-                    let diff = p.linear_velocity - linear_velocity;
-                    diff.component_mul(&diff)
-                })
-                .reduce(|| Vector3::default(), |a, b| a + b);
+            // let sum_squared_diff = particles
+            //     .par_iter_mut()
+            //     .map(|p| {
+            //         let diff = p.linear_velocity - linear_velocity;
+            //         diff.component_mul(&diff)
+            //     })
+            //     .reduce(|| Vector3::default(), |a, b| a + b);
 
             // Calculate the variance
-            let variance = sum_squared_diff / nconvert::<_, N>((bb.point_count.get() - 1).max(1));
-            println!("{:.2} {:.2} {:.2}", variance.x, variance.y, variance.z);
+            // let variance = sum_squared_diff / nconvert::<_, N>((bb.point_count.get() - 1).max(1));
+            // println!("{:.2} {:.2} {:.2}", variance.x, variance.y, variance.z);
         });
     }
     bb.context = Some(context);

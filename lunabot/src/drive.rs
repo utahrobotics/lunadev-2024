@@ -39,7 +39,7 @@ impl Drive {
         if !msg.trim().is_empty() {
             log::error!("{msg}");
         }
-        let get_values_respose_len: usize = vesc.exec("GET_VALUES_MSG_LENGTH")?.parse()?;
+        let get_values_respose_len: usize = vesc.exec("print(GET_VALUES_MSG_LENGTH)")?.parse()?;
         let get_values_request = BASE64_STANDARD
             .decode(vesc.exec("get_GET_VALUES()")?)?
             .into();
@@ -89,11 +89,13 @@ impl AsyncNode for Drive {
             }
 
             let app_controller_id = self.vesc.exec(&format!(
-                r#"decode_get_values({})"#,
+                r#"decode_get_values("{}")"#,
                 BASE64_STANDARD.encode(&get_values_buf)
             ))?;
 
-            println!("Left VESC ID: {}", app_controller_id);
+            if app_controller_id == "4" {
+                std::mem::swap(&mut left_pub, &mut right_pub);
+            }
 
             loop {
                 let steering = self.steering_sub.recv().await;
@@ -109,8 +111,20 @@ impl AsyncNode for Drive {
                     r#"encode_duty_cycle({})"#,
                     steering.right * right_modifier
                 ))?;
-                let left_vesc_msg = BASE64_STANDARD.decode(left_b64)?;
-                let right_vesc_msg = BASE64_STANDARD.decode(right_b64)?;
+                let left_vesc_msg = match BASE64_STANDARD.decode(left_b64.trim()) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!("Failed to decode left vesc message: {e}");
+                        continue;
+                    }
+                };
+                let right_vesc_msg = match BASE64_STANDARD.decode(right_b64.trim()) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!("Failed to decode right vesc message: {e}");
+                        continue;
+                    }
+                };
 
                 left_pub.set(left_vesc_msg.into());
                 right_pub.set(right_vesc_msg.into());

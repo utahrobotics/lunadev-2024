@@ -1,7 +1,3 @@
 # Configuration for lunabot
-left_port = "/dev/ttyACM2"
-right_port = "/dev/ttyACM3"
-left_invert = true
-right_invert = true
-tilt_port = "/dev/ttyACM0"
-lift_port = "/dev/ttyACM1"
+server_addr = "192.168.0.100:43721"
+# server_addr = "10.8.0.6:43721"

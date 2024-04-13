@@ -34,7 +34,7 @@ impl AsyncNode for Arms {
 
         self.dont_drop.ignore_drop = true;
         let mut tilt_repl = MonoPublisher::from(self.tilt_conn.message_to_send_sub());
-        let tilt_repl_sub = Subscriber::new(1);
+        let tilt_repl_sub = Subscriber::new(8);
         self.tilt_conn
             .msg_received_pub()
             .accept_subscription(tilt_repl_sub.create_subscription());
@@ -42,18 +42,30 @@ impl AsyncNode for Arms {
 
         let arms_fut = async {
             tilt_repl.set("get_info()\r".into());
+            let mut info = String::new();
+            
             loop {
-                let params = self.arm_sub.recv().await;
-                let info = tilt_repl_sub.recv().await;
+                let tmp = tilt_repl_sub.recv().await;
+                info.push_str(&tmp);
+
+                if info.len() < 15 {
+                    continue;
+                }
+
+                let info = info.split_at(10).1.trim();
 
                 if info.starts_with("tilt") {
-                    // Do Nothing, we are correct already
-                } else if info.contains("lift") {
+                    break;
+                } else if info.starts_with("lift") {
                     std::mem::swap(&mut tilt_repl, &mut lift_repl);
-                    info!("Arms were swapped");
+                    break;
                 } else {
-                    break Err(anyhow::anyhow!("Unexpected response from arm: {}", info));
+                    return Err(anyhow::anyhow!("Unexpected response from arm: {}", info));
                 }
+            }
+
+            loop {
+                let params = self.arm_sub.recv().await;
 
                 match params {
                     ArmParameters::TiltUp => tilt_repl.set("r()\r".into()),

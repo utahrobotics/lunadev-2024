@@ -29,7 +29,6 @@ use tokio::{
 
 use crate::{runtime::RuntimeContextExt, DropCheck};
 
-use super::SUB_LOGGING_DIR;
 
 struct DataDumpInner {
     writer: mpsc::UnboundedSender<Vec<u8>>,
@@ -63,10 +62,10 @@ impl DataDump {
         let file = if path.as_ref().is_absolute() {
             File::create(path.as_ref()).await?
         } else {
-            let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`"));
-            };
-            File::create(PathBuf::from(sub_log_dir).join(path.as_ref())).await?
+            // let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
+            //     return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`"));
+            // };
+            File::create(PathBuf::from(context.get_dump_path()).join(path.as_ref())).await?
         };
         Self::new(BufWriter::new(file), path.as_ref().to_string_lossy(), context)
     }
@@ -365,10 +364,10 @@ a=fmtp:96 packetization-mode=1",
         let pathbuf: PathBuf = if path.as_ref().is_absolute() {
             path.as_ref().into()
         } else {
-            let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
-                return Err(VideoDumpInitError::LoggingError(anyhow::anyhow!("Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`")));
-            };
-            PathBuf::from(sub_log_dir).join(path.as_ref())
+            // let Some(sub_log_dir) = SUB_LOGGING_DIR.get() else {
+            //     return Err(VideoDumpInitError::LoggingError(anyhow::anyhow!("Sub-logging directory has not been initialized with a call to `init_logger`, `async_run_all`, or `run_all`")));
+            // };
+            PathBuf::from(context.get_dump_path()).join(path.as_ref())
         };
 
         let output = FfmpegCommand::new()

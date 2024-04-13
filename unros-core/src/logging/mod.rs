@@ -5,7 +5,6 @@
 //! the goal of Unros, and this module provides that.
 
 use std::{
-    path::PathBuf,
     sync::{Arc, Mutex, Once, OnceLock},
     time::Instant,
     fmt::Write
@@ -73,7 +72,6 @@ macro_rules! setup_logging {
     };
 }
 
-static SUB_LOGGING_DIR: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static START_TIME: OnceLock<Instant> = OnceLock::new();
 static LOG_PUB: OnceLock<PublisherRef<Arc<str>>> = OnceLock::new();
 

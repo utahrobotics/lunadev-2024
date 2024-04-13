@@ -60,7 +60,7 @@ impl PyRepl {
                 break;
             }
         }
-        returned.drain((returned.len() - TERMINATOR.len())..);
+        returned.drain((returned.len() - TERMINATOR.len()).saturating_sub(1)..);
         String::from_utf8(returned).map_err(Into::into)
     }
 
