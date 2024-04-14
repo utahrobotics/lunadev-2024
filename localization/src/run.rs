@@ -29,7 +29,7 @@ use crate::{Float, LocalizerBlackboard};
 
 type RandomForestRegressor = RFR<f32, f32, DenseMatrix<f32>, Vec<f32>>;
 
-const OBSERVATIONS: usize = 2;
+pub const OBSERVATIONS: usize = 10;
 
 static FOREST: OnceLock<RandomForestRegressor> = OnceLock::new();
 
@@ -83,9 +83,9 @@ pub(super) async fn run_localizer<N: Float>(
         .collect();
     // drop(rng);
 
-    let mut accel_obs = VecDeque::from_iter([(Vector3::default(), N::zero()); OBSERVATIONS]);
-    let mut vel_obs = VecDeque::from_iter([(Vector3::default(), N::zero()); OBSERVATIONS]);
-    let mut pos_obs = VecDeque::from_iter([(Vector3::default(), N::zero()); OBSERVATIONS]);
+    let mut accel_obs = VecDeque::from_iter([(gravity(), N::zero(), N::zero()); OBSERVATIONS]);
+    let mut vel_obs = VecDeque::from_iter([(Vector3::default(), N::zero(), N::zero()); OBSERVATIONS]);
+    let mut pos_obs = VecDeque::from_iter([(Vector3::default(), N::zero(), N::zero()); OBSERVATIONS]);
 
     let mut start = Instant::now();
     // let mut acceleration_weights: Vec<(Vector3<N>, N)> = Vec::with_capacity(bb.point_count.get());
@@ -128,9 +128,11 @@ pub(super) async fn run_localizer<N: Float>(
 
                 let mut std_dev = frame.acceleration_variance.sqrt();
                 bb.linear_acceleration_std_devs.push(std_dev);
+                let delta_duration = start.elapsed();
+                let delta: N = nconvert(delta_duration.as_secs_f64());
 
-                accel_obs.pop_back();
-                accel_obs.push_front((frame.acceleration, std_dev));
+                accel_obs.pop_front();
+                accel_obs.push_back((frame.acceleration, std_dev, delta));
 
                 std_dev = frame.angular_velocity_variance.sqrt();
                 bb.angular_velocity_std_devs.push(std_dev);
@@ -173,9 +175,11 @@ pub(super) async fn run_localizer<N: Float>(
                 let isometry = frame.robot_element.get_isometry_from_base().inverse();
                 frame.position = nconvert::<_, Isometry3<N>>(isometry) * frame.position;
                 let std_dev = frame.variance.sqrt();
+                let delta_duration = start.elapsed();
+                let delta: N = nconvert(delta_duration.as_secs_f64());
 
-                pos_obs.pop_back();
-                pos_obs.push_front((frame.position.coords, std_dev));
+                pos_obs.pop_front();
+                pos_obs.push_back((frame.position.coords, std_dev, delta));
             }
 
             // Velocity Observations
@@ -184,9 +188,11 @@ pub(super) async fn run_localizer<N: Float>(
                 // attached to the robot base.
                 frame.velocity = nconvert::<_, UnitQuaternion<N>>(frame.robot_element.get_isometry_from_base().rotation) * frame.velocity;
                 let std_dev = frame.variance.sqrt();
+                let delta_duration = start.elapsed();
+                let delta: N = nconvert(delta_duration.as_secs_f64());
 
-                vel_obs.pop_back();
-                vel_obs.push_front((frame.velocity, std_dev));
+                vel_obs.pop_front();
+                vel_obs.push_back((frame.velocity, std_dev, delta));
             }
 
             // Orientation Observations
@@ -343,50 +349,50 @@ pub(super) async fn run_localizer<N: Float>(
 
             let forest = get_forest();
             let accel_obs_slice: &[_] = accel_obs.make_contiguous();
-            let accel_x_obs = accel_obs_slice.iter().flat_map(|(p, c)|
-                [p.x.to_f32(), c.to_f32()]
+            let accel_x_obs = accel_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.x.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let acceleration_x = forest.predict(&DenseMatrix::from_2d_vec(&vec![accel_x_obs])).unwrap()[0];
 
-            let accel_y_obs = accel_obs_slice.iter().flat_map(|(p, c)|
-                [p.y.to_f32(), c.to_f32()]
+            let accel_y_obs = accel_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.y.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let acceleration_y = forest.predict(&DenseMatrix::from_2d_vec(&vec![accel_y_obs])).unwrap()[0];
 
-            let accel_z_obs = accel_obs_slice.iter().flat_map(|(p, c)|
-                [p.z.to_f32(), c.to_f32()]
+            let accel_z_obs = accel_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.z.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let acceleration_z = forest.predict(&DenseMatrix::from_2d_vec(&vec![accel_z_obs])).unwrap()[0];
 
             let vel_obs_slice: &[_] = vel_obs.make_contiguous();
-            let vel_x_obs = vel_obs_slice.iter().flat_map(|(p, c)|
-                [p.x.to_f32(), c.to_f32()]
+            let vel_x_obs = vel_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.x.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let velocity_x = forest.predict(&DenseMatrix::from_2d_vec(&vec![vel_x_obs])).unwrap()[0];
 
-            let vel_y_obs = vel_obs_slice.iter().flat_map(|(p, c)|
-                [p.y.to_f32(), c.to_f32()]
+            let vel_y_obs = vel_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.y.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let velocity_y = forest.predict(&DenseMatrix::from_2d_vec(&vec![vel_y_obs])).unwrap()[0];
 
-            let vel_z_obs = vel_obs_slice.iter().flat_map(|(p, c)|
-                [p.z.to_f32(), c.to_f32()]
+            let vel_z_obs = vel_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.z.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let velocity_z = forest.predict(&DenseMatrix::from_2d_vec(&vec![vel_z_obs])).unwrap()[0];
 
             let pos_obs_slice: &[_] = pos_obs.make_contiguous();
-            let pos_x_obs = pos_obs_slice.iter().flat_map(|(p, c)|
-                [p.x.to_f32(), c.to_f32()]
+            let pos_x_obs = pos_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.x.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let position_x = forest.predict(&DenseMatrix::from_2d_vec(&vec![pos_x_obs])).unwrap()[0];
 
-            let pos_y_obs = pos_obs_slice.iter().flat_map(|(p, c)|
-                [p.y.to_f32(), c.to_f32()]
+            let pos_y_obs = pos_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.y.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let position_y = forest.predict(&DenseMatrix::from_2d_vec(&vec![pos_y_obs])).unwrap()[0];
 
-            let pos_z_obs = pos_obs_slice.iter().flat_map(|(p, c)|
-                [p.z.to_f32(), c.to_f32()]
+            let pos_z_obs = pos_obs_slice.iter().flat_map(|(p, c, d)|
+                [p.z.to_f32(), c.to_f32(), d.to_f32()]
             ).collect();
             let position_z = forest.predict(&DenseMatrix::from_2d_vec(&vec![pos_z_obs])).unwrap()[0];
 
@@ -394,11 +400,13 @@ pub(super) async fn run_localizer<N: Float>(
             let linear_velocity: Vector3<N> = nconvert(Vector3::new(velocity_x, velocity_y, velocity_z));
             let position: Vector3<N> = nconvert(Vector3::new(position_x, position_y, position_z));
 
-            vel_obs.pop_back();
-            vel_obs.push_front((linear_velocity + (acceleration - gravity()) * delta, N::zero()));
+            println!("{:.2} {:.2} {:.2}", acceleration.x, acceleration.y, acceleration.z);
 
-            pos_obs.pop_back();
-            pos_obs.push_front((position + linear_velocity * delta, N::zero()));
+            // vel_obs.pop_front();
+            // vel_obs.push_back((linear_velocity + (acceleration - gravity()) * delta, N::zero()));
+
+            // pos_obs.pop_front();
+            // pos_obs.push_back((position + linear_velocity * delta, N::zero()));
 
             // Get mean position, linear_velocity, acceleration, angular_velocity, and orientation
             let (_angular_velocity, orientation) =

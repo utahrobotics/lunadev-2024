@@ -21,6 +21,7 @@ pub mod frames;
 mod run;
 mod utils;
 
+pub use run::OBSERVATIONS;
 pub use utils::{gravity, Float};
 
 /// A Node that can digest multiple streams of spatial input to

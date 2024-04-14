@@ -12,7 +12,7 @@ script/source = "extends CharacterBody3D
 const WHEEL_SEPARATION := 0.3
 const MOUSE_SENSITIVITY := 0.3
 const SPEED := 0.5
-const ACCEL := 0.4
+const ACCEL := 0.8
 const CONN_DELAY := 0.06
 const DRAG_FACTOR := ACCEL / SPEED / SPEED
 
