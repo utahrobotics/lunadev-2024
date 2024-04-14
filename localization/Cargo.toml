@@ -18,5 +18,3 @@ eigenvalues = { path = "../eigenvalues" }
 crossbeam = { workspace = true }
 simba = { workspace = true }
 # ordered-float = { workspace = true }
-smartcore = { version = "0", features=["serde"] }
-bincode = "1"
