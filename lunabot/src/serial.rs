@@ -2,7 +2,6 @@ use unros::anyhow;
 
 use crate::{actuators::Arms, drive::Drive};
 use std::fs::{self, DirEntry};
-use std::os::unix::ffi::OsStrExt;
 use std::process::Command;
 
 pub fn connect_to_serial() -> anyhow::Result<(Arms, Drive)> {
@@ -10,7 +9,7 @@ pub fn connect_to_serial() -> anyhow::Result<(Arms, Drive)> {
     let acm_devices: Vec<DirEntry> = dev_directory
         .filter_map(|entry| {
             let entry = entry.ok()?;
-            if entry.file_name().as_bytes().starts_with(b"ttyACM") {
+            if entry.file_name().as_encoded_bytes().starts_with(b"ttyACM") {
                 Some(entry)
             } else {
                 None
