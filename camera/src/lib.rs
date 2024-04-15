@@ -22,7 +22,11 @@ use eye::hal::{
 use image::codecs::jpeg::JpegDecoder;
 use image::{imageops::FilterType, DynamicImage};
 use unros::{
-    anyhow, node::SyncNode, pubsub::{Publisher, PublisherRef}, runtime::RuntimeContext, setup_logging, DontDrop, ShouldNotDrop
+    anyhow,
+    node::SyncNode,
+    pubsub::{Publisher, PublisherRef},
+    runtime::RuntimeContext,
+    setup_logging, DontDrop, ShouldNotDrop,
 };
 #[cfg(not(unix))]
 pub struct Description {

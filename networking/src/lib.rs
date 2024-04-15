@@ -19,10 +19,16 @@ use negotiation::{FromPeer, Negotiation};
 use peer::{AwaitingNegotiationReq, NetworkPublisher};
 use spin_sleep::SpinSleeper;
 use unros::{
-    anyhow, node::SyncNode, pubsub::{
+    anyhow,
+    node::SyncNode,
+    pubsub::{
         subs::{DirectSubscription, Subscription},
         MonoPublisher, Subscriber,
-    }, runtime::RuntimeContext, setup_logging, tokio::{self, sync::oneshot}, DontDrop, ShouldNotDrop
+    },
+    runtime::RuntimeContext,
+    setup_logging,
+    tokio::{self, sync::oneshot},
+    DontDrop, ShouldNotDrop,
 };
 
 use crate::peer::{PeerStateMachine, Retention};

@@ -14,7 +14,11 @@ use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
 use lunabot::{make_negotiation, ArmParameters, ControlsPacket, ImportantMessage};
 use networking::new_server;
 use unros::{
-    anyhow, node::SyncNode, pubsub::{MonoPublisher, Subscriber}, runtime::{start_unros_runtime, MainRuntimeContext}, setup_logging, tokio
+    anyhow,
+    node::SyncNode,
+    pubsub::{MonoPublisher, Subscriber},
+    runtime::{start_unros_runtime, MainRuntimeContext},
+    setup_logging, tokio,
 };
 
 struct LunabotShared {
@@ -107,14 +111,15 @@ impl INode for LunabotConn {
                     }
                 }
 
-                let (important, camera, _odometry, controls, logs) = match peer.negotiate(&negotiation).await {
-                    Ok(x) => x,
-                    Err(e) => {
-                        error!("Failed to negotiate with lunabot! {e:?}");
-                        godot_error!("Failed to negotiate with lunabot! {e:?}");
-                        continue;
-                    }
-                };
+                let (important, camera, _odometry, controls, logs) =
+                    match peer.negotiate(&negotiation).await {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!("Failed to negotiate with lunabot! {e:?}");
+                            godot_error!("Failed to negotiate with lunabot! {e:?}");
+                            continue;
+                        }
+                    };
 
                 shared.base_mut_queue.push(Box::new(|mut base| {
                     base.emit_signal("connected".into(), &[]);
@@ -131,11 +136,13 @@ impl INode for LunabotConn {
                 let camera_sub = Subscriber::new(1);
                 camera.accept_subscription(camera_sub.create_subscription());
 
-                let mut controls_pub = MonoPublisher::from(controls.create_unreliable_subscription());
+                let mut controls_pub =
+                    MonoPublisher::from(controls.create_unreliable_subscription());
                 let controls_sub = Subscriber::new(1);
                 controls.accept_subscription(controls_sub.create_subscription());
 
-                let mut important_pub = MonoPublisher::from(important.create_reliable_subscription());
+                let mut important_pub =
+                    MonoPublisher::from(important.create_reliable_subscription());
                 let important_sub = Subscriber::new(8);
                 important.accept_subscription(important_sub.create_subscription());
 
@@ -147,9 +154,9 @@ impl INode for LunabotConn {
                             match ffplay.kill() {
                                 Ok(()) => match ffplay.wait() {
                                     Ok(x) => info!("ffplay exited with {x}"),
-                                    Err(e) => error!("ffplay failed to exit {e}")
-                                }
-                                Err(e) => error!("ffplay failed to be killed {e}")
+                                    Err(e) => error!("ffplay failed to exit {e}"),
+                                },
+                                Err(e) => error!("ffplay failed to be killed {e}"),
                             }
                         }
                     };
@@ -168,45 +175,44 @@ impl INode for LunabotConn {
                     macro_rules! make_ffplay {
                         () => {{
                             let mut child = std::process::Command::new("ffplay")
-                            .args([
-                                "-protocol_whitelist",
-                                "file,rtp,udp",
-                                "-i",
-                                "camera.sdp",
-                                "-flags",
-                                "low_delay",
-                                "-avioflags",
-                                "direct",
-                                "-probesize",
-                                "32",
-                                "-analyzeduration",
-                                "0",
-                                "-sync",
-                                "ext",
-                                "-framedrop",
-                            ])
-                            .stderr(Stdio::piped())
-                            .spawn()
-                            .expect("Failed to init ffplay process");
+                                .args([
+                                    "-protocol_whitelist",
+                                    "file,rtp,udp",
+                                    "-i",
+                                    "camera.sdp",
+                                    "-flags",
+                                    "low_delay",
+                                    "-avioflags",
+                                    "direct",
+                                    "-probesize",
+                                    "32",
+                                    "-analyzeduration",
+                                    "0",
+                                    "-sync",
+                                    "ext",
+                                    "-framedrop",
+                                ])
+                                .stderr(Stdio::piped())
+                                .spawn()
+                                .expect("Failed to init ffplay process");
 
-                        if let Some(mut ffplay) = ffplay.take() {
-                            let _ = ffplay.kill();
-                        }
+                            if let Some(mut ffplay) = ffplay.take() {
+                                let _ = ffplay.kill();
+                            }
 
-                        let mut stderr = child.stderr.take().unwrap();
-                        ffplay = Some(child);
+                            let mut stderr = child.stderr.take().unwrap();
+                            ffplay = Some(child);
 
-                        ffplay_stderr = Some(
-                        std::thread::spawn(move || {
-                            std::io::copy(
-                                &mut stderr,
-                                &mut std::fs::OpenOptions::new()
-                                    .append(true)
-                                    .create(true)
-                                    .open("camera-ffmpeg.log")
-                                    .expect("camera-ffmpeg.log should be writable"),
-                            )
-                        }));
+                            ffplay_stderr = Some(std::thread::spawn(move || {
+                                std::io::copy(
+                                    &mut stderr,
+                                    &mut std::fs::OpenOptions::new()
+                                        .append(true)
+                                        .create(true)
+                                        .open("camera-ffmpeg.log")
+                                        .expect("camera-ffmpeg.log should be writable"),
+                                )
+                            }));
                         }};
                     }
                     tokio::select! {

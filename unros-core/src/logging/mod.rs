@@ -5,9 +5,9 @@
 //! the goal of Unros, and this module provides that.
 
 use std::{
+    fmt::Write,
     sync::{Arc, Mutex, Once, OnceLock},
     time::Instant,
-    fmt::Write
 };
 
 use fern::colors::{Color, ColoredLevelConfig};
@@ -143,16 +143,17 @@ pub(crate) fn init_default_logger(context: &MainRuntimeContext) {
                 write!(log, "{}:{}", loc.file(), loc.line())
             } else {
                 write!(log, "<unknown>")
-            }.unwrap();
+            }
+            .unwrap();
 
             log::error!(target: "panic", "{log}");
             panic_hook(panic_info);
         }));
 
         let colors = ColoredLevelConfig::new()
-        .warn(Color::Yellow)
-        .error(Color::Red)
-        .trace(Color::BrightBlack);
+            .warn(Color::Yellow)
+            .error(Color::Red)
+            .trace(Color::BrightBlack);
 
         let _ = START_TIME.set(Instant::now());
 
@@ -208,5 +209,5 @@ pub(crate) fn init_default_logger(context: &MainRuntimeContext) {
             )
             // Apply globally
             .apply();
-        });
+    });
 }

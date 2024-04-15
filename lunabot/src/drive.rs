@@ -4,7 +4,11 @@ use py_repl::PyRepl;
 use serde::Deserialize;
 use serial::{Bytes, SerialConnection};
 use unros::{
-    anyhow, get_env, log, node::AsyncNode, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, runtime::RuntimeContext, setup_logging, tokio, DontDrop, ShouldNotDrop
+    anyhow, get_env, log,
+    node::AsyncNode,
+    pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber},
+    runtime::RuntimeContext,
+    setup_logging, tokio, DontDrop, ShouldNotDrop,
 };
 
 #[derive(ShouldNotDrop)]

@@ -1,7 +1,11 @@
 use lunabot::ArmParameters;
 use serial::SerialConnection;
 use unros::{
-    anyhow, node::AsyncNode, pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber}, runtime::RuntimeContext, setup_logging, tokio, DontDrop, ShouldNotDrop
+    anyhow,
+    node::AsyncNode,
+    pubsub::{subs::DirectSubscription, MonoPublisher, Subscriber},
+    runtime::RuntimeContext,
+    setup_logging, tokio, DontDrop, ShouldNotDrop,
 };
 
 #[derive(ShouldNotDrop)]
@@ -44,7 +48,7 @@ impl AsyncNode for Arms {
         let arms_fut = async {
             tilt_repl.set("get_info()\r".into());
             let mut info = String::new();
-            
+
             loop {
                 let tmp = tilt_repl_sub.recv().await;
                 info.push_str(&tmp);

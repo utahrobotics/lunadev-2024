@@ -10,14 +10,14 @@ use rig::RobotElementRef;
 use smach::StateResult;
 use unros::{setup_logging, tokio};
 
-use crate::{CalibratedImu, CalibratingImu, Float, LocalizerBlackboard};
+use crate::{engines::LocalizerEngine, CalibratedImu, CalibratingImu, Float, LocalizerBlackboard};
 
 /// The calibration stage of the localizer.
 ///
 /// This stage runs for `calibration_duration` before applying the calibrations and exiting.
-pub(super) async fn calibrate_localizer<N: Float>(
-    mut bb: LocalizerBlackboard<N>,
-) -> StateResult<LocalizerBlackboard<N>> {
+pub(super) async fn calibrate_localizer<N: Float, E: LocalizerEngine<N>>(
+    mut bb: LocalizerBlackboard<N, E>,
+) -> StateResult<LocalizerBlackboard<N, E>> {
     let context = bb.context.unwrap();
     setup_logging!(context);
     info!("Calibrating localizer");

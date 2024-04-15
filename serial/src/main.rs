@@ -2,7 +2,10 @@ use std::io::{stdout, Write};
 
 use serial::{Bytes, SerialConnection};
 use unros::{
-    pubsub::{Publisher, Subscriber}, runtime::MainRuntimeContext, tokio, node::AsyncNode
+    node::AsyncNode,
+    pubsub::{Publisher, Subscriber},
+    runtime::MainRuntimeContext,
+    tokio,
 };
 
 #[unros::main]
@@ -37,5 +40,6 @@ async fn main(ctx: MainRuntimeContext) {
     ctx.wait_for_exit_with_repl(move |line| {
         write_signal.set(line.to_string().into_bytes().into());
         write_signal.set(carriage_return_bytes.clone());
-    }).await;
+    })
+    .await;
 }

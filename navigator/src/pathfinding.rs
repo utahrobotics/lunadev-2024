@@ -13,7 +13,13 @@ use pathfinding::directed::{astar::astar, bfs::bfs};
 use rig::RobotBaseRef;
 use simba::scalar::SupersetOf;
 use unros::{
-    node::SyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, runtime::RuntimeContext, service::{new_service, Service, ServiceHandle}, setup_logging, tokio::{self, sync::oneshot}, DontDrop, ShouldNotDrop
+    node::SyncNode,
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
+    runtime::RuntimeContext,
+    service::{new_service, Service, ServiceHandle},
+    setup_logging,
+    tokio::{self, sync::oneshot},
+    DontDrop, ShouldNotDrop,
 };
 
 #[derive(Debug)]
@@ -133,7 +139,9 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode fo
         self.dont_drop.ignore_drop = true;
         let (costmap_sender, costmap_receiver) = oneshot::channel();
         tokio::spawn(async move {
-            let Ok(costmap) = self.costmap_sub.into_watch_or_closed().await else { return; };
+            let Ok(costmap) = self.costmap_sub.into_watch_or_closed().await else {
+                return;
+            };
             let _ = costmap_sender.send(costmap);
         });
         let Ok(mut costmap) = costmap_receiver.blocking_recv() else {

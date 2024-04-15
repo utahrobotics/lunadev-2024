@@ -29,7 +29,6 @@ use tokio::{
 
 use crate::runtime::RuntimeContextExt;
 
-
 struct DataDumpInner {
     writer: mpsc::UnboundedSender<Vec<u8>>,
     empty_vecs: mpsc::UnboundedReceiver<Vec<u8>>,
@@ -58,7 +57,10 @@ impl DataDump {
     /// sub-logging directory. If a logging implementation has not been initialized
     /// through `init_logger`, `async_run_all`, or `run_all`, then this method will
     /// return a `NotFound` io error.
-    pub async fn new_file(path: impl AsRef<Path>, context: &impl RuntimeContextExt) -> std::io::Result<Self> {
+    pub async fn new_file(
+        path: impl AsRef<Path>,
+        context: &impl RuntimeContextExt,
+    ) -> std::io::Result<Self> {
         let file = if path.as_ref().is_absolute() {
             File::create(path.as_ref()).await?
         } else {
@@ -67,13 +69,20 @@ impl DataDump {
             // };
             File::create(PathBuf::from(context.get_dump_path()).join(path.as_ref())).await?
         };
-        Self::new(BufWriter::new(file), path.as_ref().to_string_lossy(), context)
+        Self::new(
+            BufWriter::new(file),
+            path.as_ref().to_string_lossy(),
+            context,
+        )
     }
 
     /// Create a `DataDump` that writes to the network address.
     ///
     /// For logging purposes, the address is used as the name of the dump.
-    pub async fn new_tcp(addr: SocketAddr, context: &impl RuntimeContextExt) -> std::io::Result<Self> {
+    pub async fn new_tcp(
+        addr: SocketAddr,
+        context: &impl RuntimeContextExt,
+    ) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
         Self::new(BufWriter::new(stream), addr.to_string(), context)
     }
@@ -81,7 +90,11 @@ impl DataDump {
     /// Create a `DataDump` that writes to the given writer.
     ///
     /// For logging purposes, the given name is used as the name of the dump.
-    pub fn new<A>(mut writer: A, name: impl Into<String>, context: &impl RuntimeContextExt) -> std::io::Result<Self>
+    pub fn new<A>(
+        mut writer: A,
+        name: impl Into<String>,
+        context: &impl RuntimeContextExt,
+    ) -> std::io::Result<Self>
     where
         A: AsyncWrite + Unpin + Send + 'static,
     {
@@ -285,7 +298,7 @@ a=fmtp:96 packetization-mode=1",
         in_width: u32,
         in_height: u32,
         fps: usize,
-        context: &impl RuntimeContextExt
+        context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
         let cmd = Command::new("ffplay")
             .args([
@@ -353,7 +366,7 @@ a=fmtp:96 packetization-mode=1",
         scale_filter: ScalingFilter,
         path: impl AsRef<Path>,
         fps: usize,
-        context: &impl RuntimeContextExt
+        context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
         ffmpeg_sidecar::download::auto_download()
             .map_err(|e| VideoDumpInitError::FFMPEGInstallError(e.to_string()))?;
@@ -393,7 +406,7 @@ a=fmtp:96 packetization-mode=1",
             in_height,
             VideoDataDumpType::File(pathbuf),
             output,
-            context
+            context,
         )
     }
 
@@ -406,7 +419,7 @@ a=fmtp:96 packetization-mode=1",
         scale_filter: ScalingFilter,
         addr: SocketAddrV4,
         fps: usize,
-        context: &impl RuntimeContextExt
+        context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
         ffmpeg_sidecar::download::auto_download()
             .map_err(|e| VideoDumpInitError::FFMPEGInstallError(e.to_string()))?;
@@ -446,7 +459,13 @@ a=fmtp:96 packetization-mode=1",
             .spawn()
             .map_err(VideoDumpInitError::IOError)?;
 
-        Self::new(in_width, in_height, VideoDataDumpType::Rtp(addr), output, context)
+        Self::new(
+            in_width,
+            in_height,
+            VideoDataDumpType::Rtp(addr),
+            output,
+            context,
+        )
     }
 
     fn new(
@@ -454,7 +473,7 @@ a=fmtp:96 packetization-mode=1",
         in_height: u32,
         dump_type: VideoDataDumpType,
         mut output: FfmpegChild,
-        context: &impl RuntimeContextExt
+        context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
         let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();

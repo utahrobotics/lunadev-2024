@@ -5,7 +5,12 @@ use nalgebra::{Point3, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::task::block_in_place, DontDrop, ShouldNotDrop
+    node::AsyncNode,
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
+    runtime::RuntimeContext,
+    setup_logging,
+    tokio::task::block_in_place,
+    DontDrop, ShouldNotDrop,
 };
 
 pub mod drive;
@@ -69,84 +74,86 @@ where
         loop {
             let mut path = self.path_sub.recv().await;
 
-            let (path_sub, steering_signal, robot_base, turn_fn, tmp_context) = block_in_place(move || {
-                loop {
-                    if context.is_runtime_exiting() {
-                        break;
-                    }
-                    if let Some(new_path) = self.path_sub.try_recv() {
-                        path = new_path;
-                    }
-
-                    if path.is_empty() {
-                        break;
-                    }
-
-                    let isometry = self.robot_base.get_isometry();
-                    let position = Vector2::new(isometry.translation.x, isometry.translation.z);
-
-                    let (i, _) = path
-                        .iter()
-                        .map(|v| Vector2::new(v.x, v.z))
-                        .enumerate()
-                        .map(|(i, v)| (i, (v - position).magnitude_squared()))
-                        .min_by_key(|(_, distance)| NotNan::new(*distance).unwrap())
-                        .unwrap();
-
-                    if i == path.len() - 1 {
-                        break;
-                    }
-
-                    let next = path[i + 1];
-                    let next = Vector2::new(next.x, next.z);
-
-                    let forward = isometry.get_forward_vector();
-                    let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
-
-                    let travel = (next - position).normalize();
-                    let cross = (forward.x * travel.y - forward.y * travel.x).signum();
-                    assert!(!travel.x.is_nan(), "{position:?} {next:?} {path:?}");
-                    assert!(!travel.y.is_nan(), "{position:?} {next:?} {path:?}");
-                    let mut angle = forward.angle(&travel);
-                    let mut reversing = 1.0;
-
-                    if angle > PI / 2.0 && self.can_reverse {
-                        angle = PI - angle;
-                        reversing = -1.0;
-                    }
-
-                    if angle > self.full_turn_angle {
-                        if cross > 0.0 {
-                            self.steering_signal
-                                .set(Steering::new(1.0 * reversing, -1.0 * reversing));
-                        } else {
-                            self.steering_signal
-                                .set(Steering::new(-1.0 * reversing, 1.0 * reversing));
+            let (path_sub, steering_signal, robot_base, turn_fn, tmp_context) =
+                block_in_place(move || {
+                    loop {
+                        if context.is_runtime_exiting() {
+                            break;
                         }
-                    } else {
-                        let smaller_ratio = (self.turn_fn)(angle / self.full_turn_angle);
-
-                        if cross > 0.0 {
-                            self.steering_signal
-                                .set(Steering::new(1.0 * reversing, smaller_ratio * reversing));
-                        } else {
-                            self.steering_signal
-                                .set(Steering::new(smaller_ratio * reversing, 1.0 * reversing));
+                        if let Some(new_path) = self.path_sub.try_recv() {
+                            path = new_path;
                         }
+
+                        if path.is_empty() {
+                            break;
+                        }
+
+                        let isometry = self.robot_base.get_isometry();
+                        let position = Vector2::new(isometry.translation.x, isometry.translation.z);
+
+                        let (i, _) = path
+                            .iter()
+                            .map(|v| Vector2::new(v.x, v.z))
+                            .enumerate()
+                            .map(|(i, v)| (i, (v - position).magnitude_squared()))
+                            .min_by_key(|(_, distance)| NotNan::new(*distance).unwrap())
+                            .unwrap();
+
+                        if i == path.len() - 1 {
+                            break;
+                        }
+
+                        let next = path[i + 1];
+                        let next = Vector2::new(next.x, next.z);
+
+                        let forward = isometry.get_forward_vector();
+                        let forward =
+                            UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
+
+                        let travel = (next - position).normalize();
+                        let cross = (forward.x * travel.y - forward.y * travel.x).signum();
+                        assert!(!travel.x.is_nan(), "{position:?} {next:?} {path:?}");
+                        assert!(!travel.y.is_nan(), "{position:?} {next:?} {path:?}");
+                        let mut angle = forward.angle(&travel);
+                        let mut reversing = 1.0;
+
+                        if angle > PI / 2.0 && self.can_reverse {
+                            angle = PI - angle;
+                            reversing = -1.0;
+                        }
+
+                        if angle > self.full_turn_angle {
+                            if cross > 0.0 {
+                                self.steering_signal
+                                    .set(Steering::new(1.0 * reversing, -1.0 * reversing));
+                            } else {
+                                self.steering_signal
+                                    .set(Steering::new(-1.0 * reversing, 1.0 * reversing));
+                            }
+                        } else {
+                            let smaller_ratio = (self.turn_fn)(angle / self.full_turn_angle);
+
+                            if cross > 0.0 {
+                                self.steering_signal
+                                    .set(Steering::new(1.0 * reversing, smaller_ratio * reversing));
+                            } else {
+                                self.steering_signal
+                                    .set(Steering::new(smaller_ratio * reversing, 1.0 * reversing));
+                            }
+                        }
+
+                        sleeper.sleep(self.refresh_rate);
                     }
+                    self.steering_signal.set(Steering::new(0.0, 0.0));
 
-                    sleeper.sleep(self.refresh_rate);
-                }
-                self.steering_signal.set(Steering::new(0.0, 0.0));
-
-                (
-                    self.path_sub,
-                    self.steering_signal,
-                    self.robot_base,
-                    self.turn_fn,
-                    context
-                )
-            });
+                    (
+                        self.path_sub,
+                        self.steering_signal,
+                        self.robot_base,
+                        self.turn_fn,
+                        context,
+                    )
+                });
 
             self.path_sub = path_sub;
             self.steering_signal = steering_signal;

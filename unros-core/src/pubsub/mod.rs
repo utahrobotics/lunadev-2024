@@ -23,7 +23,10 @@ use tokio::sync::Notify;
 
 pub mod subs;
 
-use crate::{logging::{dump::DataDump, START_TIME}, runtime::RuntimeContextExt};
+use crate::{
+    logging::{dump::DataDump, START_TIME},
+    runtime::RuntimeContextExt,
+};
 
 use self::subs::{BoxedSubscription, DirectSubscription, PublisherToken, Subscription};
 

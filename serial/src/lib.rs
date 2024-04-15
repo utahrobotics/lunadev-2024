@@ -6,15 +6,21 @@ use std::{ops::Deref, sync::Arc, time::Duration};
 pub use bytes::Bytes;
 use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use unros::{
-    anyhow, node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::{
+    anyhow,
+    node::AsyncNode,
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber},
+    runtime::RuntimeContext,
+    setup_logging,
+    tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt},
-    }, DontDrop, ShouldNotDrop
+    },
+    DontDrop, ShouldNotDrop,
 };
 
 /// A single duplex connection to a serial port
 #[derive(ShouldNotDrop)]
-pub struct SerialConnection<I=Bytes, O=Bytes> {
+pub struct SerialConnection<I = Bytes, O = Bytes> {
     path: Arc<str>,
     baud_rate: u32,
 
