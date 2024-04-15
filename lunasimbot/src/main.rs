@@ -8,7 +8,7 @@ use localization::{
     Localizer,
 };
 use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
-use navigator::{pathfinding::Pathfinder, DifferentialDriver};
+use navigator::{pathfinding::Pathfinder, DifferentialDriver, DriveMode};
 // use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rand_distr::{Distribution, Normal};
 use rig::Robot;
@@ -64,8 +64,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 }
             };
             let position = debug_element_ref.get_global_isometry().translation.vector;
-            let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.3, 0.15);
-            // let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
+            // let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.5, 0.05);
+            let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
             costmap_display.write_frame(Arc::new(img.into())).unwrap();
         }
     });
@@ -81,7 +81,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         .accept_subscription(path_sub.create_subscription());
 
     let driver = DifferentialDriver::new(robot_base.get_ref());
-    // driver.can_reverse = true;
+    let mut drive_mode_pub = driver.create_drive_mode_sub().into_mono_pub();
+    drive_mode_pub.set(DriveMode::ForwardOnly);
     pathfinder
         .get_path_pub()
         .accept_subscription(driver.create_path_sub());
@@ -96,10 +97,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         scaled_axis.z = 0.0;
         isometry.rotation = UnitQuaternion::new(scaled_axis);
     };
-    // localizer.likelihood_table.position =
-    //     Box::new(|pos| if pos.y.abs() >= 0.2 { 0.0 } else { 1.0 });
-    // localizer.likelihood_table.linear_velocity =
-    //     Box::new(|vel| if vel.magnitude() > 0.75 { 0.0 } else { 1.0 });
+    localizer.engine_config.additional_time_factor = 2.0;
 
     let position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));

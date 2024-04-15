@@ -113,7 +113,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
             refresh_rate: Duration::from_millis(50),
             resolution: agent_radius,
             agent_radius,
-            max_height_diff: nalgebra::convert(0.15),
+            max_height_diff: nalgebra::convert(0.05),
         }
     }
 

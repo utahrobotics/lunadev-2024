@@ -162,6 +162,18 @@ impl<T, S: Subscription<Item = T>> MonoPublisher<T, S> {
     pub fn new() -> Self {
         Self { sub: None }
     }
+
+    pub fn into_boxed(mut self) -> MonoPublisher<T>
+    where
+        S: Send + 'static,
+    {
+        MonoPublisher {
+            sub: self.sub.take().map(|x| {
+                let dyn_box: Box<dyn Subscription<Item = T> + Send> = Box::new(x);
+                dyn_box
+            }),
+        }
+    }
 }
 
 impl<T, S: Subscription<Item = T>> Drop for MonoPublisher<T, S> {

@@ -40,6 +40,7 @@ pub struct WindowLocalizer<N: Float, FI, FV, FA, FAV> {
     orientation_queue: VecDeque<Observation<UnitQuaternion<N>, N>>,
     last_orientation: Instant,
 
+    additional_time_factor: N,
     max_no_observation_duration: Duration,
 
     isometry_func: FI,
@@ -66,8 +67,9 @@ where
             .sum()
     }
 
-    fn iter_with_factor<T>(
-        queue: &VecDeque<Observation<T, N>>,
+    fn iter_with_factor<'a, T>(
+        &'a self,
+        queue: &'a VecDeque<Observation<T, N>>,
     ) -> impl Iterator<Item = (&Observation<T, N>, N)> {
         let total_time = Self::total_time(queue);
         let two = N::one() + N::one();
@@ -75,13 +77,18 @@ where
         let mut elapsed_time = N::zero();
 
         let total_variance = Self::total_variance(queue);
+        let additional_height = self.additional_time_factor / total_time;
 
         queue.iter().map(move |obs| {
             let delta: N = nconvert(obs.delta.as_secs_f32());
-            let start_time = -time_height / total_time * elapsed_time + time_height;
-            let end_time = -time_height / total_time * (elapsed_time + delta) + time_height;
+            let start_time =
+                -time_height / total_time * elapsed_time + time_height + additional_height;
+            let end_time = -time_height / total_time * (elapsed_time + delta)
+                + time_height
+                + additional_height;
             elapsed_time += delta;
-            let time_factor = (end_time + start_time) / two * delta;
+            let time_factor =
+                (end_time + start_time) / two * delta / (N::one() + self.additional_time_factor);
 
             let variance_factor = obs.variance / total_variance;
 
@@ -90,26 +97,29 @@ where
     }
 
     fn process(&mut self) {
-        if let Some(result) = Self::iter_with_factor(&self.linear_acceleration_queue)
+        if let Some(result) = self
+            .iter_with_factor(&self.linear_acceleration_queue)
             .map(|(obs, factor)| obs.observation * factor)
             .reduce(|a, b| a + b)
         {
             self.linear_acceleration = result;
         }
-        if let Some(result) = Self::iter_with_factor(&self.linear_velocity_queue)
+        if let Some(result) = self
+            .iter_with_factor(&self.linear_velocity_queue)
             .map(|(obs, factor)| obs.observation * factor)
             .reduce(|a, b| a + b)
         {
             self.linear_velocity = result;
         }
-        if let Some(result) = Self::iter_with_factor(&self.position_queue)
+        if let Some(result) = self
+            .iter_with_factor(&self.position_queue)
             .map(|(obs, factor)| obs.observation * factor)
             .reduce(|a, b| a + b)
         {
             self.isometry.translation = result.into();
         }
         if let Some(result) = quat_mean(
-            Self::iter_with_factor(&self.angular_velocity_queue)
+            self.iter_with_factor(&self.angular_velocity_queue)
                 .map(|(obs, factor)| (obs.observation, factor)),
         ) {
             match result {
@@ -120,7 +130,7 @@ where
             }
         }
         if let Some(result) = quat_mean(
-            Self::iter_with_factor(&self.orientation_queue)
+            self.iter_with_factor(&self.orientation_queue)
                 .map(|(obs, factor)| (obs.observation, factor)),
         ) {
             match result {
@@ -210,19 +220,21 @@ where
 }
 
 pub type DefaultWindowConfig<N> = WindowConfig<
+    N,
     fn(&mut Isometry3<N>),
     fn(&mut Vector3<N>),
     fn(&mut Vector3<N>),
     fn(&mut UnitQuaternion<N>),
 >;
 
-pub struct WindowConfig<FI, FV, FA, FAV> {
+pub struct WindowConfig<N: Float, FI, FV, FA, FAV> {
     pub bucket_duration: Duration,
     pub isometry_func: FI,
     pub linear_velocity_func: FV,
     pub linear_acceleration_func: FA,
     pub angular_velocity_func: FAV,
     pub max_no_observation_duration: Duration,
+    pub additional_time_factor: N,
 }
 
 impl<N: Float> Default for DefaultWindowConfig<N> {
@@ -234,6 +246,7 @@ impl<N: Float> Default for DefaultWindowConfig<N> {
             linear_velocity_func: |_| {},
             linear_acceleration_func: |_| {},
             angular_velocity_func: |_| {},
+            additional_time_factor: N::zero(),
         }
     }
 }
@@ -245,7 +258,7 @@ where
     FA: FnMut(&mut Vector3<N>) + Send + 'static + Clone,
     FAV: FnMut(&mut UnitQuaternion<N>) + Send + 'static + Clone,
 {
-    type Config = WindowConfig<FI, FV, FA, FAV>;
+    type Config = WindowConfig<N, FI, FV, FA, FAV>;
 
     fn from_config(config: &Self::Config, robot_base: RobotBaseRef) -> Self {
         let now = Instant::now();
@@ -271,6 +284,8 @@ where
 
             orientation_queue: VecDeque::new(),
             last_orientation: now,
+
+            additional_time_factor: config.additional_time_factor,
 
             max_no_observation_duration: config.max_no_observation_duration,
 
