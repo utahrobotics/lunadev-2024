@@ -4,16 +4,18 @@ use std::{
     ops::Deref,
     os::unix::ffi::OsStrExt,
     path::Path,
-    sync::{mpsc, Arc, Exclusive, Mutex},
+    sync::{Arc, Mutex},
 };
 
 use crate::iter::{ArcIter, ArcParIter};
-use unros::rayon::{iter::ParallelDrainRange, join};
+use unros::rayon::iter::ParallelDrainRange;
 // use bytemuck::cast_slice;
 // use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
 use image::{DynamicImage, Rgb};
 use localization::frames::IMUFrame;
-use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{
+    Point3, Quaternion, UnitQuaternion, Vector3,
+};
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -25,12 +27,14 @@ use realsense_rust::{
 use realsense_sys::rs2_deproject_pixel_to_point;
 use rig::RobotElementRef;
 use unros::{
+    ShouldNotDrop,
     anyhow,
     node::SyncNode,
     pubsub::{Publisher, PublisherRef},
-    rayon::iter::ParallelIterator,
+    rayon::
+        iter::ParallelIterator,
     runtime::RuntimeContext,
-    setup_logging, DontDrop, ShouldNotDrop,
+    setup_logging, DontDrop,
 };
 
 #[derive(Clone)]
@@ -166,7 +170,6 @@ impl SyncNode for RealSenseCamera {
         // Change pipeline's type from InactivePipeline -> ActivePipeline
         let mut pipeline = pipeline.start(Some(config))?;
 
-        let mut points = vec![];
         // let mut last_img = None;
 
         let mut last_accel: Vector3<f32> = Default::default();
@@ -181,9 +184,7 @@ impl SyncNode for RealSenseCamera {
             .unwrap();
         let depth_intrinsics = depth_stream.intrinsics()?.0;
 
-        // let mut depth_buffer = vec![];
-        let (depth_sender, depth_recv) = mpsc::channel();
-        let mut depth_recv = Exclusive::new(depth_recv);
+        let mut depth_buffer = vec![];
 
         loop {
             let frames = pipeline.wait(None)?;
@@ -247,87 +248,53 @@ impl SyncNode for RealSenseCamera {
             for frame in frames.frames_of_type::<DepthFrame>() {
                 let scale = frame.depth_units().unwrap();
 
-                join(
-                    || {
-                        let frame = frame;
-                        (0..frame.width())
-                            .into_iter()
-                            .filter(|x| x % 4 == 0)
-                            .flat_map(|x| {
-                                (0..frame.height())
-                                    .into_iter()
-                                    .filter(|y| y % 4 == 0)
-                                    .zip(std::iter::repeat(x))
-                                    .filter_map(|(y, x)| {
-                                        let px = frame.get(x, y).unwrap();
-
-                                        let PixelKind::Z16 { depth } = px else {
-                                            unreachable!()
-                                        };
-                                        let depth = *depth as f32 * scale;
-                                        if depth < self.min_distance {
-                                            return None;
-                                        }
-                                        Some((x, y, depth))
-                                    })
-                            })
-                            .for_each(|x| {
-                                depth_sender.send(x).unwrap();
-                            });
-                    },
-                    || {
-                        while let Ok((x, y, depth)) = depth_recv.get_mut().try_recv() {
-                            let mut point = [0.0f32; 3];
-                            let pixel = [x as f32, y as f32];
-
-                            unsafe {
-                                rs2_deproject_pixel_to_point(
-                                    point.first_mut().unwrap(),
-                                    &depth_intrinsics,
-                                    pixel.first().unwrap(),
-                                    depth,
-                                );
-                            }
-
-                            points.push((
-                                Point3::new(point[0], point[1], point[2]),
-                                Rgb([0; 3]), // *last_img.get_pixel(
-                                             //     i as u32 % (frame_width / 4) * 4,
-                                             //     i as u32 / (frame_width / 4) * 4,
-                                             // ),
-                            ));
-                        }
-                    },
+                depth_buffer.extend(
+                    (0..frame.width())
+                        .into_iter()
+                        .filter(|x| x % 4 == 0)
+                        .flat_map(|x| {
+                            (0..frame.height())
+                                .into_iter()
+                                .filter(|y| y % 4 == 0)
+                                .zip(std::iter::repeat(x))
+                                .filter_map(|(y, x)| {
+                                    let px = frame.get(x, y).unwrap();
+                                    
+                                    let PixelKind::Z16 { depth } = px else {
+                                        unreachable!()
+                                    };
+                                    let depth = *depth as f32 * scale;
+                                    if depth < self.min_distance {
+                                        return None;
+                                    }
+                                    Some((x, y, depth))
+                                })
+                        }),
                 );
 
-                // depth_buffer.extend(
-                //     ,
-                // );
+                let points: Arc<[_]> = depth_buffer.par_drain(..).map(|(x, y, depth)| {
+                        let mut point = [0.0f32; 3];
+                        let pixel = [x as f32, y as f32];
 
-                let points: Arc<[_]> = points.drain(..).collect();
-                // let points: Arc<[_]> = depth_buffer.par_drain(..).map(|(x, y, depth)| {
-                //         let mut point = [0.0f32; 3];
-                //         let pixel = [x as f32, y as f32];
+                        unsafe {
+                            rs2_deproject_pixel_to_point(
+                                point.first_mut().unwrap(),
+                                &depth_intrinsics,
+                                pixel.first().unwrap(),
+                                depth
+                            );
+                        }
 
-                //         unsafe {
-                //             rs2_deproject_pixel_to_point(
-                //                 point.first_mut().unwrap(),
-                //                 &depth_intrinsics,
-                //                 pixel.first().unwrap(),
-                //                 depth
-                //             );
-                //         }
-
-                //         (
-                //             Point3::new(point[0], point[1], point[2]),
-                //             Rgb([0; 3]), // *last_img.get_pixel(
-                //                             //     i as u32 % (frame_width / 4) * 4,
-                //                             //     i as u32 / (frame_width / 4) * 4,
-                //                             // ),
-                //         )
-                //     })
-
-                // .collect();
+                        (
+                            Point3::new(point[0], point[1], point[2]),
+                            Rgb([0; 3]), // *last_img.get_pixel(
+                                            //     i as u32 % (frame_width / 4) * 4,
+                                            //     i as u32 / (frame_width / 4) * 4,
+                                            // ),
+                        )
+                    })
+                
+                .collect();
 
                 // let min_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).min().unwrap().into_inner();
                 // let max_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).max().unwrap().into_inner();
