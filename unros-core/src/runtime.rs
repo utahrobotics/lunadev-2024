@@ -1,8 +1,16 @@
 use std::{
-    backtrace::Backtrace, borrow::Cow, future::Future, io::BufRead, ops::Deref, path::{Path, PathBuf}, sync::{
+    backtrace::Backtrace,
+    borrow::Cow,
+    future::Future,
+    io::BufRead,
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock, Weak,
-    }, thread::JoinHandle as SyncJoinHandle, time::{Duration, Instant}
+    },
+    thread::JoinHandle as SyncJoinHandle,
+    time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Datelike, Local, Timelike};

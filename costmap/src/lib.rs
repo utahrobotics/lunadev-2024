@@ -7,7 +7,7 @@ use std::sync::{
 
 use dst_init::{dst, BoxExt, Slice, SliceExt};
 use image::GrayImage;
-use nalgebra::{Isometry3, Point2, Point3, RealField, convert as nconvert};
+use nalgebra::{convert as nconvert, Isometry3, Point2, Point3, RealField};
 use quadtree_rs::{area::AreaBuilder, Quadtree};
 use rig::{RobotBaseRef, RobotElementRef};
 use simba::scalar::{SubsetOf, SupersetOf};
@@ -55,7 +55,13 @@ pub struct Costmap<N = f64> {
 }
 
 impl<
-        N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize> + SupersetOf<i64> + SupersetOf<u8> + SupersetOf<f32>,
+        N: RealField
+            + Copy
+            + SupersetOf<usize>
+            + SupersetOf<isize>
+            + SupersetOf<i64>
+            + SupersetOf<u8>
+            + SupersetOf<f32>,
     > Costmap<N>
 {
     pub fn is_global_point_safe(&self, point: Point3<N>, radius: N, max_diff: N) -> bool {
@@ -283,7 +289,7 @@ impl CostmapGenerator {
             quadtree_sub: Subscriber::new(frame_buffer_size),
             dont_drop: DontDrop::new("costmap-generator"),
             costmap_pub: Default::default(),
-            robot_base_ref
+            robot_base_ref,
         }
     }
 }

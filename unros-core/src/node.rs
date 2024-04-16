@@ -60,7 +60,7 @@ pub trait SyncNode {
             });
         } else {
             let handle = context.inner.runtime_handle.clone();
-            std::thread::spawn(move || {
+            rayon::spawn(move || {
                 let _guard = handle.enter();
                 let result = self.run(context.clone());
                 result.finish(context);

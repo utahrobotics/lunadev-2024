@@ -132,7 +132,18 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
     }
 }
 
-impl<N: RealField + SupersetOf<f32> + SupersetOf<usize> + SupersetOf<i64> + SupersetOf<isize> + SupersetOf<u8> + FloatCore + Copy, E: PathfindingEngine<N>> SyncNode for Pathfinder<N, E> {
+impl<
+        N: RealField
+            + SupersetOf<f32>
+            + SupersetOf<usize>
+            + SupersetOf<i64>
+            + SupersetOf<isize>
+            + SupersetOf<u8>
+            + FloatCore
+            + Copy,
+        E: PathfindingEngine<N>,
+    > SyncNode for Pathfinder<N, E>
+{
     type Result = ();
 
     fn run(mut self, context: RuntimeContext) -> Self::Result {
@@ -190,7 +201,8 @@ impl<N: RealField + SupersetOf<f32> + SupersetOf<usize> + SupersetOf<i64> + Supe
                         if context.is_runtime_exiting() {
                             return;
                         }
-                        start = nalgebra::convert(self.robot_base.get_isometry().translation.vector);
+                        start =
+                            nalgebra::convert(self.robot_base.get_isometry().translation.vector);
 
                         if (end.coords - start).magnitude() <= self.completion_distance {
                             pending_task.finish(Ok(()));
@@ -202,7 +214,9 @@ impl<N: RealField + SupersetOf<f32> + SupersetOf<usize> + SupersetOf<i64> + Supe
 
                             let cross = travel.cross(&relative);
 
-                            let rotation_90 = UnitQuaternion::<N>::new(cross.normalize() * nconvert::<_, N>(std::f64::consts::PI / 2.0));
+                            let rotation_90 = UnitQuaternion::<N>::new(
+                                cross.normalize() * nconvert::<_, N>(std::f64::consts::PI / 2.0),
+                            );
                             let offset_vec = rotation_90 * travel.normalize();
                             let offset = offset_vec.dot(&relative);
 
@@ -210,7 +224,14 @@ impl<N: RealField + SupersetOf<f32> + SupersetOf<usize> + SupersetOf<i64> + Supe
                                 break 'repathfind;
                             }
 
-                            if !traverse_to(from.coords, to.coords, self.agent_radius, self.max_height_diff, &costmap, self.resolution) {
+                            if !traverse_to(
+                                from.coords,
+                                to.coords,
+                                self.agent_radius,
+                                self.max_height_diff,
+                                &costmap,
+                                self.resolution,
+                            ) {
                                 break 'repathfind;
                             }
                         }
@@ -434,7 +455,13 @@ fn traverse_to<N>(
     resolution: N,
 ) -> bool
 where
-    N: RealField + SupersetOf<usize> + SupersetOf<f32> + SupersetOf<i64> + SupersetOf<isize> + SupersetOf<u8> + Copy,
+    N: RealField
+        + SupersetOf<usize>
+        + SupersetOf<f32>
+        + SupersetOf<i64>
+        + SupersetOf<isize>
+        + SupersetOf<u8>
+        + Copy,
 {
     if !costmap.is_global_point_in_bounds(to.into()) {
         return true;

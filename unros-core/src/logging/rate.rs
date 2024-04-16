@@ -1,6 +1,6 @@
 //! Simple primitives for tracking the rate at which events occur.
 
-use std::time::Instant;
+use std::{borrow::Cow, time::Instant};
 
 use log::info;
 
@@ -17,7 +17,7 @@ pub struct RateLogger {
     /// The target to log to.
     ///
     /// This is essentially the name that will be added to the log.
-    pub target: String,
+    pub target: Cow<'static, str>,
 }
 
 impl Default for RateLogger {

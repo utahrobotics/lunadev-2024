@@ -8,12 +8,11 @@ edition = "2021"
 [dependencies]
 unros = { path = "../unros" }
 image = { workspace = true }
-bytemuck = { workspace = true }
+# bytemuck = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 realsense-rust = { version = "1.2", features = ["buildtime-bindgen"] }
-cam-geom = "0.14"
-fast_image_resize = { workspace = true }
+realsense-sys = { version = "2" }
 localization = { path = "../localization" }
 nalgebra = { workspace = true }
 rig = { path = "../rig" }

@@ -9,11 +9,12 @@
 use std::{
     error::Error,
     fmt::Display,
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Write},
     net::{SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use crossbeam::{queue::ArrayQueue, utils::Backoff};
@@ -300,7 +301,7 @@ a=fmtp:96 packetization-mode=1",
         fps: usize,
         context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
-        let cmd = Command::new("ffplay")
+        let mut cmd = Command::new("ffplay")
             .args([
                 "-f",
                 "rawvideo",
@@ -322,8 +323,8 @@ a=fmtp:96 packetization-mode=1",
         let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();
 
-        let mut video_out = cmd.stdin.unwrap();
-        let mut video_err = cmd.stderr.unwrap();
+        let mut video_out = cmd.stdin.take().unwrap();
+        // let mut video_err = cmd.stderr.unwrap();
 
         let backoff = Backoff::new();
 
@@ -342,12 +343,16 @@ a=fmtp:96 packetization-mode=1",
 
             if let Err(e) = video_out.write_all(frame.to_rgb8().as_bytes()) {
                 if e.kind() == ErrorKind::BrokenPipe {
-                    error!("Display has closed!");
-                    let mut err = String::new();
-                    if let Err(e) = video_err.read_to_string(&mut err) {
-                        error!("Error loading error: {e}");
-                    } else {
-                        error!("Display error: {err}");
+                    match cmd.wait_with_output() {
+                        Ok(output) => {
+                            if !output.status.success() {
+                                let err = String::from_utf8_lossy(&output.stderr);
+                                error!("Display closed: {err}");
+                            }
+                        }
+                        Err(e) => {
+                            error!("Display closed: {e}");
+                        }
                     }
                     break;
                 } else {
@@ -411,6 +416,7 @@ a=fmtp:96 packetization-mode=1",
         Self::new(
             in_width,
             in_height,
+            fps,
             VideoDataDumpType::File(pathbuf),
             output,
             context,
@@ -469,6 +475,7 @@ a=fmtp:96 packetization-mode=1",
         Self::new(
             in_width,
             in_height,
+            fps,
             VideoDataDumpType::Rtp(addr),
             output,
             context,
@@ -478,6 +485,7 @@ a=fmtp:96 packetization-mode=1",
     fn new(
         in_width: u32,
         in_height: u32,
+        fps: usize,
         dump_type: VideoDataDumpType,
         mut output: FfmpegChild,
         context: &impl RuntimeContextExt,
@@ -508,18 +516,38 @@ a=fmtp:96 packetization-mode=1",
 
         let dump_type2 = dump_type.clone();
         let backoff = Backoff::new();
+        let mut last_frame = None;
+        let mut instant = Instant::now();
+        let delta = Duration::from_millis((1000 / fps) as u64);
 
         context.spawn_persistent_sync(move || loop {
-            let Some(frame) = queue_receiver.pop() else {
-                if Arc::strong_count(&queue_receiver) == 1 {
-                    if let Err(e) = video_out.flush() {
-                        error!("Failed to flush {}: {e}", dump_type2);
-                    }
-                    break;
+            let elapsed = instant.elapsed();
+            let frame = match queue_receiver.pop() {
+                Some(x) => {
+                    last_frame = Some(x.clone());
+                    x
                 }
-                backoff.snooze();
-                continue;
+                None => {
+                    if Arc::strong_count(&queue_receiver) == 1 {
+                        if let Err(e) = video_out.flush() {
+                            error!("Failed to flush {}: {e}", dump_type2);
+                        }
+                        break;
+                    }
+                    backoff.snooze();
+                    if let Some(last_frame) = last_frame.clone() {
+                        if elapsed >= delta {
+                            last_frame
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                }
             };
+
+            instant += elapsed;
             backoff.reset();
 
             if let Err(e) = video_out.write_all(frame.to_rgb8().as_bytes()) {
@@ -539,8 +567,7 @@ a=fmtp:96 packetization-mode=1",
             video_writer: queue_sender,
             width: in_width,
             height: in_height,
-            dump_type, // start: Instant::now(),
-                       // path: path.to_path_buf(),
+            dump_type,
         })
     }
 

@@ -510,18 +510,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "514de17de45fdb8dc022b1a7975556c53c86f9f0aa5f534b98977b171857c2c9"
 
 [[package]]
-name = "cam-geom"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35cbc78121508edaef40f74082f1224f9d650f5f7c4d3824e098b4aea4f0046c"
-dependencies = [
- "approx",
- "itertools 0.11.0",
- "nalgebra",
- "num-iter",
-]
-
-[[package]]
 name = "camera"
 version = "0.1.0"
 dependencies = [
@@ -1277,16 +1265,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fast_image_resize"
-version = "2.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc789a40040e11bbe4ba31ca319406805a12fe3f8d71314bbc4bd076602ad55a"
-dependencies = [
- "num-traits",
- "thiserror",
-]
-
-[[package]]
 name = "fdeflate"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1929,15 +1907,6 @@ name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
 dependencies = [
  "either",
 ]
@@ -3182,15 +3151,13 @@ dependencies = [
 name = "realsense"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
- "cam-geom",
  "costmap",
- "fast_image_resize",
  "image",
  "localization",
  "nalgebra",
  "quaternion-core",
  "realsense-rust",
+ "realsense-sys",
  "rig",
  "unros",
 ]
