@@ -3184,6 +3184,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "cam-geom",
+ "costmap",
  "fast_image_resize",
  "image",
  "localization",

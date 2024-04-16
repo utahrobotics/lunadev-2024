@@ -9,7 +9,7 @@
 use std::{
     error::Error,
     fmt::Display,
-    io::{ErrorKind, Write},
+    io::{ErrorKind, Read, Write},
     net::{SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -323,6 +323,7 @@ a=fmtp:96 packetization-mode=1",
         let queue_receiver = queue_sender.clone();
 
         let mut video_out = cmd.stdin.unwrap();
+        let mut video_err = cmd.stderr.unwrap();
 
         let backoff = Backoff::new();
 
@@ -342,6 +343,12 @@ a=fmtp:96 packetization-mode=1",
             if let Err(e) = video_out.write_all(frame.to_rgb8().as_bytes()) {
                 if e.kind() == ErrorKind::BrokenPipe {
                     error!("Display has closed!");
+                    let mut err = String::new();
+                    if let Err(e) = video_err.read_to_string(&mut err) {
+                        error!("Error loading error: {e}");
+                    } else {
+                        error!("Display error: {err}");
+                    }
                     break;
                 } else {
                     error!("Faced the following error while writing video frame to Display: {e}");

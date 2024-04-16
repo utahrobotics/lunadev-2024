@@ -37,9 +37,6 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
 
     let costmap = CostmapGenerator::new(10);
 
-    #[cfg(unix)]
-    let costmap = costmap;
-
     let mut cameras: Vec<_> = discover_all_cameras()?
         .map(|x| {
             info!(

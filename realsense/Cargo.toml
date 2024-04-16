@@ -18,3 +18,6 @@ localization = { path = "../localization" }
 nalgebra = { workspace = true }
 rig = { path = "../rig" }
 quaternion-core = { workspace = true }
+
+[dev-dependencies]
+costmap = { path = "../costmap" }
