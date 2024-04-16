@@ -1,3 +1,5 @@
+#![feature(array_windows)]
+
 use std::{ops::Deref, sync::Arc, time::Duration};
 
 use drive::Steering;
@@ -37,6 +39,7 @@ pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
     pub refresh_rate: Duration,
     drive_mode: WatchSubscriber<DriveMode>,
     pub full_turn_angle: Float,
+    pub completion_distance: Float,
     pub turn_fn: F,
     dont_drop: DontDrop<Self>,
 }
@@ -49,6 +52,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
             robot_base,
             refresh_rate: Duration::from_millis(20),
             drive_mode: WatchSubscriber::new(DriveMode::Both),
+            completion_distance: 0.15,
             // 30 degrees
             full_turn_angle: std::f64::consts::FRAC_PI_6 as Float,
             turn_fn: |frac| -2.0 * frac + 1.0,
@@ -110,17 +114,25 @@ where
                         .min_by_key(|(_, distance)| NotNan::new(*distance).unwrap())
                         .unwrap();
 
-                    if i == path.len() - 1 {
-                        break;
-                    }
+                    let next = if i == path.len() - 1 {
+                        path[i]
+                    } else {
+                        path[i + 1]
+                    };
 
-                    let next = path[i + 1];
                     let next = Vector2::new(next.x, next.z);
 
                     let forward = isometry.get_forward_vector();
                     let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
-                    let travel = (next - position).normalize();
+                    let mut travel = next - position;
+                    let distance = travel.magnitude();
+
+                    if i == path.len() - 1 && distance < self.completion_distance {
+                        break;
+                    }
+
+                    travel.unscale_mut(distance);
                     let cross = (forward.x * travel.y - forward.y * travel.x).signum();
                     assert!(!travel.x.is_nan(), "{position:?} {next:?} {path:?}");
                     assert!(!travel.y.is_nan(), "{position:?} {next:?} {path:?}");

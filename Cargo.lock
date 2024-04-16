@@ -3613,16 +3613,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
-name = "sudo"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88bd84d4c082e18e37fef52c0088e4407dabcef19d23a607fb4b5ee03b7d5b83"
-dependencies = [
- "libc",
- "log",
-]
-
-[[package]]
 name = "symphonia"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4152,13 +4142,6 @@ version = "0.1.1"
 dependencies = [
  "quote 1.0.36",
  "syn 2.0.58",
-]
-
-[[package]]
-name = "usb-pluggy"
-version = "0.1.0"
-dependencies = [
- "sudo",
 ]
 
 [[package]]

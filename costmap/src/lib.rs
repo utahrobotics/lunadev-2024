@@ -7,9 +7,9 @@ use std::sync::{
 
 use dst_init::{dst, BoxExt, Slice, SliceExt};
 use image::GrayImage;
-use nalgebra::{Isometry3, Point2, Point3, RealField};
+use nalgebra::{Isometry3, Point2, Point3, RealField, convert as nconvert};
 use quadtree_rs::{area::AreaBuilder, Quadtree};
-use rig::RobotElementRef;
+use rig::{RobotBaseRef, RobotElementRef};
 use simba::scalar::{SubsetOf, SupersetOf};
 use unros::{
     node::AsyncNode,
@@ -39,13 +39,13 @@ struct CostmapFrame<N> {
     max_height: N,
     min_height: N,
     resolution: N,
-    isometry: Isometry3<N>,
 }
 
 #[dst]
 struct CostmapInner<N> {
     point_count: usize,
     threshold: N,
+    robot_base_ref: RobotBaseRef,
     frames: [Arc<CostmapFrame<N>>],
 }
 
@@ -55,15 +55,17 @@ pub struct Costmap<N = f64> {
 }
 
 impl<
-        N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize> + SupersetOf<i64> + SupersetOf<u8>,
+        N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize> + SupersetOf<i64> + SupersetOf<u8> + SupersetOf<f32>,
     > Costmap<N>
 {
     pub fn is_global_point_safe(&self, point: Point3<N>, radius: N, max_diff: N) -> bool {
         assert!(!radius.is_negative());
         assert!(!max_diff.is_negative());
 
+        let base_isometry: Isometry3<N> = nconvert(self.inner.robot_base_ref.get_isometry());
+
         for frame in self.inner.frames.iter() {
-            let point3d = frame.isometry.inverse_transform_point(&point);
+            let point3d = base_isometry.inverse_transform_point(&point);
             let mut point2d = Point2::<isize>::new(
                 (point3d.x / frame.resolution).round().to_subset_unchecked(),
                 (point3d.z / frame.resolution).round().to_subset_unchecked(),
@@ -118,8 +120,10 @@ impl<
     }
 
     pub fn is_global_point_in_bounds(&self, point: Point3<N>) -> bool {
+        let base_isometry: Isometry3<N> = nconvert(self.inner.robot_base_ref.get_isometry());
+
         for frame in self.inner.frames.iter() {
-            let point3d = frame.isometry.inverse_transform_point(&point);
+            let point3d = base_isometry.inverse_transform_point(&point);
             let mut point2d = Point2::<isize>::new(
                 (point3d.x / frame.resolution).round().to_subset_unchecked(),
                 (point3d.z / frame.resolution).round().to_subset_unchecked(),
@@ -176,6 +180,7 @@ impl<
         height: u32,
     ) -> GrayImage {
         assert!(resolution.is_positive());
+        let base_isometry: Isometry3<N> = nconvert(self.inner.robot_base_ref.get_isometry());
         let data: Vec<_> = (0..height as i64)
             .into_par_iter()
             .flat_map(|mut y| {
@@ -195,7 +200,7 @@ impl<
                         max_height = max_height.max(frame.max_height);
                         min_height = min_height.min(frame.min_height);
 
-                        let point3d = frame.isometry.inverse_transform_point(&transformed_point);
+                        let point3d = base_isometry.inverse_transform_point(&transformed_point);
                         let mut point2d = Point2::<isize>::new(
                             (point3d.x / frame.resolution).round().to_subset_unchecked(),
                             (point3d.z / frame.resolution).round().to_subset_unchecked(),
@@ -267,16 +272,18 @@ pub struct CostmapGenerator<N: RealField + Copy = f32> {
     quadtree_sub: Subscriber<CostmapFrame<N>>,
     dont_drop: DontDrop<Self>,
     costmap_pub: Publisher<Costmap<N>>,
+    robot_base_ref: RobotBaseRef,
 }
 
 impl CostmapGenerator {
-    pub fn new(frame_buffer_size: usize) -> Self {
+    pub fn new(frame_buffer_size: usize, robot_base_ref: RobotBaseRef) -> Self {
         Self {
-            threshold: 0.5,
-            window_length: 10,
+            threshold: 0.2,
+            window_length: 3,
             quadtree_sub: Subscriber::new(frame_buffer_size),
             dont_drop: DontDrop::new("costmap-generator"),
             costmap_pub: Default::default(),
+            robot_base_ref
         }
     }
 }
@@ -396,9 +403,6 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
                     max_height,
                     min_height,
                     resolution,
-                    isometry: nalgebra::convert(
-                        original_points.robot_element.get_isometry_of_base(),
-                    ),
                 })
             })
     }
@@ -423,7 +427,6 @@ impl<N: RealField + Copy> AsyncNode for CostmapGenerator<N> {
                 max_height: N::zero(),
                 min_height: N::zero(),
                 resolution: N::one(),
-                isometry: nalgebra::Isometry3::identity(),
             })
             .into()
         })
@@ -435,6 +438,7 @@ impl<N: RealField + Copy> AsyncNode for CostmapGenerator<N> {
             let inner = CostmapInnerInit {
                 point_count: costmap_frames.iter().map(|x| x.quadtree.len()).sum(),
                 frames: Slice::iter_init(costmap_frames.len(), costmap_frames.iter().cloned()),
+                robot_base_ref: self.robot_base_ref.clone(),
                 threshold: self.threshold,
             };
             let inner = Box::emplace(inner);

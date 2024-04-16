@@ -1,20 +1,13 @@
 use std::{
-    backtrace::Backtrace,
-    borrow::Cow,
-    future::Future,
-    io::BufRead,
-    ops::Deref,
-    path::{Path, PathBuf},
-    sync::{
+    backtrace::Backtrace, borrow::Cow, future::Future, io::BufRead, ops::Deref, path::{Path, PathBuf}, sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock, Weak,
-    },
-    thread::JoinHandle as SyncJoinHandle,
-    time::{Duration, Instant},
+    }, thread::JoinHandle as SyncJoinHandle, time::{Duration, Instant}
 };
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 use crossbeam::queue::SegQueue;
+use rayon::ThreadPoolBuilder;
 use sysinfo::Pid;
 use tokio::{
     runtime::{Builder as TokioBuilder, Handle},
@@ -299,6 +292,13 @@ pub fn start_unros_runtime<T: Send + 'static, F: Future<Output = T> + Send + 'st
     builder: impl FnOnce(&mut RuntimeBuilder),
 ) -> Option<T> {
     let pid = std::process::id();
+
+    let _ = ThreadPoolBuilder::default()
+        .panic_handler(|_| {
+            // Panics in rayon still get logged, but this prevents
+            // the thread pool from aborting the entire process
+        })
+        .build_global();
 
     let mut tokio_builder = TokioBuilder::new_multi_thread();
     tokio_builder.enable_all();

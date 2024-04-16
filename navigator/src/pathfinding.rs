@@ -8,10 +8,12 @@ use std::{
 };
 
 use costmap::Costmap;
-use nalgebra::{Point3, RealField, Vector3};
+use nalgebra::{convert as nconvert, Point3, RealField, UnitQuaternion, Vector2, Vector3};
+use ordered_float::{FloatCore, NotNan};
 use pathfinding::directed::{astar::astar, bfs::bfs};
 use rig::RobotBaseRef;
 use simba::scalar::SupersetOf;
+use spin_sleep::SpinSleeper;
 use unros::{
     node::SyncNode,
     pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
@@ -92,10 +94,10 @@ pub struct Pathfinder<
     robot_base: RobotBaseRef,
     path_pub: Publisher<Arc<[Point3<N>]>>,
     completion_distance: N,
-    pub refresh_rate: Duration,
     pub resolution: N,
     pub agent_radius: N,
     pub max_height_diff: N,
+    pub refresh_rate: Duration,
 }
 
 impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<N, E> {
@@ -110,10 +112,10 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
             robot_base,
             path_pub: Publisher::default(),
             completion_distance: nalgebra::convert(0.15),
-            refresh_rate: Duration::from_millis(50),
             resolution: agent_radius,
             agent_radius,
-            max_height_diff: nalgebra::convert(0.05),
+            max_height_diff: nalgebra::convert(0.1),
+            refresh_rate: Duration::from_millis(100),
         }
     }
 
@@ -130,7 +132,7 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
     }
 }
 
-impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode for Pathfinder<N, E> {
+impl<N: RealField + SupersetOf<f32> + SupersetOf<usize> + SupersetOf<i64> + SupersetOf<isize> + SupersetOf<u8> + FloatCore + Copy, E: PathfindingEngine<N>> SyncNode for Pathfinder<N, E> {
     type Result = ();
 
     fn run(mut self, context: RuntimeContext) -> Self::Result {
@@ -148,8 +150,8 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode fo
             warn!("Costmap dropped before we could start");
             return;
         };
-        let sleeper = spin_sleep::SpinSleeper::default();
         let mut start_time = Instant::now();
+        let sleeper = SpinSleeper::default();
 
         loop {
             let Some(mut req) = self.service.blocking_wait_for_request() else {
@@ -166,18 +168,10 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode fo
                 continue;
             };
 
-            loop {
+            'main: loop {
                 start_time += start_time.elapsed();
-                if context.is_runtime_exiting() {
-                    return;
-                }
-                let start: Vector3<N> =
+                let mut start: Vector3<N> =
                     nalgebra::convert(self.robot_base.get_isometry().translation.vector);
-
-                if (end.coords - start).magnitude() <= self.completion_distance {
-                    pending_task.finish(Ok(()));
-                    break;
-                }
 
                 WatchSubscriber::try_update(&mut costmap);
                 if let Some(path) = self.engine.pathfind(
@@ -189,11 +183,41 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> SyncNode fo
                     self.max_height_diff,
                     &context,
                 ) {
-                    self.path_pub.set(path.into_boxed_slice().into());
-                    // pending_task.finish(Err(NavigationError::NoPath));
-                };
+                    let path: Arc<[Point3<N>]> = Arc::from(path.into_boxed_slice());
+                    self.path_pub.set(path.clone());
 
-                sleeper.sleep(self.refresh_rate.saturating_sub(start_time.elapsed()));
+                    'repathfind: loop {
+                        if context.is_runtime_exiting() {
+                            return;
+                        }
+                        start = nalgebra::convert(self.robot_base.get_isometry().translation.vector);
+
+                        if (end.coords - start).magnitude() <= self.completion_distance {
+                            pending_task.finish(Ok(()));
+                            break 'main;
+                        }
+                        for [from, to] in path.array_windows::<2>() {
+                            let relative = start - from.coords;
+                            let travel = to.coords - from.coords;
+
+                            let cross = travel.cross(&relative);
+
+                            let rotation_90 = UnitQuaternion::<N>::new(cross.normalize() * nconvert::<_, N>(std::f64::consts::PI / 2.0));
+                            let offset_vec = rotation_90 * travel.normalize();
+                            let offset = offset_vec.dot(&relative);
+
+                            if offset > self.completion_distance {
+                                break 'repathfind;
+                            }
+
+                            if !traverse_to(from.coords, to.coords, self.agent_radius, self.max_height_diff, &costmap, self.resolution) {
+                                break 'repathfind;
+                            }
+                        }
+                        sleeper.sleep(self.refresh_rate);
+                    }
+                };
+                // pending_task.finish(Err(NavigationError::NoPath));
             }
         }
     }
@@ -410,7 +434,7 @@ fn traverse_to<N>(
     resolution: N,
 ) -> bool
 where
-    N: RealField + SupersetOf<usize> + SupersetOf<i64> + SupersetOf<isize> + SupersetOf<u8> + Copy,
+    N: RealField + SupersetOf<usize> + SupersetOf<f32> + SupersetOf<i64> + SupersetOf<isize> + SupersetOf<u8> + Copy,
 {
     if !costmap.is_global_point_in_bounds(to.into()) {
         return true;

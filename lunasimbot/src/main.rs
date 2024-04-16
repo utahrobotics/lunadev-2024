@@ -36,7 +36,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let camera_ref = camera.get_ref();
     let debug_element = elements.remove("debug").unwrap();
 
-    let costmap = CostmapGenerator::new(10);
+    let costmap = CostmapGenerator::new(10, robot_base.get_ref());
     let points_signal = Publisher::<Vec<Point3<f32>>>::default();
 
     points_signal.accept_subscription(costmap.create_points_sub(0.05).map(move |points| Points {
@@ -64,8 +64,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 }
             };
             let position = debug_element_ref.get_global_isometry().translation.vector;
-            // let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.5, 0.05);
-            let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
+            let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.5, 0.1);
+            // let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
             costmap_display.write_frame(Arc::new(img.into())).unwrap();
         }
     });
