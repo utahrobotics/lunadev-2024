@@ -13,9 +13,7 @@ use unros::rayon::iter::ParallelDrainRange;
 // use cam_geom::{ExtrinsicParameters, IntrinsicParametersPerspective, PerspectiveParams, Pixels};
 use image::{DynamicImage, Rgb};
 use localization::frames::IMUFrame;
-use nalgebra::{
-    Point3, Quaternion, UnitQuaternion, Vector3,
-};
+use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
 use realsense_rust::{
     config::Config,
     context::Context,
@@ -27,14 +25,12 @@ use realsense_rust::{
 use realsense_sys::rs2_deproject_pixel_to_point;
 use rig::RobotElementRef;
 use unros::{
-    ShouldNotDrop,
     anyhow,
     node::SyncNode,
     pubsub::{Publisher, PublisherRef},
-    rayon::
-        iter::ParallelIterator,
+    rayon::iter::ParallelIterator,
     runtime::RuntimeContext,
-    setup_logging, DontDrop,
+    setup_logging, DontDrop, ShouldNotDrop,
 };
 
 #[derive(Clone)]
@@ -259,7 +255,7 @@ impl SyncNode for RealSenseCamera {
                                 .zip(std::iter::repeat(x))
                                 .filter_map(|(y, x)| {
                                     let px = frame.get(x, y).unwrap();
-                                    
+
                                     let PixelKind::Z16 { depth } = px else {
                                         unreachable!()
                                     };
@@ -272,7 +268,9 @@ impl SyncNode for RealSenseCamera {
                         }),
                 );
 
-                let points: Arc<[_]> = depth_buffer.par_drain(..).map(|(x, y, depth)| {
+                let points: Arc<[_]> = depth_buffer
+                    .par_drain(..)
+                    .map(|(x, y, depth)| {
                         let mut point = [0.0f32; 3];
                         let pixel = [x as f32, y as f32];
 
@@ -281,20 +279,19 @@ impl SyncNode for RealSenseCamera {
                                 point.first_mut().unwrap(),
                                 &depth_intrinsics,
                                 pixel.first().unwrap(),
-                                depth
+                                depth,
                             );
                         }
 
                         (
                             Point3::new(point[0], point[1], point[2]),
                             Rgb([0; 3]), // *last_img.get_pixel(
-                                            //     i as u32 % (frame_width / 4) * 4,
-                                            //     i as u32 / (frame_width / 4) * 4,
-                                            // ),
+                                         //     i as u32 % (frame_width / 4) * 4,
+                                         //     i as u32 / (frame_width / 4) * 4,
+                                         // ),
                         )
                     })
-                
-                .collect();
+                    .collect();
 
                 // let min_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).min().unwrap().into_inner();
                 // let max_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).max().unwrap().into_inner();
