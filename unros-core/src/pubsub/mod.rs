@@ -23,7 +23,10 @@ use tokio::sync::Notify;
 
 pub mod subs;
 
-use crate::{logging::{dump::DataDump, START_TIME}, runtime::RuntimeContextExt};
+use crate::{
+    logging::{dump::DataDump, START_TIME},
+    runtime::RuntimeContextExt,
+};
 
 use self::subs::{BoxedSubscription, DirectSubscription, PublisherToken, Subscription};
 
@@ -158,6 +161,18 @@ impl<T, S: Subscription<Item = T>> MonoPublisher<T, S> {
     /// but would rather work with just a `MonoPublisher`.
     pub fn new() -> Self {
         Self { sub: None }
+    }
+
+    pub fn into_boxed(mut self) -> MonoPublisher<T>
+    where
+        S: Send + 'static,
+    {
+        MonoPublisher {
+            sub: self.sub.take().map(|x| {
+                let dyn_box: Box<dyn Subscription<Item = T> + Send> = Box::new(x);
+                dyn_box
+            }),
+        }
     }
 }
 

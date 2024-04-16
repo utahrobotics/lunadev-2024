@@ -15,8 +15,9 @@ use telemetry::Telemetry;
 use unros::{
     anyhow,
     log::info,
-    pubsub::{subs::Subscription, Subscriber}, runtime::MainRuntimeContext,
-    node::{AsyncNode, SyncNode}
+    node::{AsyncNode, SyncNode},
+    pubsub::{subs::Subscription, Subscriber},
+    runtime::MainRuntimeContext,
 };
 
 mod actuators;
@@ -74,12 +75,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             camera
         };
 
-    let telemetry = Telemetry::new(
-        1280,
-        720,
-        20,
-    )
-    .await?;
+    let telemetry = Telemetry::new(1280, 720, 20).await?;
 
     let arm_sub = Subscriber::new(8);
     telemetry
@@ -254,7 +250,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     costmap.spawn(context.make_context("costmap"));
     #[cfg(unix)]
     realsense_camera.spawn(context.make_context("realsense_camera"));
-    
+
     context.wait_for_exit().await;
     Ok(())
 }

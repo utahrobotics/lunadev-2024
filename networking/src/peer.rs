@@ -5,7 +5,10 @@ use std::{
 use fxhash::FxHashMap;
 use laminar::{Packet, Socket};
 use unros::{
-    pubsub::Subscriber, runtime::RuntimeContext, setup_logging, tokio::sync::oneshot::{self, error::TryRecvError}
+    pubsub::Subscriber,
+    runtime::RuntimeContext,
+    setup_logging,
+    tokio::sync::oneshot::{self, error::TryRecvError},
 };
 
 use crate::{NetworkPeer, PeerQuirk, SpecialMessage};

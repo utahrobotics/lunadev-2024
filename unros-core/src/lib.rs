@@ -18,9 +18,7 @@
 #![feature(ptr_metadata)]
 #![feature(alloc_layout_extra)]
 
-use std::{
-    borrow::Cow, marker::PhantomData, path::Path, sync::OnceLock
-};
+use std::{borrow::Cow, marker::PhantomData, path::Path, sync::OnceLock};
 
 pub mod logging;
 pub mod node;
@@ -37,7 +35,6 @@ pub use rand;
 pub use rayon;
 use serde::Deserialize;
 pub use tokio;
-
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
@@ -64,7 +61,6 @@ pub struct DontDrop<T: ShouldNotDrop + ?Sized> {
     phantom: PhantomData<T>,
 }
 
-
 impl<T: ShouldNotDrop + ?Sized> DontDrop<T> {
     pub fn new(name: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -85,7 +81,6 @@ impl<T: ShouldNotDrop + ?Sized> DontDrop<T> {
     }
 }
 
-
 impl<T: ShouldNotDrop + ?Sized> Drop for DontDrop<T> {
     fn drop(&mut self) {
         if !self.ignore_drop {
@@ -93,7 +88,6 @@ impl<T: ShouldNotDrop + ?Sized> Drop for DontDrop<T> {
         }
     }
 }
-
 
 pub trait ShouldNotDrop {
     fn get_dont_drop(&mut self) -> &mut DontDrop<Self>;

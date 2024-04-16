@@ -11,37 +11,37 @@ use nalgebra::{
 use rand::{rngs::SmallRng, Rng};
 use simba::scalar::{SubsetOf, SupersetOf};
 
-pub(crate) struct UnorderedQueue<T> {
-    queue: Box<[T]>,
-    index: usize,
-}
+// pub(crate) struct UnorderedQueue<T> {
+//     queue: Box<[T]>,
+//     index: usize,
+// }
 
-impl<T> UnorderedQueue<T> {
-    pub fn push(&mut self, value: T) {
-        self.queue[self.index] = value;
-        self.index += 1;
-        if self.index >= self.queue.len() {
-            self.index = 0;
-        }
-    }
+// impl<T> UnorderedQueue<T> {
+//     pub fn push(&mut self, value: T) {
+//         self.queue[self.index] = value;
+//         self.index += 1;
+//         if self.index >= self.queue.len() {
+//             self.index = 0;
+//         }
+//     }
 
-    pub fn as_slice(&self) -> &[T] {
-        &self.queue
-    }
+//     pub fn as_slice(&self) -> &[T] {
+//         &self.queue
+//     }
 
-    // pub fn as_mut_slice(&mut self) -> &mut [T] {
-    //     &mut self.queue
-    // }
-}
+//     // pub fn as_mut_slice(&mut self) -> &mut [T] {
+//     //     &mut self.queue
+//     // }
+// }
 
-impl<T> FromIterator<T> for UnorderedQueue<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        UnorderedQueue {
-            queue: iter.into_iter().collect(),
-            index: 0,
-        }
-    }
-}
+// impl<T> FromIterator<T> for UnorderedQueue<T> {
+//     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+//         UnorderedQueue {
+//             queue: iter.into_iter().collect(),
+//             index: 0,
+//         }
+//     }
+// }
 
 pub trait Float:
     RealField
@@ -120,13 +120,13 @@ where
     }
 }
 
-#[inline]
-pub fn normal<N: Float>(mean: N, std_dev: N, x: N) -> N {
-    let two = N::one() + N::one();
-    let e: N = nconvert(std::f64::consts::E);
-    let tau: N = nconvert(std::f64::consts::TAU);
-    e.powf(((x - mean) / std_dev).powi(2) / -two) / std_dev / tau.sqrt()
-}
+// #[inline]
+// pub fn normal<N: Float>(mean: N, std_dev: N, x: N) -> N {
+//     let two = N::one() + N::one();
+//     let e: N = nconvert(std::f64::consts::E);
+//     let tau: N = nconvert(std::f64::consts::TAU);
+//     e.powf(((x - mean) / std_dev).powi(2) / -two) / std_dev / tau.sqrt()
+// }
 
 #[inline(always)]
 pub fn gravity<N: Float>() -> Vector3<N> {

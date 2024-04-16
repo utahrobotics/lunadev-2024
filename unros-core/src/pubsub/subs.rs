@@ -11,7 +11,7 @@ use std::{
 
 use log::warn;
 
-use super::SubscriberInner;
+use super::{MonoPublisher, Publisher, SubscriberInner};
 
 /// A token produced only by Publishers, ensuring that only Unros
 /// can call specific methods.
@@ -114,6 +114,22 @@ pub trait Subscription {
     /// Decrements the publisher count of the `Subscriber`, which is important for it to know
     /// when no more publishers are connected to it.
     fn decrement_publishers(&self, token: PublisherToken);
+
+    fn into_mono_pub(self) -> MonoPublisher<Self::Item, Self>
+    where
+        Self: Sized,
+    {
+        MonoPublisher::from(self)
+    }
+
+    fn into_pub(self) -> Publisher<Self::Item>
+    where
+        Self: Sized + Send + 'static,
+    {
+        let publisher = Publisher::default();
+        publisher.accept_subscription(self);
+        publisher
+    }
 }
 
 /// An object that must be passed to a `Publisher`, enabling the `Subscriber`

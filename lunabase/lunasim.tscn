@@ -93,10 +93,14 @@ var right_steering := 0.0
 
 
 func _physics_process(delta: float) -> void:
-	if is_zero_approx(user_accel.slide(Vector3.DOWN).length()):
+	var acceleration = user_accel - global_transform.basis.z.slide(Vector3.UP).normalized() * ACCEL * (left_steering + right_steering) / 2
+	var angle := (left_steering - right_steering) * SPEED / WHEEL_SEPARATION
+	global_rotate(Vector3.UP, - angle * delta)
+	
+	if is_zero_approx(acceleration.slide(Vector3.DOWN).length()):
 		velocity = velocity.move_toward(Vector3.ZERO, ACCEL * delta)
 	else:
-		velocity += (user_accel - velocity.normalized() * velocity.length_squared() * DRAG_FACTOR) * delta
+		velocity += (acceleration - velocity.normalized() * velocity.length_squared() * DRAG_FACTOR) * delta
 	ang_vel = last_quat.inverse() * quaternion
 	if ang_vel.get_axis().is_normalized():
 		ang_vel = Quaternion(ang_vel.get_axis(), ang_vel.get_angle() / delta)
@@ -117,9 +121,9 @@ func _physics_process(delta: float) -> void:
 			conn.put_float(velocity.x)
 			conn.put_float(0.0)
 			conn.put_float(velocity.z)
-			conn.put_float(user_accel.x)
-			conn.put_float(user_accel.y)
-			conn.put_float(user_accel.z)
+			conn.put_float(acceleration.x)
+			conn.put_float(acceleration.y)
+			conn.put_float(acceleration.z)
 			conn.put_float(quaternion.w)
 			conn.put_float(quaternion.x)
 			conn.put_float(quaternion.y)
@@ -169,11 +173,7 @@ func _physics_process(delta: float) -> void:
 						var distance := child.global_position.distance_to(last_child.global_position)
 						last_child.global_position -= last_child.global_transform.basis.z * distance / 2
 						last_child.scale.z = distance * 40
-				
 	
-	velocity += - global_transform.basis.z.slide(Vector3.UP).normalized() * SPEED * (left_steering + right_steering) / 2
-	var angle := (left_steering - right_steering) * SPEED / WHEEL_SEPARATION
-	global_rotate(Vector3.UP, - angle * delta)
 	#prints(left_steering, right_steering)
 	
 	move_and_slide()

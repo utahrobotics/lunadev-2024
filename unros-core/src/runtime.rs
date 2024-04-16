@@ -1,14 +1,31 @@
 use std::{
-    backtrace::Backtrace, borrow::Cow, future::Future, io::BufRead, ops::Deref, path::{Path, PathBuf}, sync::{atomic::{AtomicBool, Ordering}, Arc, OnceLock, Weak}, thread::JoinHandle as SyncJoinHandle, time::{Duration, Instant}
+    backtrace::Backtrace,
+    borrow::Cow,
+    future::Future,
+    io::BufRead,
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, OnceLock, Weak,
+    },
+    thread::JoinHandle as SyncJoinHandle,
+    time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 use crossbeam::queue::SegQueue;
 use sysinfo::Pid;
-use tokio::{runtime::{Builder as TokioBuilder, Handle}, sync::watch, task::JoinHandle as AsyncJoinHandle};
+use tokio::{
+    runtime::{Builder as TokioBuilder, Handle},
+    sync::watch,
+    task::JoinHandle as AsyncJoinHandle,
+};
 
 use crate::{
-    logging::init_default_logger, pubsub::{MonoPublisher, Publisher, PublisherRef, Subscriber}, setup_logging
+    logging::init_default_logger,
+    pubsub::{MonoPublisher, Publisher, PublisherRef, Subscriber},
+    setup_logging,
 };
 
 pub enum DumpPath {
@@ -48,7 +65,6 @@ impl RuntimeBuilder {
     }
 }
 
-
 pub(crate) struct RuntimeContextInner {
     async_persistent_threads: SegQueue<AsyncJoinHandle<()>>,
     sync_persistent_threads: SegQueue<SyncJoinHandle<()>>,
@@ -56,7 +72,7 @@ pub(crate) struct RuntimeContextInner {
     exiting: watch::Receiver<bool>,
     end_pub: Publisher<EndCondition>,
     dump_path: PathBuf,
-    pub(crate) runtime_handle: Handle
+    pub(crate) runtime_handle: Handle,
 }
 
 #[derive(Clone)]
@@ -143,11 +159,14 @@ impl AbortHandle {
 
 pub trait RuntimeContextExt {
     fn spawn_persistent_sync(&self, f: impl FnOnce() + Send + 'static);
-    fn spawn_persistent_async(&self, f: impl Future<Output=()> + Send + 'static) -> AbortHandle;
+    fn spawn_persistent_async(&self, f: impl Future<Output = ()> + Send + 'static) -> AbortHandle;
     fn get_name(&self) -> &str;
     fn get_dump_path(&self) -> &Path;
     fn is_runtime_exiting(&self) -> bool;
-    fn spawn_async<T: Send + 'static>(&self, f: impl Future<Output=T> + Send + 'static) -> AsyncJoinHandle<T>;
+    fn spawn_async<T: Send + 'static>(
+        &self,
+        f: impl Future<Output = T> + Send + 'static,
+    ) -> AsyncJoinHandle<T>;
 }
 
 impl RuntimeContextExt for RuntimeContext {
@@ -166,7 +185,7 @@ impl RuntimeContextExt for RuntimeContext {
         self.inner.persistent_backtraces.push(weak_backtrace);
     }
 
-    fn spawn_persistent_async(&self, f: impl Future<Output=()> + Send + 'static) -> AbortHandle {
+    fn spawn_persistent_async(&self, f: impl Future<Output = ()> + Send + 'static) -> AbortHandle {
         let backtrace = Arc::new(Backtrace::force_capture());
         let weak_backtrace = Arc::downgrade(&backtrace);
 
@@ -197,7 +216,10 @@ impl RuntimeContextExt for RuntimeContext {
         &self.inner.dump_path
     }
 
-    fn spawn_async<T: Send + 'static>(&self, f: impl Future<Output=T> + Send + 'static) -> AsyncJoinHandle<T> {
+    fn spawn_async<T: Send + 'static>(
+        &self,
+        f: impl Future<Output = T> + Send + 'static,
+    ) -> AsyncJoinHandle<T> {
         self.inner.runtime_handle.spawn(f)
     }
 }
@@ -218,7 +240,7 @@ impl RuntimeContextExt for MainRuntimeContext {
         self.inner.persistent_backtraces.push(weak_backtrace);
     }
 
-    fn spawn_persistent_async(&self, f: impl Future<Output=()> + Send + 'static) -> AbortHandle {
+    fn spawn_persistent_async(&self, f: impl Future<Output = ()> + Send + 'static) -> AbortHandle {
         let backtrace = Arc::new(Backtrace::force_capture());
         let weak_backtrace = Arc::downgrade(&backtrace);
 
@@ -249,7 +271,10 @@ impl RuntimeContextExt for MainRuntimeContext {
         &self.inner.dump_path
     }
 
-    fn spawn_async<T: Send + 'static>(&self, f: impl Future<Output=T> + Send + 'static) -> AsyncJoinHandle<T> {
+    fn spawn_async<T: Send + 'static>(
+        &self,
+        f: impl Future<Output = T> + Send + 'static,
+    ) -> AsyncJoinHandle<T> {
         self.inner.runtime_handle.spawn(f)
     }
 }
@@ -319,7 +344,7 @@ pub fn start_unros_runtime<T: Send + 'static, F: Future<Output = T> + Send + 'st
         end_pub: Publisher::default(),
         dump_path,
         persistent_backtraces: SegQueue::new(),
-        runtime_handle: runtime.handle().clone()
+        runtime_handle: runtime.handle().clone(),
     };
     let run_ctx_inner = Arc::new(run_ctx_inner);
     let main_run_ctx = MainRuntimeContext {

@@ -3,21 +3,27 @@ use std::{ops::DerefMut, sync::Arc};
 use costmap::{CostmapGenerator, Points};
 use fxhash::FxBuildHasher;
 use localization::{
-    frames::{IMUFrame, OrientationFrame, PositionFrame, VelocityFrame},
+    engines::window::{DefaultWindowConfig, WindowLocalizer},
+    frames::{IMUFrame, OrientationFrame, PositionFrame},
     Localizer,
 };
 use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
-use navigator::{pathfinding::Pathfinder, DifferentialDriver};
+use navigator::{pathfinding::Pathfinder, DifferentialDriver, DriveMode};
 // use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rand_distr::{Distribution, Normal};
 use rig::Robot;
 use unros::{
-    anyhow, log, pubsub::{subs::Subscription, Publisher, Subscriber}, rayon, rng::quick_rng, runtime::MainRuntimeContext, tokio::{
+    anyhow, log,
+    node::{AsyncNode, SyncNode},
+    pubsub::{subs::Subscription, Publisher, Subscriber},
+    rayon,
+    rng::quick_rng,
+    runtime::MainRuntimeContext,
+    tokio::{
         self,
         io::{AsyncReadExt, AsyncWriteExt, BufStream},
         net::TcpListener,
     },
-    node::{AsyncNode, SyncNode}
 };
 
 type Float = f32;
@@ -43,7 +49,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         .get_costmap_pub()
         .accept_subscription(costmap_sub.create_subscription());
 
-    let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(400, 400, 24, &context)?;
+    let mut costmap_display =
+        unros::logging::dump::VideoDataDump::new_display(400, 400, 24, &context)?;
     let debug_element_ref = debug_element.get_ref();
 
     rayon::spawn(move || {
@@ -57,8 +64,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 }
             };
             let position = debug_element_ref.get_global_isometry().translation.vector;
-            let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.3, 0.15);
-            // let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
+            // let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.5, 0.05);
+            let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
             costmap_display.write_frame(Arc::new(img.into())).unwrap();
         }
     });
@@ -74,17 +81,23 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         .accept_subscription(path_sub.create_subscription());
 
     let driver = DifferentialDriver::new(robot_base.get_ref());
-    // driver.can_reverse = true;
+    let mut drive_mode_pub = driver.create_drive_mode_sub().into_mono_pub();
+    drive_mode_pub.set(DriveMode::ForwardOnly);
     pathfinder
         .get_path_pub()
         .accept_subscription(driver.create_path_sub());
     let nav_task = pathfinder.get_navigation_handle();
 
-    let mut localizer = Localizer::new(robot_base, 0.0f32);
-    // localizer.likelihood_table.position =
-    //     Box::new(|pos| if pos.y.abs() >= 0.2 { 0.0 } else { 1.0 });
-    // localizer.likelihood_table.linear_velocity =
-    //     Box::new(|vel| if vel.magnitude() > 0.75 { 0.0 } else { 1.0 });
+    let mut localizer: Localizer<f32, WindowLocalizer<f32, _, _, _, _>> =
+        Localizer::new(robot_base, DefaultWindowConfig::default());
+    localizer.engine_config.isometry_func = |isometry| {
+        isometry.translation.vector.y = 0.0;
+        let mut scaled_axis = isometry.rotation.scaled_axis();
+        scaled_axis.x = 0.0;
+        scaled_axis.z = 0.0;
+        isometry.rotation = UnitQuaternion::new(scaled_axis);
+    };
+    localizer.engine_config.additional_time_factor = 2.0;
 
     let position_pub = Publisher::default();
     position_pub.accept_subscription(localizer.create_position_sub().set_name("position"));
@@ -104,251 +117,249 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         .accept_subscription(steering_sub.create_subscription());
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
-    tokio::spawn(
-         async move {
-            let (stream, _) = tcp_listener
-                .accept()
+    tokio::spawn(async move {
+        let (stream, _) = tcp_listener
+            .accept()
+            .await
+            .expect("Connection should have succeeded");
+        let mut stream = BufStream::new(stream);
+        let mut points = vec![];
+        let mut last_left_steering = 0.0;
+        let mut last_right_steering = 0.0;
+
+        loop {
+            let x = stream
+                .read_f32_le()
                 .await
-                .expect("Connection should have succeeded");
-            let mut stream = BufStream::new(stream);
-            let mut points = vec![];
-            let mut last_left_steering = 0.0;
-            let mut last_right_steering = 0.0;
+                .expect("Failed to receive packet") as Float;
+            let _y = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let z = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let _vx = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let _vy = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let _vz = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let ax = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let ay = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let az = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let w = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let i = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let j = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let k = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let vw = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let vi = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let vj = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let vk = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let x_rot = stream
+                .read_f32_le()
+                .await
+                .expect("Failed to receive packet") as Float;
+            let n = stream
+                .read_u32_le()
+                .await
+                .expect("Failed to receive packet") as usize;
 
-            loop {
-                let x = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let _y = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let z = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let vx = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let vy = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let vz = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let ax = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let ay = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let az = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let w = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let i = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let j = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let k = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let vw = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let vi = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let vj = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let vk = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let x_rot = stream
-                    .read_f32_le()
-                    .await
-                    .expect("Failed to receive packet") as Float;
-                let n = stream
-                    .read_u32_le()
-                    .await
-                    .expect("Failed to receive packet") as usize;
+            position_pub.set(PositionFrame::rand(
+                Point3::new(x, 0.0, z),
+                0.03,
+                debug_element.get_ref(),
+            ));
+            // velocity_pub.set(VelocityFrame::rand(
+            //     Vector3::new(vx, vy, vz),
+            //     0.03,
+            //     debug_element.get_ref(),
+            // ));
+            let orientation = UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k));
+            orientation_pub.set(OrientationFrame::rand(
+                orientation,
+                0.03,
+                debug_element.get_ref(),
+            ));
+            imu_pub.set(IMUFrame::rand(
+                Vector3::new(ax, ay, az),
+                0.03,
+                UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)),
+                0.03,
+                debug_element.get_ref(),
+            ));
 
-                position_pub.set(PositionFrame::rand(
-                    Point3::new(x, 0.0, z),
-                    0.03,
-                    debug_element.get_ref(),
-                ));
-                // velocity_pub.set(VelocityFrame::rand(
-                //     Vector3::new(vx, vy, vz),
-                //     0.03,
-                //     debug_element.get_ref(),
-                // ));
-                let orientation = UnitQuaternion::new_unchecked(Quaternion::new(w, i, j, k));
-                orientation_pub.set(OrientationFrame::rand(
-                    orientation,
-                    0.03,
-                    debug_element.get_ref(),
-                ));
-                imu_pub.set(IMUFrame::rand(
-                    Vector3::new(ax, ay, az),
-                    0.03,
-                    UnitQuaternion::new_unchecked(Quaternion::new(vw, vi, vj, vk)),
-                    0.03,
-                    debug_element.get_ref(),
-                ));
+            let mut camera_joint = match camera.get_local_joint() {
+                rig::joints::JointMut::Hinge(x) => x,
+                _ => unreachable!(),
+            };
 
-                let mut camera_joint = match camera.get_local_joint() {
-                    rig::joints::JointMut::Hinge(x) => x,
-                    _ => unreachable!(),
-                };
+            camera_joint.set_angle(x_rot);
+            points.reserve(n.saturating_sub(points.capacity()));
+            let distr = Normal::new(0.0, 0.05).unwrap();
+            let mut rng = quick_rng();
+            for _ in 0..n {
+                let x = stream.read_f32_le().await.expect("Failed to receive point");
+                let y = stream.read_f32_le().await.expect("Failed to receive point");
+                let z = stream.read_f32_le().await.expect("Failed to receive point");
 
-                camera_joint.set_angle(x_rot);
-                points.reserve(n.saturating_sub(points.capacity()));
-                let distr = Normal::new(0.0, 0.05).unwrap();
-                let mut rng = quick_rng();
-                for _ in 0..n {
-                    let x = stream.read_f32_le().await.expect("Failed to receive point");
-                    let y = stream.read_f32_le().await.expect("Failed to receive point");
-                    let z = stream.read_f32_le().await.expect("Failed to receive point");
+                let mut vec = Vector3::new(x, y, z);
 
-                    let mut vec = Vector3::new(x, y, z);
+                vec.scale_mut(1.0 + distr.sample(rng.deref_mut()));
 
-                    vec.scale_mut(1.0 + distr.sample(rng.deref_mut()));
-
-                    points.push(vec.into());
-                }
-
-                let capacity = points.capacity();
-                points_signal.set(points);
-                points = Vec::with_capacity(capacity);
-
-                if stream
-                    .read_u8()
-                    .await
-                    .expect("Failed to receive waypoint byte")
-                    == 255
-                {
-                    let x = stream.read_f32_le().await.expect("Failed to receive point");
-                    let y = stream.read_f32_le().await.expect("Failed to receive point");
-                    match nav_task
-                        .try_schedule_or_closed(Point3::new(x, 0.0, y))
-                        .await
-                    {
-                        Some(Ok(handle)) => {
-                            tokio::spawn(async move {
-                                match handle.wait().await {
-                                    Ok(()) => log::info!("Navigation complete"),
-                                    Err(e) => log::error!("{e}"),
-                                }
-                            });
-                        }
-                        Some(Err(e)) => log::error!("{e}"),
-                        None => log::error!("Navigation task closed"),
-                    }
-                }
-
-                if let Some(steering) = steering_sub.try_recv() {
-                    last_left_steering = steering.left.into_inner();
-                    last_right_steering = steering.right.into_inner();
-                    stream
-                        .write_f32_le(last_left_steering)
-                        .await
-                        .expect("Failed to write steering");
-                    stream
-                        .write_f32_le(last_right_steering)
-                        .await
-                        .expect("Failed to write steering");
-                } else {
-                    stream
-                        .write_f32_le(last_left_steering)
-                        .await
-                        .expect("Failed to write steering");
-                    stream
-                        .write_f32_le(last_right_steering)
-                        .await
-                        .expect("Failed to write steering");
-                }
-
-                let isometry = camera.get_isometry_of_base();
-
-                stream
-                    .write_f32_le(isometry.translation.x)
-                    .await
-                    .expect("Failed to write position");
-                stream
-                    .write_f32_le(isometry.translation.y)
-                    .await
-                    .expect("Failed to write position");
-                stream
-                    .write_f32_le(isometry.translation.z)
-                    .await
-                    .expect("Failed to write position");
-
-                stream
-                    .write_f32_le(isometry.rotation.w)
-                    .await
-                    .expect("Failed to write orientation");
-                stream
-                    .write_f32_le(isometry.rotation.i)
-                    .await
-                    .expect("Failed to write orientation");
-                stream
-                    .write_f32_le(isometry.rotation.j)
-                    .await
-                    .expect("Failed to write orientation");
-                stream
-                    .write_f32_le(isometry.rotation.k)
-                    .await
-                    .expect("Failed to write orientation");
-
-                stream.flush().await.expect("Failed to write steering");
-
-                if let Some(path) = path_sub.try_recv() {
-                    stream
-                        .write_u16_le(path.len() as u16)
-                        .await
-                        .expect("Failed to write path length");
-                    for point in path.iter() {
-                        stream
-                            .write_f32_le(point.x)
-                            .await
-                            .expect("Failed to write point.x");
-                        stream
-                            .write_f32_le(point.z)
-                            .await
-                            .expect("Failed to write point.z");
-                    }
-                } else {
-                    stream
-                        .write_u16_le(0)
-                        .await
-                        .expect("Failed to write path length");
-                }
-
-                stream.flush().await.expect("Failed to write path");
+                points.push(vec.into());
             }
-        },
-    );
+
+            let capacity = points.capacity();
+            points_signal.set(points);
+            points = Vec::with_capacity(capacity);
+
+            if stream
+                .read_u8()
+                .await
+                .expect("Failed to receive waypoint byte")
+                == 255
+            {
+                let x = stream.read_f32_le().await.expect("Failed to receive point");
+                let y = stream.read_f32_le().await.expect("Failed to receive point");
+                match nav_task
+                    .try_schedule_or_closed(Point3::new(x, 0.0, y))
+                    .await
+                {
+                    Some(Ok(handle)) => {
+                        tokio::spawn(async move {
+                            match handle.wait().await {
+                                Ok(()) => log::info!("Navigation complete"),
+                                Err(e) => log::error!("{e}"),
+                            }
+                        });
+                    }
+                    Some(Err(e)) => log::error!("{e}"),
+                    None => log::error!("Navigation task closed"),
+                }
+            }
+
+            if let Some(steering) = steering_sub.try_recv() {
+                last_left_steering = steering.left.into_inner();
+                last_right_steering = steering.right.into_inner();
+                stream
+                    .write_f32_le(last_left_steering)
+                    .await
+                    .expect("Failed to write steering");
+                stream
+                    .write_f32_le(last_right_steering)
+                    .await
+                    .expect("Failed to write steering");
+            } else {
+                stream
+                    .write_f32_le(last_left_steering)
+                    .await
+                    .expect("Failed to write steering");
+                stream
+                    .write_f32_le(last_right_steering)
+                    .await
+                    .expect("Failed to write steering");
+            }
+
+            let isometry = camera.get_isometry_of_base();
+
+            stream
+                .write_f32_le(isometry.translation.x)
+                .await
+                .expect("Failed to write position");
+            stream
+                .write_f32_le(isometry.translation.y)
+                .await
+                .expect("Failed to write position");
+            stream
+                .write_f32_le(isometry.translation.z)
+                .await
+                .expect("Failed to write position");
+
+            stream
+                .write_f32_le(isometry.rotation.w)
+                .await
+                .expect("Failed to write orientation");
+            stream
+                .write_f32_le(isometry.rotation.i)
+                .await
+                .expect("Failed to write orientation");
+            stream
+                .write_f32_le(isometry.rotation.j)
+                .await
+                .expect("Failed to write orientation");
+            stream
+                .write_f32_le(isometry.rotation.k)
+                .await
+                .expect("Failed to write orientation");
+
+            stream.flush().await.expect("Failed to write steering");
+
+            if let Some(path) = path_sub.try_recv() {
+                stream
+                    .write_u16_le(path.len() as u16)
+                    .await
+                    .expect("Failed to write path length");
+                for point in path.iter() {
+                    stream
+                        .write_f32_le(point.x)
+                        .await
+                        .expect("Failed to write point.x");
+                    stream
+                        .write_f32_le(point.z)
+                        .await
+                        .expect("Failed to write point.z");
+                }
+            } else {
+                stream
+                    .write_u16_le(0)
+                    .await
+                    .expect("Failed to write path length");
+            }
+
+            stream.flush().await.expect("Failed to write path");
+        }
+    });
 
     driver.spawn(context.make_context("driver"));
     pathfinder.spawn(context.make_context("pathfinder"));

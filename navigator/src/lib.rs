@@ -1,11 +1,16 @@
-use std::{sync::Arc, time::Duration};
+use std::{ops::Deref, sync::Arc, time::Duration};
 
 use drive::Steering;
 use nalgebra::{Point3, UnitVector2, Vector2};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::task::block_in_place, DontDrop, ShouldNotDrop
+    node::AsyncNode,
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
+    runtime::RuntimeContext,
+    setup_logging,
+    tokio::task::block_in_place,
+    DontDrop, ShouldNotDrop,
 };
 
 pub mod drive;
@@ -17,13 +22,20 @@ type Float = f32;
 
 const PI: Float = std::f64::consts::PI as Float;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriveMode {
+    ForwardOnly,
+    Both,
+    ReverseOnly,
+}
+
 #[derive(ShouldNotDrop)]
 pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
     path_sub: Subscriber<Arc<[Point3<Float>]>>,
     steering_signal: Publisher<Steering>,
     robot_base: RobotBaseRef,
     pub refresh_rate: Duration,
-    pub can_reverse: bool,
+    drive_mode: WatchSubscriber<DriveMode>,
     pub full_turn_angle: Float,
     pub turn_fn: F,
     dont_drop: DontDrop<Self>,
@@ -36,7 +48,7 @@ impl DifferentialDriver<fn(Float) -> Float> {
             steering_signal: Default::default(),
             robot_base,
             refresh_rate: Duration::from_millis(20),
-            can_reverse: false,
+            drive_mode: WatchSubscriber::new(DriveMode::Both),
             // 30 degrees
             full_turn_angle: std::f64::consts::FRAC_PI_6 as Float,
             turn_fn: |frac| -2.0 * frac + 1.0,
@@ -53,6 +65,10 @@ impl<F: FnMut(Float) -> Float + Send + 'static> DifferentialDriver<F> {
     pub fn create_path_sub(&self) -> DirectSubscription<Arc<[Point3<Float>]>> {
         self.path_sub.create_subscription()
     }
+
+    pub fn create_drive_mode_sub(&self) -> DirectSubscription<DriveMode> {
+        self.drive_mode.create_subscription()
+    }
 }
 
 impl<F> AsyncNode for DifferentialDriver<F>
@@ -61,7 +77,7 @@ where
 {
     type Result = ();
 
-    async fn run(mut self, mut context: RuntimeContext) -> Self::Result {
+    async fn run(mut self, context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
         self.dont_drop.ignore_drop = true;
         let sleeper = spin_sleep::SpinSleeper::default();
@@ -69,7 +85,7 @@ where
         loop {
             let mut path = self.path_sub.recv().await;
 
-            let (path_sub, steering_signal, robot_base, turn_fn, tmp_context) = block_in_place(move || {
+            block_in_place(|| {
                 loop {
                     if context.is_runtime_exiting() {
                         break;
@@ -81,6 +97,7 @@ where
                     if path.is_empty() {
                         break;
                     }
+                    WatchSubscriber::try_update(&mut self.drive_mode);
 
                     let isometry = self.robot_base.get_isometry();
                     let position = Vector2::new(isometry.translation.x, isometry.translation.z);
@@ -110,7 +127,9 @@ where
                     let mut angle = forward.angle(&travel);
                     let mut reversing = 1.0;
 
-                    if angle > PI / 2.0 && self.can_reverse {
+                    if self.drive_mode.deref() == &DriveMode::ReverseOnly
+                        || (angle > PI / 2.0 && self.drive_mode.deref() != &DriveMode::ForwardOnly)
+                    {
                         angle = PI - angle;
                         reversing = -1.0;
                     }
@@ -138,21 +157,7 @@ where
                     sleeper.sleep(self.refresh_rate);
                 }
                 self.steering_signal.set(Steering::new(0.0, 0.0));
-
-                (
-                    self.path_sub,
-                    self.steering_signal,
-                    self.robot_base,
-                    self.turn_fn,
-                    context
-                )
             });
-
-            self.path_sub = path_sub;
-            self.steering_signal = steering_signal;
-            self.robot_base = robot_base;
-            self.turn_fn = turn_fn;
-            context = tmp_context;
 
             // if let Some(goal_forward) = goal_forward {
             //     // Turn to goal orientation

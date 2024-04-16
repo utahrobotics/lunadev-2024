@@ -25,10 +25,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string_pretty, to_writer_pretty};
 use sub::Undistorter;
 use unros::{
-    anyhow::{self, Context}, log, pubsub::{
+    anyhow::{self, Context},
+    log,
+    node::SyncNode,
+    pubsub::{
         subs::{DirectSubscription, Subscription},
         Publisher, Subscriber,
-    }, runtime::MainRuntimeContext, setup_logging, tokio::{self, task::JoinHandle}, node::SyncNode
+    },
+    runtime::MainRuntimeContext,
+    setup_logging,
+    tokio::{self, task::JoinHandle},
 };
 
 pub mod sub;
@@ -266,293 +272,289 @@ pub async fn interactive_examine(
 
     let context2 = context.make_context("examiner");
 
-    tokio::spawn(
-        async move {
-            setup_logging!(context2);
+    tokio::spawn(async move {
+        setup_logging!(context2);
 
-            let Some(img) = camera_sub.recv_or_closed().await else {
-                return Err(anyhow::anyhow!("Camera did not produce any frames!"));
-            };
+        let Some(img) = camera_sub.recv_or_closed().await else {
+            return Err(anyhow::anyhow!("Camera did not produce any frames!"));
+        };
 
-            let mut camera_info = CameraInfo {
-                width: img.width(),
-                height: img.height(),
-                fps: None,
-                focal_length_px: None,
-                distortion_data: None,
-            };
+        let mut camera_info = CameraInfo {
+            width: img.width(),
+            height: img.height(),
+            fps: None,
+            focal_length_px: None,
+            distortion_data: None,
+        };
 
-            if chessboard {
-                let mut object_point = VectorOfPoint3f::new();
-                for y in 0..6 {
-                    for x in 0..7 {
-                        object_point.push(Point3f::new(x as f32, y as f32, 0.0));
-                    }
+        if chessboard {
+            let mut object_point = VectorOfPoint3f::new();
+            for y in 0..6 {
+                for x in 0..7 {
+                    object_point.push(Point3f::new(x as f32, y as f32, 0.0));
                 }
-                let mut object_points = Vector::<VectorOfPoint3f>::new();
-                let mut image_points = Vector::<VectorOfPoint2f>::new();
+            }
+            let mut object_points = Vector::<VectorOfPoint3f>::new();
+            let mut image_points = Vector::<VectorOfPoint2f>::new();
 
-                let img_size = Size::new(img.width() as i32, img.height() as i32);
-                let criteria =
-                    TermCriteria::default().expect("Failed to generate default TermCriteria");
+            let img_size = Size::new(img.width() as i32, img.height() as i32);
+            let criteria =
+                TermCriteria::default().expect("Failed to generate default TermCriteria");
 
-                for iteration in 0..10 {
-                    println!("{iteration}: Finding chessboard corners");
-                    loop {
-                        let Some(img) = camera_sub.recv_or_closed().await else {
-                            return Err(anyhow::anyhow!("Camera did not produce any frames!"));
-                        };
-                        let img = img.to_luma8();
-                        let img = Mat::from_slice_rows_cols(
-                            &img,
-                            img.height() as usize,
-                            img.width() as usize,
-                        )
-                        .expect("Image should have been converted into a matrix");
+            for iteration in 0..10 {
+                println!("{iteration}: Finding chessboard corners");
+                loop {
+                    let Some(img) = camera_sub.recv_or_closed().await else {
+                        return Err(anyhow::anyhow!("Camera did not produce any frames!"));
+                    };
+                    let img = img.to_luma8();
+                    let img = Mat::from_slice_rows_cols(
+                        &img,
+                        img.height() as usize,
+                        img.width() as usize,
+                    )
+                    .expect("Image should have been converted into a matrix");
 
-                        let mut corners = VectorOfPoint2f::new();
-                        let success = find_chessboard_corners(
-                            &img,
-                            Size::new(7, 6),
-                            &mut corners,
-                            CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_NORMALIZE_IMAGE,
-                        )
-                        .expect("Failed to execute find_chessboard_corners");
+                    let mut corners = VectorOfPoint2f::new();
+                    let success = find_chessboard_corners(
+                        &img,
+                        Size::new(7, 6),
+                        &mut corners,
+                        CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_NORMALIZE_IMAGE,
+                    )
+                    .expect("Failed to execute find_chessboard_corners");
 
-                        if !success {
-                            continue;
-                        }
-
-                        println!("{iteration}: Refining corners");
-                        corner_sub_pix(
-                            &img,
-                            &mut corners,
-                            Size::new(11, 11),
-                            Size::new(-1, -1),
-                            criteria,
-                        )
-                        .expect("Failed to execute corner_sub_pix");
-
-                        object_points.push(object_point.clone());
-                        image_points.push(corners);
-                        break;
+                    if !success {
+                        continue;
                     }
+
+                    println!("{iteration}: Refining corners");
+                    corner_sub_pix(
+                        &img,
+                        &mut corners,
+                        Size::new(11, 11),
+                        Size::new(-1, -1),
+                        criteria,
+                    )
+                    .expect("Failed to execute corner_sub_pix");
+
+                    object_points.push(object_point.clone());
+                    image_points.push(corners);
+                    break;
                 }
-
-                let mut camera_matrix =
-                    Mat::from_slice_rows_cols(&[0, 0, 0, 0, 0, 0, 0, 0, 0], 3, 3).unwrap();
-                let mut dist_coeffs = Vector::<f64>::new();
-                let mut rvecs = VectorOfMat::new();
-                let mut tvecs = VectorOfVec3d::new();
-
-                println!("Calculating distortion");
-                let err = calibrate_camera(
-                    &object_points,
-                    &image_points,
-                    img_size,
-                    &mut camera_matrix,
-                    &mut dist_coeffs,
-                    &mut rvecs,
-                    &mut tvecs,
-                    0,
-                    criteria,
-                )
-                .expect("Failed to execute calibrate_camera");
-                println!("RMS re-projection error: {err}");
-                let mut roi = Rect::new(0, 0, img.width() as i32, img.height() as i32);
-                let new_camera_matrix = get_optimal_new_camera_matrix(
-                    &camera_matrix,
-                    &dist_coeffs,
-                    img_size,
-                    1.0,
-                    img_size,
-                    Some(&mut roi),
-                    false,
-                )
-                .expect("Failed to execute get_optimal_new_camera_matrix");
-
-                let distortion_data = DistortionData {
-                    distortion_coefficients: dist_coeffs.into_iter().collect(),
-                    camera_matrix: array::from_fn(|i| *camera_matrix.at(i as i32).unwrap()),
-                    new_camera_matrix: array::from_fn(|i| *new_camera_matrix.at(i as i32).unwrap()),
-                    roi_x: roi.x as u32,
-                    roi_y: roi.y as u32,
-                    roi_width: roi.width as u32,
-                    roi_height: roi.height as u32,
-                };
-
-                camera_info.distortion_data = Some(distortion_data.into());
             }
 
-            if let Some(FocalLengthEstimate {
-                tag_distance,
-                width,
-                id,
-            }) = focal_length_estimate
-            {
-                let pose_sub = Subscriber::new(1);
-                let mut length = img.width().max(img.height()) as f64 / 2.0;
-                let mut close_enoughs = 0usize;
-                let mut first = true;
-                let mut fails = 0;
+            let mut camera_matrix =
+                Mat::from_slice_rows_cols(&[0, 0, 0, 0, 0, 0, 0, 0, 0], 3, 3).unwrap();
+            let mut dist_coeffs = Vector::<f64>::new();
+            let mut rvecs = VectorOfMat::new();
+            let mut tvecs = VectorOfVec3d::new();
 
-                loop {
-                    let img_pub = Publisher::default();
-                    let mut apriltag = AprilTagDetector::new(
-                        length,
-                        img.width(),
-                        img.height(),
-                        camera_element.get_ref(),
-                    );
-                    img_pub.accept_subscription(apriltag.create_image_subscription());
+            println!("Calculating distortion");
+            let err = calibrate_camera(
+                &object_points,
+                &image_points,
+                img_size,
+                &mut camera_matrix,
+                &mut dist_coeffs,
+                &mut rvecs,
+                &mut tvecs,
+                0,
+                criteria,
+            )
+            .expect("Failed to execute calibrate_camera");
+            println!("RMS re-projection error: {err}");
+            let mut roi = Rect::new(0, 0, img.width() as i32, img.height() as i32);
+            let new_camera_matrix = get_optimal_new_camera_matrix(
+                &camera_matrix,
+                &dist_coeffs,
+                img_size,
+                1.0,
+                img_size,
+                Some(&mut roi),
+                false,
+            )
+            .expect("Failed to execute get_optimal_new_camera_matrix");
 
-                    apriltag.add_tag(Default::default(), Default::default(), width, id);
-                    apriltag
-                        .tag_detected_pub()
-                        .accept_subscription(pose_sub.create_subscription());
-                    apriltag.spawn(context2.clone_new_name("apriltag"));
+            let distortion_data = DistortionData {
+                distortion_coefficients: dist_coeffs.into_iter().collect(),
+                camera_matrix: array::from_fn(|i| *camera_matrix.at(i as i32).unwrap()),
+                new_camera_matrix: array::from_fn(|i| *new_camera_matrix.at(i as i32).unwrap()),
+                roi_x: roi.x as u32,
+                roi_y: roi.y as u32,
+                roi_width: roi.width as u32,
+                roi_height: roi.height as u32,
+            };
 
-                    if first {
-                        first = false;
-                        println!("Waiting for initial apriltag observation...");
-                        let img_fut = async {
-                            loop {
-                                img_pub.set(camera_sub.recv().await);
-                            }
-                        };
-                        tokio::select! {
-                            _ = img_fut => unreachable!(),
-                            _ = pose_sub.recv() => {}
-                        }
-                    }
-                    println!("Current length: {length:.2}");
+            camera_info.distortion_data = Some(distortion_data.into());
+        }
 
+        if let Some(FocalLengthEstimate {
+            tag_distance,
+            width,
+            id,
+        }) = focal_length_estimate
+        {
+            let pose_sub = Subscriber::new(1);
+            let mut length = img.width().max(img.height()) as f64 / 2.0;
+            let mut close_enoughs = 0usize;
+            let mut first = true;
+            let mut fails = 0;
+
+            loop {
+                let img_pub = Publisher::default();
+                let mut apriltag = AprilTagDetector::new(
+                    length,
+                    img.width(),
+                    img.height(),
+                    camera_element.get_ref(),
+                );
+                img_pub.accept_subscription(apriltag.create_image_subscription());
+
+                apriltag.add_tag(Default::default(), Default::default(), width, id);
+                apriltag
+                    .tag_detected_pub()
+                    .accept_subscription(pose_sub.create_subscription());
+                apriltag.spawn(context2.clone_new_name("apriltag"));
+
+                if first {
+                    first = false;
+                    println!("Waiting for initial apriltag observation...");
                     let img_fut = async {
                         loop {
                             img_pub.set(camera_sub.recv().await);
                         }
                     };
-                    let mut distance = 0.0;
-                    let mut observations = 0usize;
-                    let pose_fut = async {
-                        loop {
-                            let pose = pose_sub.recv().await;
-                            distance += pose.pose.translation.vector.magnitude();
-                            observations += 1;
-                        }
-                    };
                     tokio::select! {
                         _ = img_fut => unreachable!(),
-                        _ = pose_fut => unreachable!(),
-                        _ = tokio::time::sleep(Duration::from_secs(3)) => {}
+                        _ = pose_sub.recv() => {}
                     }
-                    if observations == 0 {
-                        println!("Received no observations!");
-                        fails += 1;
-                        if fails == 3 {
-                            println!("Resetting length...");
-                            length = img.width().max(img.height()) as f64 / 2.0;
-                        }
-                        continue;
-                    }
-                    distance /= observations as f64;
-                    let new_length = length * tag_distance / distance;
-
-                    if (new_length - length).abs() < 1.0 {
-                        close_enoughs += 1;
-
-                        if close_enoughs >= 5 {
-                            camera_info.focal_length_px =
-                                Some(NonZeroUsize::new(new_length.round() as usize).unwrap());
-                        }
-                    } else {
-                        close_enoughs = 0;
-                    }
-
-                    length = new_length;
                 }
-            }
+                println!("Current length: {length:.2}");
 
-            if estimate_fps {
-                loop {
-                    println!("Estimating fps across 5 seconds");
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    let mut count = 0;
-                    let fut = async {
-                        loop {
-                            let Some(_) = camera_sub.recv_or_closed().await else {
-                                return anyhow::anyhow!("Camera stopped unexpectedly!");
+                let img_fut = async {
+                    loop {
+                        img_pub.set(camera_sub.recv().await);
+                    }
+                };
+                let mut distance = 0.0;
+                let mut observations = 0usize;
+                let pose_fut = async {
+                    loop {
+                        let pose = pose_sub.recv().await;
+                        distance += pose.pose.translation.vector.magnitude();
+                        observations += 1;
+                    }
+                };
+                tokio::select! {
+                    _ = img_fut => unreachable!(),
+                    _ = pose_fut => unreachable!(),
+                    _ = tokio::time::sleep(Duration::from_secs(3)) => {}
+                }
+                if observations == 0 {
+                    println!("Received no observations!");
+                    fails += 1;
+                    if fails == 3 {
+                        println!("Resetting length...");
+                        length = img.width().max(img.height()) as f64 / 2.0;
+                    }
+                    continue;
+                }
+                distance /= observations as f64;
+                let new_length = length * tag_distance / distance;
+
+                if (new_length - length).abs() < 1.0 {
+                    close_enoughs += 1;
+
+                    if close_enoughs >= 5 {
+                        camera_info.focal_length_px =
+                            Some(NonZeroUsize::new(new_length.round() as usize).unwrap());
+                    }
+                } else {
+                    close_enoughs = 0;
+                }
+
+                length = new_length;
+            }
+        }
+
+        if estimate_fps {
+            loop {
+                println!("Estimating fps across 5 seconds");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                let mut count = 0;
+                let fut = async {
+                    loop {
+                        let Some(_) = camera_sub.recv_or_closed().await else {
+                            return anyhow::anyhow!("Camera stopped unexpectedly!");
+                        };
+                        count += 1;
+                    }
+                };
+                tokio::select! {
+                    e = fut => return Err(e),
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                }
+                let fps = (count as f32 / 5.0).round() as usize;
+                if fps == 0 {
+                    println!("Received no frames during fps testing!");
+                    continue;
+                }
+                camera_info.fps = Some(NonZeroUsize::new(fps).unwrap());
+                break;
+            }
+        }
+
+        println!("Finished examination of: {camera_name}");
+
+        let join = tokio::task::spawn_blocking(move || {
+            let stdin = stdin();
+            let mut input = String::new();
+
+            loop {
+                println!("Save file (Y/N)?");
+                input.clear();
+                stdin.read_line(&mut input).expect("Failed to read stdin");
+                match input.to_ascii_lowercase().trim() {
+                    "y" => {
+                        let mut submap = HashMap::with_capacity(1);
+                        submap.insert(camera_name, camera_info);
+
+                        std::fs::DirBuilder::new()
+                            .recursive(true)
+                            .create(DEFAULT_CAMERA_FOLDER)
+                            .with_context(|| format!("{DEFAULT_CAMERA_FOLDER} should be writable"))
+                            .unwrap();
+
+                        for i in 0.. {
+                            let path =
+                                Path::new(DEFAULT_CAMERA_FOLDER).join(format!("block{i}.json"));
+                            let file = match std::fs::File::create(&path) {
+                                Ok(x) => x,
+                                Err(e) => match e.kind() {
+                                    std::io::ErrorKind::AlreadyExists => todo!(),
+                                    _ => continue,
+                                },
                             };
-                            count += 1;
-                        }
-                    };
-                    tokio::select! {
-                        e = fut => return Err(e),
-                        _ = tokio::time::sleep(Duration::from_secs(5)) => {}
-                    }
-                    let fps = (count as f32 / 5.0).round() as usize;
-                    if fps == 0 {
-                        println!("Received no frames during fps testing!");
-                        continue;
-                    }
-                    camera_info.fps = Some(NonZeroUsize::new(fps).unwrap());
-                    break;
-                }
-            }
-
-            println!("Finished examination of: {camera_name}");
-
-            let join = tokio::task::spawn_blocking(move || {
-                let stdin = stdin();
-                let mut input = String::new();
-
-                loop {
-                    println!("Save file (Y/N)?");
-                    input.clear();
-                    stdin.read_line(&mut input).expect("Failed to read stdin");
-                    match input.to_ascii_lowercase().trim() {
-                        "y" => {
-                            let mut submap = HashMap::with_capacity(1);
-                            submap.insert(camera_name, camera_info);
-
-                            std::fs::DirBuilder::new()
-                                .recursive(true)
-                                .create(DEFAULT_CAMERA_FOLDER)
-                                .with_context(|| {
-                                    format!("{DEFAULT_CAMERA_FOLDER} should be writable")
-                                })
+                            to_writer_pretty(file, &submap)
+                                .with_context(|| format!("{path:?} should be writable"))
                                 .unwrap();
-
-                            for i in 0.. {
-                                let path =
-                                    Path::new(DEFAULT_CAMERA_FOLDER).join(format!("block{i}.json"));
-                                let file = match std::fs::File::create(&path) {
-                                    Ok(x) => x,
-                                    Err(e) => match e.kind() {
-                                        std::io::ErrorKind::AlreadyExists => todo!(),
-                                        _ => continue,
-                                    },
-                                };
-                                to_writer_pretty(file, &submap)
-                                    .with_context(|| format!("{path:?} should be writable"))
-                                    .unwrap();
-                                break;
-                            }
-
-                            std::mem::forget(submap);
+                            break;
                         }
-                        "n" => {}
-                        _ => continue,
+
+                        std::mem::forget(submap);
                     }
-                    break;
+                    "n" => {}
+                    _ => continue,
                 }
-            });
+                break;
+            }
+        });
 
-            join.await.unwrap();
+        join.await.unwrap();
 
-            Ok(())
-        },
-    );
+        Ok(())
+    });
 
     context.wait_for_exit().await;
 }

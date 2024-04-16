@@ -20,18 +20,23 @@ use ordered_float::NotNan;
 use serde::Deserialize;
 use spin_sleep::SpinSleeper;
 use unros::{
-    anyhow, logging::{
+    anyhow,
+    logging::{
         dump::{ScalingFilter, VideoDataDump},
         get_log_pub,
-    }, node::{AsyncNode, SyncNode}, pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber}, runtime::RuntimeContext, setup_logging, tokio::{self, task::spawn_blocking}, DontDrop, ShouldNotDrop
+    },
+    node::{AsyncNode, SyncNode},
+    pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber},
+    runtime::RuntimeContext,
+    setup_logging,
+    tokio::{self, task::spawn_blocking},
+    DontDrop, ShouldNotDrop,
 };
-
 
 #[derive(Deserialize)]
 struct TelemetryConfig {
     server_addr: SocketAddrV4,
 }
-
 
 /// A remote connection to `Lunabase`
 #[derive(ShouldNotDrop)]
@@ -58,11 +63,7 @@ pub struct Telemetry {
 }
 
 impl Telemetry {
-    pub async fn new(
-        cam_width: u32,
-        cam_height: u32,
-        cam_fps: usize,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(cam_width: u32, cam_height: u32, cam_fps: usize) -> anyhow::Result<Self> {
         let config: TelemetryConfig = unros::get_env()?;
         let mut video_addr = config.server_addr;
         video_addr.set_port(video_addr.port() + 1);
@@ -135,7 +136,7 @@ impl AsyncNode for Telemetry {
                                 ScalingFilter::FastBilinear,
                                 self.video_addr,
                                 self.cam_fps,
-                                &context2
+                                &context2,
                             ) {
                                 Ok(x) => {
                                     video_dump = x;

@@ -12,7 +12,11 @@ use quadtree_rs::{area::AreaBuilder, Quadtree};
 use rig::RobotElementRef;
 use simba::scalar::{SubsetOf, SupersetOf};
 use unros::{
-    node::AsyncNode, pubsub::{subs::Subscription, Publisher, PublisherRef, Subscriber}, rayon::iter::{IntoParallelIterator, ParallelIterator}, runtime::RuntimeContext, setup_logging, DontDrop, ShouldNotDrop
+    node::AsyncNode,
+    pubsub::{subs::Subscription, Publisher, PublisherRef, Subscriber},
+    rayon::iter::{IntoParallelIterator, ParallelIterator},
+    runtime::RuntimeContext,
+    setup_logging, DontDrop, ShouldNotDrop,
 };
 
 #[derive(Clone, Copy)]

@@ -27,10 +27,15 @@ use realsense_rust::{
 };
 use rig::RobotElementRef;
 use unros::{
-    anyhow, node::SyncNode, pubsub::{Publisher, PublisherRef}, rayon::{
+    anyhow,
+    node::SyncNode,
+    pubsub::{Publisher, PublisherRef},
+    rayon::{
         iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
         join,
-    }, runtime::RuntimeContext, setup_logging, DontDrop, ShouldNotDrop
+    },
+    runtime::RuntimeContext,
+    setup_logging, DontDrop, ShouldNotDrop,
 };
 
 #[derive(Clone)]
@@ -304,22 +309,19 @@ impl SyncNode for RealSenseCamera {
                             (0..frame_width / 4).flat_map(move |x| [x as f32, y as f32])
                         });
 
-                        let pixel_coords = Pixels::new(Matrix::<
-                            f32,
-                            Dyn,
-                            U2,
-                            VecStorage<f32, Dyn, U2>,
-                        >::from_row_iterator(
-                            frame_height as usize * frame_width as usize / 16,
-                            pixel_coords,
-                        ));
+                        let pixel_coords =
+                            Pixels::new(
+                                Matrix::<f32, Dyn, U2, VecStorage<f32, Dyn, U2>>::from_row_iterator(
+                                    frame_height as usize * frame_width as usize / 16,
+                                    pixel_coords,
+                                ),
+                            );
                         cam_geom.pixel_to_world(&pixel_coords)
                     },
                 );
 
                 let scale = frame.depth_units().unwrap();
-                let origin: Vector3<f32> =
-                    nalgebra::convert(global_isometry.translation.vector);
+                let origin: Vector3<f32> = nalgebra::convert(global_isometry.translation.vector);
 
                 let points: Arc<[_]> = cast_slice::<_, u16>(&frame_bytes)
                     .into_par_iter()
@@ -377,6 +379,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         robot_element: None,
         focal_length_frac: 0.5,
         min_distance: 0.4,
-        dont_drop: DontDrop::new("realsense")
+        dont_drop: DontDrop::new("realsense"),
     }))
 }
