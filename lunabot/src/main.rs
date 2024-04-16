@@ -24,6 +24,7 @@ mod drive;
 mod serial;
 // mod imu;
 mod telemetry;
+mod audio;
 
 #[unros::main]
 async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
