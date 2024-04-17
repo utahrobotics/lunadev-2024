@@ -11,6 +11,7 @@ var connected := false
 
 
 func _ready() -> void:
+	connected = Lunabot.is_lunabot_connected()
 	Lunabot.connected.connect(func(): connected = true)
 	Lunabot.disconnected.connect(func(): connected = false)
 	Lunabot.connected.connect($Connected.play)
@@ -35,6 +36,8 @@ script/source = "extends Label
 
 
 func _ready() -> void:
+	if Lunabot.is_lunabot_connected():
+		text = \"Connected\"
 	Lunabot.disconnected.connect(func():
 		text = \"Not Connected\"
 	)
