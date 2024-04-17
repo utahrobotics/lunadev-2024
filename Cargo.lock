@@ -3155,6 +3155,7 @@ dependencies = [
  "image",
  "localization",
  "nalgebra",
+ "ordered-float",
  "quaternion-core",
  "realsense-rust",
  "realsense-sys",

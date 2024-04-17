@@ -3,6 +3,7 @@ use camera::discover_all_cameras;
 use costmap::CostmapGenerator;
 use fxhash::FxBuildHasher;
 use localization::{
+    engines::window::{DefaultWindowConfig, WindowLocalizer},
     frames::{OrientationFrame, PositionFrame},
     Localizer,
 };
@@ -14,10 +15,11 @@ use rig::Robot;
 use telemetry::Telemetry;
 use unros::{
     anyhow,
-    log::info,
     node::{AsyncNode, SyncNode},
     pubsub::{subs::Subscription, Subscriber},
     runtime::MainRuntimeContext,
+    setup_logging,
+    ShouldNotDrop
 };
 
 mod actuators;
@@ -29,48 +31,31 @@ mod telemetry;
 
 #[unros::main]
 async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
+    setup_logging!(context);
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;
     let camera_element = elements.remove("camera").unwrap();
     let robot_base_ref = robot_base.get_ref();
     // let imu01 = elements.remove("imu01").unwrap().get_ref();
 
-    let costmap = CostmapGenerator::new(10);
+    let costmap = CostmapGenerator::new(10, robot_base_ref.clone());
 
     let mut cameras: Vec<_> = discover_all_cameras()?
-        .map(|x| {
-            info!(
-                "Discovered {} at {}",
-                x.get_camera_name(),
-                x.get_camera_uri()
-            );
-            // x.get_intrinsics().ignore_drop();
-            x
+        .filter_map(|mut x| {
+            if x.get_camera_name().contains("RealSense") {
+                x.ignore_drop();
+                None
+            } else {
+                info!(
+                    "Discovered {} at {}",
+                    x.get_camera_name(),
+                    x.get_camera_uri()
+                );
+                Some(x)
+            }
         })
         .collect();
     info!("Discovered {} cameras", cameras.len());
-
-    #[cfg(unix)]
-    let realsense_camera =
-        {
-            use costmap::Points;
-            let mut camera = discover_all_realsense()?
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("No realsense camera"))?;
-
-            camera.set_robot_element_ref(camera_element.get_ref());
-            let camera_element_ref = camera_element.get_ref();
-            camera
-                .cloud_received_pub()
-                .accept_subscription(costmap.create_points_sub(0.1).map(move |x: PointCloud| {
-                    Points {
-                        points: x.iter().map(|x| x.0),
-                        robot_element: camera_element_ref.clone(),
-                    }
-                }));
-
-            camera
-        };
 
     let telemetry = Telemetry::new(1280, 720, 20).await?;
 
@@ -82,19 +67,47 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         .into_logger(|x| format!("{x:?}"), "arms.logs", &context)
         .await?;
 
-    let (arms, drive) = serial::connect_to_serial()?;
-    telemetry
-        .steering_pub()
-        .accept_subscription(drive.get_steering_sub());
+    match serial::connect_to_serial() {
+        Ok((arms, drive)) => {
+            telemetry
+                .steering_pub()
+                .accept_subscription(drive.get_steering_sub());
 
-    telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
+            telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
+            drive.spawn(context.make_context("drive"));
+            arms.spawn(context.make_context("arms"));
+        }
+        Err(e) => {
+            error!("{e}");
+        }
+    }
 
-    let mut teleop_camera = cameras.remove(0);
-    teleop_camera.res_x = 1280;
-    teleop_camera.res_y = 720;
-    teleop_camera
-        .image_received_pub()
-        .accept_subscription(telemetry.create_image_subscription());
+    match cameras
+        .iter()
+        .enumerate()
+        .filter_map(|(i, cam)| {
+            if cam.get_camera_name() == "HD USB CAMERA: HD USB CAMERA" {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .next()
+    {
+        Some(i) => {
+            let mut teleop_camera = cameras.remove(i);
+            teleop_camera.res_x = 1280;
+            teleop_camera.res_y = 720;
+            teleop_camera
+                .image_received_pub()
+                .accept_subscription(telemetry.create_image_subscription());
+            teleop_camera.spawn(context.make_context("teleop_camera"));
+        }
+        None => {
+            error!("Teleop camera not found");
+        }
+    }
+
     //     let mut vid_writer = VideoDataDump::new_file(1280, 720, 24);
     //     tokio::spawn(async move { loop {
 
@@ -141,7 +154,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     //     }
     // });
 
-    let localizer = Localizer::new(robot_base, 0.4);
+    let localizer: Localizer<f32, WindowLocalizer<f32, _, _, _, _>> =
+        Localizer::new(robot_base, DefaultWindowConfig::default());
 
     apriltag
         .tag_detected_pub()
@@ -167,6 +181,38 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 }),
         );
 
+    #[cfg(unix)]
+    {
+        use costmap::Points;
+        match discover_all_realsense()?.next() {
+            Some(mut camera) => {
+                camera.set_robot_element_ref(camera_element.get_ref());
+                let camera_element_ref = camera_element.get_ref();
+                camera.cloud_received_pub().accept_subscription(
+                    costmap
+                        .create_points_sub(0.1)
+                        .map(move |x: PointCloud| Points {
+                            points: x.iter().map(|x| x.0),
+                            robot_element: camera_element_ref.clone(),
+                        }),
+                );
+
+                camera.image_received_pub().accept_subscription(
+                    apriltag
+                        .create_image_subscription()
+                        .set_name("RealSense Apriltag Image"),
+                );
+                camera
+                    .imu_frame_received_pub()
+                    .accept_subscription(localizer.create_imu_sub().set_name("RealSense IMU"));
+                camera.spawn(context.make_context("realsense_camera"));
+            }
+            None => {
+                error!("No realsense camera");
+            }
+        }
+    }
+
     // let imu01 = open_imu(
     //     "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6616407e3496e28-if00",
     //     imu01,
@@ -175,18 +221,6 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     // imu01
     //     .msg_received_pub()
     //     .accept_subscription(localizer.create_imu_sub().set_name("imu01"));
-
-    #[cfg(unix)]
-    {
-        realsense_camera.image_received_pub().accept_subscription(
-            apriltag
-                .create_image_subscription()
-                .set_name("RealSense Apriltag Image"),
-        );
-        realsense_camera
-            .imu_frame_received_pub()
-            .accept_subscription(localizer.create_imu_sub().set_name("RealSense IMU"));
-    }
 
     let pathfinder: Pathfinder =
         Pathfinder::new_with_engine(0.7, Default::default(), robot_base_ref.clone());
@@ -241,12 +275,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     driver.spawn(context.make_context("driver"));
     pathfinder.spawn(context.make_context("pathfinder"));
     telemetry.spawn(context.make_context("telemetry"));
-    teleop_camera.spawn(context.make_context("teleop_camera"));
-    drive.spawn(context.make_context("drive"));
-    arms.spawn(context.make_context("arms"));
     costmap.spawn(context.make_context("costmap"));
-    #[cfg(unix)]
-    realsense_camera.spawn(context.make_context("realsense_camera"));
 
     context.wait_for_exit().await;
     Ok(())

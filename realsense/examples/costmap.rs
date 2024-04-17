@@ -77,8 +77,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 }
             };
             let position = camera_element.get_global_isometry().translation.vector;
-            // let img = costmap.get_obstacle_map(position.into(), 0.03, 400, 400, 0.5, 0.05);
-            let img = costmap.get_cost_map(position.into(), 0.03, 400, 400);
+            let img = costmap.get_obstacle_map(position.into(), 0.03, 400, 400, 0.5, 0.05);
+            // let img = costmap.get_cost_map(position.into(), 0.03, 400, 400);
             costmap_display.write_frame(Arc::new(img.into())).unwrap();
         }
     });

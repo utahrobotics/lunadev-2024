@@ -40,12 +40,10 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 
 /// Deserialize environment variables and the default config file into the given generic type.
 pub fn get_env<'de, T: Deserialize<'de>>() -> anyhow::Result<T> {
-    let mut config = Config::builder().add_source(config::Environment::with_prefix(""));
+    let mut config = Config::builder()
+        .add_source(config::Environment::with_prefix("").convert_case(config::Case::Snake));
     if Path::new("settings.toml").exists() {
         config = config.add_source(config::File::with_name("settings.toml"));
-    }
-    if Path::new(".env").exists() {
-        config = config.add_source(config::File::with_name(".env"));
     }
     CONFIG
         .get_or_try_init(|| config.build())?
