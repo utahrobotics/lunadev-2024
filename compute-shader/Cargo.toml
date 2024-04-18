@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+wgpu = "0.19.4"
+anyhow = { workspace = true }
+bytemuck = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+env_logger = "0"

@@ -33,7 +33,7 @@ spin_sleep = "1"
 rand = { version = "0.8", features = ["small_rng"] }
 serde-big-array = "0.5"
 rand_distr = "0.4"
-bytemuck = "1"
+bytemuck = { version = "1", features = [ "derive" ] }
 log = "0.4"
 simba = "0.8"
 # eigenvalues = { git = "https://github.com/Masterchef365/eigenvalues.git" }
