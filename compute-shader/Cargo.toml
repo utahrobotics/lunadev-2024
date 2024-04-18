@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wgpu = "0.19.4"
+wgpu = "0"
 anyhow = { workspace = true }
 bytemuck = { workspace = true }
-pollster = "0"
+tokio = { workspace = true }
+crossbeam = { workspace = true }
+rayon = { workspace = true }
 
 [dev-dependencies]
 env_logger = "0"

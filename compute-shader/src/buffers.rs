@@ -2,7 +2,7 @@ use std::{marker::PhantomData, mem::size_of};
 
 use bytemuck::{bytes_of, bytes_of_mut, from_bytes};
 
-pub trait BufferSize: Copy {
+pub trait BufferSize: Copy + Send + 'static {
     fn size(&self) -> u64;
 }
 
@@ -21,7 +21,7 @@ impl<T> Clone for StaticSize<T> {
     }
 }
 
-impl<T> BufferSize for StaticSize<T> {
+impl<T: Send + 'static> BufferSize for StaticSize<T> {
     fn size(&self) -> u64 {
         size_of::<T>() as u64
     }
@@ -29,7 +29,7 @@ impl<T> BufferSize for StaticSize<T> {
 
 pub struct DynamicSize<T>(pub usize, PhantomData<T>);
 
-impl<T> BufferSize for DynamicSize<T> {
+impl<T: Send + 'static> BufferSize for DynamicSize<T> {
     fn size(&self) -> u64 {
         (self.0 * size_of::<T>()) as u64
     }
@@ -69,36 +69,52 @@ impl<T: BufferSize, T1: BufferSize, T2: BufferSize> BufferSizeIter for (T, T1, T
     }
 }
 
-pub trait IntoBuffer {
+pub trait IntoBuffer: Copy {
     type Size: BufferSize;
     fn get_size(&self) -> Self::Size;
-    fn into_buffer(&self, buffer: &wgpu::Buffer, queue: &wgpu::Queue);
+    fn into_buffer(self, buffer: &wgpu::Buffer, queue: &wgpu::Queue);
 }
 
-pub struct Pod<T: bytemuck::Pod>(pub T);
-
-impl<T: bytemuck::Pod> IntoBuffer for Pod<T> {
+impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &T {
     type Size = StaticSize<T>;
 
     fn get_size(&self) -> Self::Size {
         StaticSize::default()
     }
 
-    fn into_buffer(&self, buffer: &wgpu::Buffer, queue: &wgpu::Queue) {
-        queue.write_buffer(buffer, 0, bytes_of(&self.0));
+    fn into_buffer(self, buffer: &wgpu::Buffer, queue: &wgpu::Queue) {
+        queue.write_buffer(buffer, 0, bytes_of(self));
     }
 }
 
-impl<T: bytemuck::Pod> IntoBuffer for &[T] {
+impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &[T] {
     type Size = DynamicSize<T>;
 
     fn get_size(&self) -> Self::Size {
         DynamicSize::new(self.len())
     }
 
-    fn into_buffer(&self, buffer: &wgpu::Buffer, queue: &wgpu::Queue) {
+    fn into_buffer(self, buffer: &wgpu::Buffer, queue: &wgpu::Queue) {
         for (i, item) in self.iter().enumerate() {
             queue.write_buffer(buffer, (i * size_of::<T>()) as u64, bytes_of(item));
+        }
+    }
+}
+
+impl<T: Send + 'static> IntoBuffer for Option<&T>
+where
+    for<'a> &'a T: IntoBuffer,
+{
+    type Size = StaticSize<T>;
+
+    fn get_size(&self) -> Self::Size {
+        StaticSize::default()
+    }
+
+    fn into_buffer(self, buffer: &wgpu::Buffer, queue: &wgpu::Queue) {
+        match self {
+            Some(item) => item.into_buffer(buffer, queue),
+            None => {}
         }
     }
 }
@@ -112,7 +128,7 @@ impl<T: IntoBuffer> IntoBuffers for (T,) {
     type Sizes = (T::Size,);
 
     fn into_buffers(&self, buffers: &[wgpu::Buffer], queue: &wgpu::Queue) {
-        self.0.into_buffer(&buffers[0], queue);
+        (&self.0).into_buffer(&buffers[0], queue);
     }
 }
 
@@ -135,33 +151,38 @@ impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer> IntoBuffers for (T, T1, T2) 
     }
 }
 
-pub trait FromBuffer {
+pub trait FromBuffer: Send + 'static {
+    type Receiver: Default + Send + 'static;
     type Size: BufferSize;
 
-    fn from_buffer(buffer: &wgpu::BufferView, size: Self::Size) -> Self;
+    fn from_buffer(recv: Self::Receiver, buffer: &wgpu::BufferView, size: Self::Size) -> Self;
 }
 
-impl<T: bytemuck::Pod> FromBuffer for Pod<T> {
+pub struct Single<T>(pub T);
+
+impl<T: bytemuck::Pod + Send + 'static> FromBuffer for Single<T> {
+    type Receiver = ();
     type Size = StaticSize<T>;
 
-    fn from_buffer(buffer: &wgpu::BufferView, _size: Self::Size) -> Self {
+    fn from_buffer(_recv: Self::Receiver, buffer: &wgpu::BufferView, _size: Self::Size) -> Self {
         let mut return_val = T::zeroed();
         let return_val_bytes = bytes_of_mut(&mut return_val);
         return_val_bytes.copy_from_slice(buffer);
-        Pod(return_val)
+        Single(return_val)
     }
 }
 
-impl<T: bytemuck::Pod> FromBuffer for Vec<T> {
+impl<T: bytemuck::Pod + Send + 'static> FromBuffer for Vec<T> {
+    type Receiver = Vec<T>;
     type Size = DynamicSize<T>;
 
-    fn from_buffer(buffer: &wgpu::BufferView, size: Self::Size) -> Self {
-        let mut return_val = Vec::with_capacity(size.0 as usize);
+    fn from_buffer(mut recv: Self::Receiver, buffer: &wgpu::BufferView, size: Self::Size) -> Self {
+        recv.reserve(size.0 as usize);
         for i in 0..size.0 as usize {
             let item_slice = &buffer[(i * size_of::<T>())..((i + 1) * size_of::<T>())];
             let item: &T = from_bytes(item_slice);
-            return_val.push(*item);
+            recv.push(*item);
         }
-        return_val
+        recv
     }
 }

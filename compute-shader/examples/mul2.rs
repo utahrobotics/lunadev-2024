@@ -1,17 +1,37 @@
 use compute_shader::buffers::DynamicSize;
 use compute_shader::create_compute;
+use std::sync::Arc;
 use wgpu::include_wgsl;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let mut compute = create_compute::<(&[f32],), Vec<f32>>(
+    let compute = create_compute::<(&[f32],), Vec<f32>>(
         include_wgsl!("mul2.wgsl"),
         (DynamicSize::new(4),),
         DynamicSize::new(4),
         (1, 1, 1),
-    )?;
-    println!("{:?}", compute((&[2.0, 2.3, 1.6, 7.6],)));
+    )
+    .await?;
+    let compute = Arc::new(compute);
+    let compute2 = compute.clone();
+
+    let task = tokio::spawn(async move {
+        for _ in 0..100 {
+            assert_eq!(
+                "[4.0, 4.6, 3.2, 15.2]",
+                format!("{:?}", compute2.call(&[2.0, 2.3, 1.6, 7.6]).await)
+            );
+        }
+    });
+    for _ in 0..100 {
+        assert_eq!(
+            "[9.4, 12.6, 13.8, 4.2]",
+            format!("{:?}", compute.call(&[4.7, 6.3, 6.9, 2.1]).await)
+        );
+    }
+    task.await.unwrap();
 
     Ok(())
 }

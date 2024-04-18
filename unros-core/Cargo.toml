@@ -26,4 +26,4 @@ sysinfo = "0.30"
 config = "0.14"
 color-eyre = { version = "0.6", default-features = false }
 ctrlc = "3.4.2"
-rayon = "1.10.0"
+rayon = { workspace = true }
