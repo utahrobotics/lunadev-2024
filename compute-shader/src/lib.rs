@@ -1,9 +1,7 @@
 #![feature(once_cell_try)]
-use std::
-    sync::{mpsc, Arc, OnceLock}
-;
+use std::sync::{mpsc, Arc, OnceLock};
 
-use buffers::{BufferSizeIter, FromBuffer, IntoBuffers, BufferSize};
+use buffers::{BufferSize, BufferSizeIter, FromBuffer, IntoBuffers};
 pub use bytemuck;
 pub use wgpu;
 use wgpu::MapMode;
@@ -65,7 +63,8 @@ fn get_gpu_device() -> anyhow::Result<&'static GpuDevice> {
 pub async fn create_compute<A, V>(
     shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>,
     arg_sizes: A::Sizes,
-    ret_size: V::Size
+    ret_size: V::Size,
+    workgroup_size: (u32, u32, u32),
 ) -> anyhow::Result<impl FnMut(A) -> V>
 where
     A: IntoBuffers,
@@ -103,6 +102,7 @@ where
         return_buffer,
         return_staging_buffer.clone(),
         ret_size.size(),
+        workgroup_size,
     )
     .await;
 
@@ -119,7 +119,10 @@ where
         queue.submit(std::iter::empty());
         let _ = receiver.recv();
 
-        V::from_buffer(&return_staging_buffer.slice(..).get_mapped_range(), ret_size)
+        V::from_buffer(
+            &return_staging_buffer.slice(..).get_mapped_range(),
+            ret_size,
+        )
     })
 }
 
@@ -129,6 +132,7 @@ struct State {
     return_buffer: wgpu::Buffer,
     return_staging_buffer: Arc<wgpu::Buffer>,
     return_size: u64,
+    workgroup_size: (u32, u32, u32),
 }
 
 impl State {
@@ -139,6 +143,7 @@ impl State {
         return_buffer: wgpu::Buffer,
         return_staging_buffer: Arc<wgpu::Buffer>,
         return_size: u64,
+        workgroup_size: (u32, u32, u32),
     ) -> Self {
         let GpuDevice { device, .. } = get_gpu_device().unwrap();
 
@@ -217,6 +222,7 @@ impl State {
             return_buffer,
             return_staging_buffer,
             return_size,
+            workgroup_size,
         }
     }
 
@@ -233,7 +239,11 @@ impl State {
 
             compute_pass.set_pipeline(&self.compute_pipeline);
             compute_pass.set_bind_group(0, &self.bind_group, &[]);
-            compute_pass.dispatch_workgroups(1, 1, 1);
+            compute_pass.dispatch_workgroups(
+                self.workgroup_size.0,
+                self.workgroup_size.1,
+                self.workgroup_size.2,
+            );
         }
         encoder.copy_buffer_to_buffer(
             &self.return_buffer,
