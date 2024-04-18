@@ -1,4 +1,4 @@
-[gd_scene load_steps=5 format=3 uid="uid://b8qgudi6vkflb"]
+[gd_scene load_steps=6 format=3 uid="uid://b8qgudi6vkflb"]
 
 [ext_resource type="Texture2D" uid="uid://d4it3tpx2xqxq" path="res://icon.png" id="1_1xyvq"]
 
@@ -19,6 +19,14 @@ script/source = "extends Button
 
 func _on_pressed() -> void:
 	get_tree().change_scene_to_file(\"res://lunasim.tscn\")
+"
+
+[sub_resource type="GDScript" id="GDScript_7iehl"]
+script/source = "extends Button
+
+
+func _on_pressed() -> void:
+	get_tree().change_scene_to_file(\"res://lunaportal.tscn\")
 "
 
 [node name="VBoxContainer" type="VBoxContainer"]
@@ -53,5 +61,12 @@ size_flags_horizontal = 4
 text = "Lunasim"
 script = SubResource("GDScript_gxj40")
 
+[node name="Button3" type="Button" parent="."]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Lunaportal"
+script = SubResource("GDScript_7iehl")
+
 [connection signal="pressed" from="Button" to="Button" method="_on_pressed"]
 [connection signal="pressed" from="Button2" to="Button2" method="_on_pressed"]
+[connection signal="pressed" from="Button3" to="Button3" method="_on_pressed"]

@@ -19,6 +19,7 @@ config/icon="res://icon.png"
 
 Lunabot="*res://lunabot.gd"
 UI="*res://ui.gd"
+Lunaportal="*res://lunaportal.gd"
 
 [display]
 
