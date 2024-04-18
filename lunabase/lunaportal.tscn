@@ -98,7 +98,7 @@ func _on_pressed() -> void:
 "
 
 [node name="Lunaportal" type="VBoxContainer"]
-anchors_preset = -1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 10.0
@@ -128,7 +128,7 @@ horizontal_alignment = 1
 custom_minimum_size = Vector2(120, 0)
 layout_mode = 2
 size_flags_horizontal = 4
-text = "192.168.0.100"
+text = "192.168.0.102"
 expand_to_text_length = true
 script = SubResource("GDScript_l668k")
 
