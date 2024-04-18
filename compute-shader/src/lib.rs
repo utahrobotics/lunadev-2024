@@ -1,14 +1,14 @@
 #![feature(once_cell_try)]
 use std::{
     mem::size_of,
-    sync::{mpsc, OnceLock},
+    sync::{mpsc, Arc, OnceLock},
 };
 
 use buffers::IntoBuffers;
 pub use bytemuck;
 use bytemuck::bytes_of_mut;
 pub use wgpu;
-use wgpu::util::DeviceExt;
+use wgpu::MapMode;
 
 pub mod buffers;
 
@@ -71,30 +71,58 @@ where
     A: IntoBuffers,
     V: bytemuck::Pod,
 {
-    let GpuDevice { device, .. } = get_gpu_device()?;
+    let GpuDevice { device, queue } = get_gpu_device()?;
     let arg_buffers: Box<[_]> = A::sizes()
+        .into_iter()
         .enumerate()
         .map(|(i, size)| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Arg Buffer{i}")),
-                contents: &vec![0; size].into_boxed_slice(),
-                usage: wgpu::BufferUsages::UNIFORM,
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Arg Buffer {i}")),
+                size: size as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             })
         })
         .collect();
-    let return_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let return_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(&format!("Return Buffer")),
-        contents: &vec![0; size_of::<V>()].into_boxed_slice(),
-        usage: wgpu::BufferUsages::STORAGE,
+        size: size_of::<V>() as u64,
+        mapped_at_creation: false,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
-    let mut state = State::new(shader_module_decsriptor, &arg_buffers, &return_buffer).await;
+    let return_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(&format!("Return Buffer")),
+        size: size_of::<V>() as u64,
+        mapped_at_creation: false,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+    });
+    let return_staging_buffer = Arc::new(return_staging_buffer);
+    let mut state = State::new(
+        shader_module_decsriptor,
+        &arg_buffers,
+        return_buffer,
+        return_staging_buffer.clone(),
+        size_of::<V>() as u64,
+    )
+    .await;
 
     Ok(move |args: A| {
-        args.into_buffers(&arg_buffers);
+        args.into_buffers(&arg_buffers, &queue);
         state.run();
+
+        let (sender, receiver) = mpsc::sync_channel::<()>(0);
+        return_staging_buffer
+            .slice(..)
+            .map_async(MapMode::Read, move |_| {
+                let _sender = sender;
+            });
+        queue.submit(std::iter::empty());
+        let _ = receiver.recv();
+
         let mut return_val = V::zeroed();
         let return_val_bytes = bytes_of_mut(&mut return_val);
-        return_val_bytes.copy_from_slice(&return_buffer.slice(..).get_mapped_range());
+        return_val_bytes.copy_from_slice(&return_staging_buffer.slice(..).get_mapped_range());
+        return_staging_buffer.unmap();
         return_val
     })
 }
@@ -102,6 +130,9 @@ where
 struct State {
     compute_pipeline: wgpu::ComputePipeline,
     bind_group: wgpu::BindGroup,
+    return_buffer: wgpu::Buffer,
+    return_staging_buffer: Arc<wgpu::Buffer>,
+    return_size: u64,
 }
 
 impl State {
@@ -109,7 +140,9 @@ impl State {
     async fn new(
         shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>,
         arg_buffers: &[wgpu::Buffer],
-        return_buffer: &wgpu::Buffer,
+        return_buffer: wgpu::Buffer,
+        return_staging_buffer: Arc<wgpu::Buffer>,
+        return_size: u64,
     ) -> Self {
         let GpuDevice { device, .. } = get_gpu_device().unwrap();
 
@@ -165,13 +198,13 @@ impl State {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
             entries: &entries,
-            label: Some("diffuse_bind_group"),
+            label: Some("bind_group"),
         });
 
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Compute Pipeline Layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -185,6 +218,9 @@ impl State {
         Self {
             compute_pipeline,
             bind_group,
+            return_buffer,
+            return_staging_buffer,
+            return_size,
         }
     }
 
@@ -201,13 +237,21 @@ impl State {
 
             compute_pass.set_pipeline(&self.compute_pipeline);
             compute_pass.set_bind_group(0, &self.bind_group, &[]);
+            compute_pass.dispatch_workgroups(1, 1, 1);
         }
+        encoder.copy_buffer_to_buffer(
+            &self.return_buffer,
+            0,
+            &self.return_staging_buffer,
+            0,
+            self.return_size,
+        );
 
-        queue.submit(std::iter::once(encoder.finish()));
         let (sender, receiver) = mpsc::sync_channel::<()>(0);
         queue.on_submitted_work_done(|| {
             let _sender = sender;
         });
+        queue.submit(std::iter::once(encoder.finish()));
 
         let _ = receiver.recv();
     }
