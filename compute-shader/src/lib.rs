@@ -3,6 +3,7 @@ use std::sync::{mpsc, Arc, OnceLock};
 
 use buffers::{BufferSize, BufferSizeIter, FromBuffer, IntoBuffers};
 pub use bytemuck;
+use pollster::FutureExt;
 pub use wgpu;
 use wgpu::MapMode;
 
@@ -17,50 +18,43 @@ static GPU_DEVICE: OnceLock<GpuDevice> = OnceLock::new();
 
 fn get_gpu_device() -> anyhow::Result<&'static GpuDevice> {
     GPU_DEVICE.get_or_try_init(|| {
-        let (sender, receiver) = mpsc::sync_channel::<anyhow::Result<GpuDevice>>(0);
-        tokio::spawn(async move {
-            let f = || async {
-                // The instance is a handle to our GPU
-                // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
-                let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-                    backends: wgpu::Backends::all(),
-                    ..Default::default()
-                });
-
-                let adapter = instance
-                    .request_adapter(&wgpu::RequestAdapterOptions {
-                        power_preference: wgpu::PowerPreference::default(),
-                        compatible_surface: None,
-                        force_fallback_adapter: false,
-                    })
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Failed to request adapter"))?;
-
-                let (device, queue) = adapter
-                    .request_device(
-                        &wgpu::DeviceDescriptor {
-                            required_features: wgpu::Features::empty(),
-                            // WebGL doesn't support all of wgpu's features, so if
-                            // we're building for the web, we'll have to disable some.
-                            required_limits: if cfg!(target_arch = "wasm32") {
-                                wgpu::Limits::downlevel_webgl2_defaults()
-                            } else {
-                                wgpu::Limits::default()
-                            },
-                            label: None,
-                        },
-                        None, // Trace path
-                    )
-                    .await?;
-                Ok(GpuDevice { device, queue })
-            };
-            let _ = sender.send(f().await);
+        // The instance is a handle to our GPU
+        // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
         });
-        receiver.recv().unwrap()
+
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .block_on()
+            .ok_or_else(|| anyhow::anyhow!("Failed to request adapter"))?;
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    required_features: wgpu::Features::empty(),
+                    // WebGL doesn't support all of wgpu's features, so if
+                    // we're building for the web, we'll have to disable some.
+                    required_limits: if cfg!(target_arch = "wasm32") {
+                        wgpu::Limits::downlevel_webgl2_defaults()
+                    } else {
+                        wgpu::Limits::default()
+                    },
+                    label: None,
+                },
+                None, // Trace path
+            )
+            .block_on()?;
+        Ok(GpuDevice { device, queue })
     })
 }
 
-pub async fn create_compute<A, V>(
+pub fn create_compute<A, V>(
     shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>,
     arg_sizes: A::Sizes,
     ret_size: V::Size,
@@ -103,8 +97,7 @@ where
         return_staging_buffer.clone(),
         ret_size.size(),
         workgroup_size,
-    )
-    .await;
+    );
 
     Ok(move |args: A| {
         args.into_buffers(&arg_buffers, &queue);
@@ -137,7 +130,7 @@ struct State {
 
 impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(
+    fn new(
         shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>,
         arg_buffers: &[wgpu::Buffer],
         return_buffer: wgpu::Buffer,
