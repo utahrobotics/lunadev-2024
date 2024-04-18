@@ -18,8 +18,7 @@ use unros::{
     node::{AsyncNode, SyncNode},
     pubsub::{subs::Subscription, Subscriber},
     runtime::MainRuntimeContext,
-    setup_logging,
-    ShouldNotDrop
+    setup_logging, ShouldNotDrop,
 };
 
 mod actuators;

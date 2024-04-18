@@ -14,7 +14,7 @@ smach = { path = "../smach" }
 fxhash = { workspace = true }
 rand_distr = { workspace = true }
 rand = { workspace = true }
-eigenvalues = { path = "../eigenvalues" }
+eigenvalues = { git = "https://github.com/manglemix/eigenvalues.git" }
 crossbeam = { workspace = true }
 simba = { workspace = true }
 # ordered-float = { workspace = true }
