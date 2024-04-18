@@ -16,7 +16,7 @@ realsense-sys = { version = "2" }
 localization = { path = "../localization" }
 nalgebra = { workspace = true }
 rig = { path = "../rig" }
-ordered-float = { workspace = true }
+# ordered-float = { workspace = true }
 quaternion-core = { workspace = true }
 
 [dev-dependencies]

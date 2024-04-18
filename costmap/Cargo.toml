@@ -9,8 +9,6 @@ edition = "2021"
 unros = { path = "../unros" }
 nalgebra = { workspace = true }
 image = { workspace = true, optional = false }
-spin_sleep = { workspace = true }
-ordered-float = { workspace = true }
 simba = { workspace = true }
 quadtree_rs = "0.1"
 rig = { path = "../rig" }
