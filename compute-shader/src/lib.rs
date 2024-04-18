@@ -60,48 +60,6 @@ async fn get_gpu_device() -> anyhow::Result<&'static GpuDevice> {
         .await
 }
 
-pub async fn create_compute<A, V>(
-    shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>,
-    arg_sizes: A::Sizes,
-    return_size: V::Size,
-    workgroup_size: (u32, u32, u32),
-) -> anyhow::Result<Compute<A, V>>
-where
-    A: IntoBuffers,
-    V: FromBuffer,
-{
-    let GpuDevice { device, .. } = get_gpu_device().await?;
-    let arg_buffers: Box<[_]> = arg_sizes
-        .into_iter()
-        .enumerate()
-        .map(|(i, size)| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("Arg Buffer {i}")),
-                size: size,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
-        })
-        .collect();
-
-    let state = State::new(
-        shader_module_decsriptor,
-        &arg_buffers,
-        return_size.size(),
-        workgroup_size,
-        device,
-    )
-    .await;
-
-    Ok(Compute {
-        return_recv: Arc::default(),
-        return_size,
-        arg_buffers,
-        state,
-        phantom: std::marker::PhantomData,
-    })
-}
-
 pub struct Compute<A, V: FromBuffer> {
     return_recv: Arc<SegQueue<V::Receiver>>,
     return_size: V::Size,
@@ -111,6 +69,43 @@ pub struct Compute<A, V: FromBuffer> {
 }
 
 impl<A: IntoBuffers, V: FromBuffer> Compute<A, V> {
+    pub async fn new(
+        shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>,
+        arg_sizes: A::Sizes,
+        return_size: V::Size,
+        workgroup_size: (u32, u32, u32),
+    ) -> anyhow::Result<Self> {
+        let GpuDevice { device, .. } = get_gpu_device().await?;
+        let arg_buffers: Box<[_]> = arg_sizes
+            .into_iter()
+            .enumerate()
+            .map(|(i, size)| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("Arg Buffer {i}")),
+                    size: size,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect();
+
+        let state = State::new(
+            shader_module_decsriptor,
+            &arg_buffers,
+            return_size.size(),
+            workgroup_size,
+            device,
+        )
+        .await;
+
+        Ok(Self {
+            return_recv: Arc::default(),
+            return_size,
+            arg_buffers,
+            state,
+            phantom: std::marker::PhantomData,
+        })
+    }
     pub fn provide_return_recv(&mut self, recv: V::Receiver) {
         self.return_recv.push(recv);
     }

@@ -1,5 +1,5 @@
 use compute_shader::buffers::DynamicSize;
-use compute_shader::create_compute;
+use compute_shader::Compute;
 use std::sync::Arc;
 use wgpu::include_wgsl;
 
@@ -7,7 +7,7 @@ use wgpu::include_wgsl;
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let compute = create_compute::<(&[f32],), Vec<f32>>(
+    let compute = Compute::<(&[f32],), Vec<f32>>::new(
         include_wgsl!("mul2.wgsl"),
         (DynamicSize::new(4),),
         DynamicSize::new(4),
