@@ -1,12 +1,10 @@
 #![feature(once_cell_try)]
-use std::{
-    mem::size_of,
-    sync::{mpsc, Arc, OnceLock},
-};
+use std::
+    sync::{mpsc, Arc, OnceLock}
+;
 
-use buffers::IntoBuffers;
+use buffers::{BufferSizeIter, FromBuffer, IntoBuffers, BufferSize};
 pub use bytemuck;
-use bytemuck::bytes_of_mut;
 pub use wgpu;
 use wgpu::MapMode;
 
@@ -66,19 +64,21 @@ fn get_gpu_device() -> anyhow::Result<&'static GpuDevice> {
 
 pub async fn create_compute<A, V>(
     shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>,
+    arg_sizes: A::Sizes,
+    ret_size: V::Size
 ) -> anyhow::Result<impl FnMut(A) -> V>
 where
     A: IntoBuffers,
-    V: bytemuck::Pod,
+    V: FromBuffer,
 {
     let GpuDevice { device, queue } = get_gpu_device()?;
-    let arg_buffers: Box<[_]> = A::sizes()
+    let arg_buffers: Box<[_]> = arg_sizes
         .into_iter()
         .enumerate()
         .map(|(i, size)| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("Arg Buffer {i}")),
-                size: size as u64,
+                size: size,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -86,13 +86,13 @@ where
         .collect();
     let return_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(&format!("Return Buffer")),
-        size: size_of::<V>() as u64,
+        size: ret_size.size(),
         mapped_at_creation: false,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
     let return_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(&format!("Return Buffer")),
-        size: size_of::<V>() as u64,
+        size: ret_size.size(),
         mapped_at_creation: false,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
     });
@@ -102,7 +102,7 @@ where
         &arg_buffers,
         return_buffer,
         return_staging_buffer.clone(),
-        size_of::<V>() as u64,
+        ret_size.size(),
     )
     .await;
 
@@ -119,11 +119,7 @@ where
         queue.submit(std::iter::empty());
         let _ = receiver.recv();
 
-        let mut return_val = V::zeroed();
-        let return_val_bytes = bytes_of_mut(&mut return_val);
-        return_val_bytes.copy_from_slice(&return_staging_buffer.slice(..).get_mapped_range());
-        return_staging_buffer.unmap();
-        return_val
+        V::from_buffer(&return_staging_buffer.slice(..).get_mapped_range(), ret_size)
     })
 }
 
