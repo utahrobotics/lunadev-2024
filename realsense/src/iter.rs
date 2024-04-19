@@ -6,11 +6,13 @@ use nalgebra::Point3;
 #[derive(Clone)]
 pub struct RealSensePoints {
     pub(crate) buffer: Arc<ReturnBuffer<[[f32; 4]]>>,
+    pub(crate) len: usize,
 }
 
 pub struct RealSensePointsIter {
     buffer: Arc<ReturnBuffer<[[f32; 4]]>>,
     index: usize,
+    len: usize,
 }
 
 impl IntoIterator for RealSensePoints {
@@ -21,6 +23,7 @@ impl IntoIterator for RealSensePoints {
         RealSensePointsIter {
             buffer: self.buffer,
             index: 0,
+            len: self.len,
         }
     }
 }
@@ -40,9 +43,8 @@ impl Iterator for RealSensePointsIter {
     }
 }
 
-
 impl ExactSizeIterator for RealSensePointsIter {
     fn len(&self) -> usize {
-        self.buffer.len()
+        self.len
     }
 }

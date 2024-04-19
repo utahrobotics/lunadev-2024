@@ -308,7 +308,10 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
         self.quadtree_sub
             .create_subscription()
             .filter_map(move |original_points: Points<T>| {
-                let original_points_iter = original_points.points.into_iter().map(|mut p| {
+                let original_points_iter = original_points.points.into_iter();
+                let size = original_points_iter.len();
+
+                let mapper = |mut p: Point3<N>| {
                     let iso: Isometry3<N> =
                         nalgebra::convert(original_points.robot_element.get_isometry_from_base());
                     p = iso.transform_point(&p);
@@ -318,25 +321,29 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
                         (p.z / resolution).round().to_subset_unchecked(),
                     );
                     (pt, p.y)
-                });
-                let size = original_points_iter.len();
+                };
+
                 if size > max_points {
                     let extra_per_chunk = size as f32 / max_points as f32 - 1.0;
-                    println!("{} {} {}", size, extra_per_chunk, max_points);
                     let mut running_extra = 0.0;
-                    points.reserve(max_points.saturating_sub(points.capacity()));
-                    points.extend(original_points_iter.filter_map(|x| {
-                        if running_extra >= 1.0 {
-                            running_extra -= 1.0;
-                            None
-                        } else {
-                            running_extra += extra_per_chunk;
-                            Some(x)
-                        }
-                    }));
+                    // +1 for occasional off by 1 error
+                    points.reserve((max_points + 1).saturating_sub(points.capacity()));
+                    points.extend(
+                        original_points_iter
+                            .filter_map(|x| {
+                                if running_extra >= 1.0 {
+                                    running_extra -= 1.0;
+                                    None
+                                } else {
+                                    running_extra += extra_per_chunk;
+                                    Some(x)
+                                }
+                            })
+                            .map(mapper),
+                    );
                 } else {
                     points.reserve(size.saturating_sub(points.capacity()));
-                    points.extend(original_points_iter);
+                    points.extend(original_points_iter.map(mapper));
                 }
 
                 let mut points_iter = points.iter().copied();
@@ -381,7 +388,6 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
                 let mut max_density = 0;
 
                 let mut quadtree = Quadtree::<usize, HeightCell<N>>::new(depth);
-                println!("{}", points.len());
 
                 for (point, height) in points.drain(..) {
                     let mut modified_count = AtomicUsize::default();

@@ -294,6 +294,7 @@ impl SyncNode for RealSenseCamera {
                 // total.normalize_mut();
                 // println!("{total}");
                 self.point_cloud_received.set(RealSensePoints {
+                    len: points_buf.iter().filter(|[_, _, _, v]| *v == 1.0).count(),
                     buffer: Arc::new(points_buf),
                 });
             }

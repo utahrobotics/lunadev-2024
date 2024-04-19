@@ -1,8 +1,8 @@
 use compute_shader::buffers::DynamicSize;
 use compute_shader::Compute;
+use std::ops::Deref;
 use std::sync::Arc;
 use wgpu::include_wgsl;
-use std::ops::Deref;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
