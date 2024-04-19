@@ -1,6 +1,6 @@
 use costmap::CostmapGenerator;
 use realsense::discover_all_realsense;
-use realsense::PointCloud;
+use realsense::RealSensePoints;
 use rig::Robot;
 use std::hash::BuildHasherDefault;
 use std::hash::DefaultHasher;
@@ -35,13 +35,15 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         let camera_element_ref = camera_element.get_ref();
         camera
             .cloud_received_pub()
-            .accept_subscription(costmap.create_points_sub(0.1).map(move |x: PointCloud| {
-                rate.increment();
-                Points {
-                    points: x.iter().map(|x| x.0),
-                    robot_element: camera_element_ref.clone(),
-                }
-            }));
+            .accept_subscription(costmap.create_points_sub(0.1).map(
+                move |points: RealSensePoints| {
+                    rate.increment();
+                    Points {
+                        points,
+                        robot_element: camera_element_ref.clone(),
+                    }
+                },
+            ));
 
         camera
     };

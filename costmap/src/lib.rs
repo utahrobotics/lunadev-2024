@@ -275,6 +275,7 @@ impl<
 pub struct CostmapGenerator<N: RealField + Copy = f32> {
     pub threshold: N,
     pub window_length: usize,
+    pub max_points_in_frame: usize,
     quadtree_sub: Subscriber<CostmapFrame<N>>,
     dont_drop: DontDrop<Self>,
     costmap_pub: Publisher<Costmap<N>>,
@@ -287,6 +288,7 @@ impl CostmapGenerator {
             threshold: 0.2,
             window_length: 3,
             quadtree_sub: Subscriber::new(frame_buffer_size),
+            max_points_in_frame: 5000,
             dont_drop: DontDrop::new("costmap-generator"),
             costmap_pub: Default::default(),
             robot_base_ref,
@@ -297,29 +299,45 @@ impl CostmapGenerator {
 impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerator<N> {
     pub fn create_points_sub<T>(&self, resolution: N) -> impl Subscription<Item = Points<T>>
     where
-        T: IntoIterator<Item = Point3<N>>,
+        T: IntoIterator<Item = Point3<N>, IntoIter: ExactSizeIterator>,
         f32: SubsetOf<N>,
     {
         assert!(resolution.is_positive());
+        let mut points = vec![];
+        let max_points = self.max_points_in_frame;
         self.quadtree_sub
             .create_subscription()
             .filter_map(move |original_points: Points<T>| {
-                let points: Box<[_]> = original_points
-                    .points
-                    .into_iter()
-                    .map(|mut p| {
-                        let iso: Isometry3<N> = nalgebra::convert(
-                            original_points.robot_element.get_isometry_from_base(),
-                        );
-                        p = iso.transform_point(&p);
+                let original_points_iter = original_points.points.into_iter().map(|mut p| {
+                    let iso: Isometry3<N> =
+                        nalgebra::convert(original_points.robot_element.get_isometry_from_base());
+                    p = iso.transform_point(&p);
 
-                        let pt = Point2::<isize>::new(
-                            (p.x / resolution).round().to_subset_unchecked(),
-                            (p.z / resolution).round().to_subset_unchecked(),
-                        );
-                        (pt, p.y)
-                    })
-                    .collect();
+                    let pt = Point2::<isize>::new(
+                        (p.x / resolution).round().to_subset_unchecked(),
+                        (p.z / resolution).round().to_subset_unchecked(),
+                    );
+                    (pt, p.y)
+                });
+                let size = original_points_iter.len();
+                if size > max_points {
+                    let extra_per_chunk = size as f32 / max_points as f32 - 1.0;
+                    println!("{} {} {}", size, extra_per_chunk, max_points);
+                    let mut running_extra = 0.0;
+                    points.reserve(max_points.saturating_sub(points.capacity()));
+                    points.extend(original_points_iter.filter_map(|x| {
+                        if running_extra >= 1.0 {
+                            running_extra -= 1.0;
+                            None
+                        } else {
+                            running_extra += extra_per_chunk;
+                            Some(x)
+                        }
+                    }));
+                } else {
+                    points.reserve(size.saturating_sub(points.capacity()));
+                    points.extend(original_points_iter);
+                }
 
                 let mut points_iter = points.iter().copied();
                 let Some((first_point, first_height)) = points_iter.next() else {
@@ -363,8 +381,9 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
                 let mut max_density = 0;
 
                 let mut quadtree = Quadtree::<usize, HeightCell<N>>::new(depth);
+                println!("{}", points.len());
 
-                for (point, height) in points.iter().copied() {
+                for (point, height) in points.drain(..) {
                     let mut modified_count = AtomicUsize::default();
 
                     let anchor = quadtree_rs::point::Point {

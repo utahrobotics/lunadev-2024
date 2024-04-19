@@ -1,4 +1,10 @@
-use std::{marker::PhantomData, mem::size_of, num::NonZeroU64, ops::{Deref, DerefMut}, sync::Arc};
+use std::{
+    marker::PhantomData,
+    mem::size_of,
+    num::NonZeroU64,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use bytemuck::{bytes_of, from_bytes_mut};
 use crossbeam::queue::SegQueue;
@@ -257,19 +263,16 @@ impl<T: bytemuck::Pod + Send> FromBuffer for [T] {
         if buffer.len() % size_of::<T>() != 0 {
             panic!("Buffer size is not a multiple of the size of T");
         }
-        let items: &mut [T] = unsafe {
-            std::mem::transmute(buffer)
-        };
-        items
+        let count = buffer.len() / size_of::<T>();
+        unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), count) }
     }
 }
 
 pub struct ReturnBuffer<T: ?Sized> {
     buffer: Arc<wgpu::Buffer>,
     pointer: *mut T,
-    buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>
+    buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
 }
-
 
 impl<T: FromBuffer + ?Sized> ReturnBuffer<T> {
     pub fn new(buffer: Arc<wgpu::Buffer>, buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>) -> Self {
@@ -280,39 +283,49 @@ impl<T: FromBuffer + ?Sized> ReturnBuffer<T> {
         Self {
             buffer,
             pointer,
-            buffer_queue
+            buffer_queue,
         }
     }
 }
 
-
-impl<T: FromBuffer> Deref for ReturnBuffer<T> {
+impl<T: ?Sized> Deref for ReturnBuffer<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe {
-            &*self.pointer
-        }
+        unsafe { &*self.pointer }
     }
 }
 
-
-impl<T: FromBuffer> DerefMut for ReturnBuffer<T> {
+impl<T: ?Sized> DerefMut for ReturnBuffer<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe {
-            &mut *self.pointer
-        }
+        unsafe { &mut *self.pointer }
     }
 }
-
 
 unsafe impl<T: Send + ?Sized> Send for ReturnBuffer<T> {}
 unsafe impl<T: Sync + ?Sized> Sync for ReturnBuffer<T> {}
-
 
 impl<T: ?Sized> Drop for ReturnBuffer<T> {
     fn drop(&mut self) {
         self.buffer.unmap();
         self.buffer_queue.push(self.buffer.clone());
+    }
+}
+
+impl<'a, T> IntoIterator for &'a ReturnBuffer<[T]> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.deref().iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut ReturnBuffer<[T]> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.deref_mut().iter_mut()
     }
 }

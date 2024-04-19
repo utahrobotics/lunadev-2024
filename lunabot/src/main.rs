@@ -10,7 +10,7 @@ use localization::{
 use nalgebra::Point3;
 use navigator::{pathfinding::Pathfinder, DifferentialDriver};
 #[cfg(unix)]
-use realsense::{discover_all_realsense, PointCloud};
+use realsense::{discover_all_realsense, RealSensePoints};
 use rig::Robot;
 use telemetry::Telemetry;
 use unros::{
@@ -190,8 +190,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 camera.cloud_received_pub().accept_subscription(
                     costmap
                         .create_points_sub(0.1)
-                        .map(move |x: PointCloud| Points {
-                            points: x.iter().map(|x| x.0),
+                        .map(move |points: RealSensePoints| Points {
+                            points,
                             robot_element: camera_element_ref.clone(),
                         }),
                 );

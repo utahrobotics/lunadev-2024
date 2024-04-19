@@ -1,4 +1,3 @@
-
 use std::sync::Arc;
 
 use buffers::{BufferSize, BufferSizeIter, FromBuffer, IntoBuffer, IntoBuffers, ReturnBuffer};
@@ -156,7 +155,10 @@ impl<A: IntoBuffers, V: FromBuffer + ?Sized> Compute<A, V> {
             device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(idx));
             let buffer = return_staging_buffer.clone();
             buffer.slice(..).map_async(MapMode::Read, move |_| {
-                let _ = sender.send(ReturnBuffer::new(return_staging_buffer, return_staging_buffers));
+                let _ = sender.send(ReturnBuffer::new(
+                    return_staging_buffer,
+                    return_staging_buffers,
+                ));
             });
             device.poll(wgpu::MaintainBase::Poll);
         });
@@ -176,7 +178,9 @@ impl<T: IntoBuffer, T1: IntoBuffer, V: FromBuffer + ?Sized> Compute<(T, T1), V> 
     }
 }
 
-impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, V: FromBuffer + ?Sized> Compute<(T, T1, T2), V> {
+impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, V: FromBuffer + ?Sized>
+    Compute<(T, T1, T2), V>
+{
     pub async fn call(&self, arg1: T, arg2: T1, arg3: T2) -> ReturnBuffer<V> {
         self.call_inner((arg1, arg2, arg3)).await
     }

@@ -7,15 +7,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::iter::{ArcIter, ArcParIter};
 use compute_shader::{
     buffers::{DynamicSize, StaticSize},
     wgpu::include_wgsl,
     Compute,
 };
-use image::{DynamicImage, Rgb};
+use image::DynamicImage;
 use localization::frames::IMUFrame;
-use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use pollster::FutureExt;
 use realsense_rust::{
     config::Config,
@@ -31,31 +30,11 @@ use unros::{
     anyhow,
     node::SyncNode,
     pubsub::{Publisher, PublisherRef},
-    rayon::iter::{ParallelDrainRange, ParallelIterator},
     runtime::RuntimeContext,
     setup_logging, DontDrop, ShouldNotDrop,
 };
 
-#[derive(Clone)]
-pub struct PointCloud {
-    /// An array of points in *global* space.
-    ///
-    /// The points have already been transformed
-    /// to global space as efficient processing
-    /// of this transformation is a hefty implementation
-    /// detail that users need not worry
-    /// about.
-    pub points: Arc<[(Point3<f32>, image::Rgb<u8>)]>,
-}
-
-impl PointCloud {
-    pub fn par_iter(&self) -> ArcParIter<(Point3<f32>, image::Rgb<u8>)> {
-        ArcParIter::new(self.points.clone())
-    }
-    pub fn iter(&self) -> ArcIter<(Point3<f32>, image::Rgb<u8>)> {
-        ArcIter::new(self.points.clone())
-    }
-}
+pub use crate::iter::{RealSensePoints, RealSensePointsIter};
 
 /// A connection to a RealSense Camera.
 #[derive(ShouldNotDrop)]
@@ -63,7 +42,7 @@ pub struct RealSenseCamera {
     device: Device,
     context: Arc<Mutex<Context>>,
     image_received: Publisher<Arc<DynamicImage>>,
-    point_cloud_received: Publisher<PointCloud>,
+    point_cloud_received: Publisher<RealSensePoints>,
     imu_frame_received: Publisher<IMUFrame<f32>>,
     robot_element: Option<RobotElementRef>,
     pub focal_length_frac: f32,
@@ -96,7 +75,7 @@ impl RealSenseCamera {
         self.image_received.get_ref()
     }
 
-    pub fn cloud_received_pub(&self) -> PublisherRef<PointCloud> {
+    pub fn cloud_received_pub(&self) -> PublisherRef<RealSensePoints> {
         self.point_cloud_received.get_ref()
     }
 
@@ -208,23 +187,22 @@ impl SyncNode for RealSenseCamera {
                     })
             })
             .collect();
-        let compute: Compute<(Option<&[[f32; 3]]>, &[u32], &f32, &f32), [[f32; 4]]> =
-            Compute::new(
-                include_wgsl!("project.wgsl"),
-                (
-                    DynamicSize::new(rays.len()),
-                    DynamicSize::new(rays.len() / 2),
-                    StaticSize::default(),
-                    StaticSize::default(),
-                ),
+        let compute: Compute<(Option<&[[f32; 3]]>, &[u32], &f32, &f32), [[f32; 4]]> = Compute::new(
+            include_wgsl!("project.wgsl"),
+            (
                 DynamicSize::new(rays.len()),
-                (
-                    (depth_intrinsics.width() / 2) as u32,
-                    depth_intrinsics.height() as u32,
-                    1,
-                ),
-            )
-            .block_on()?;
+                DynamicSize::new(rays.len() / 2),
+                StaticSize::default(),
+                StaticSize::default(),
+            ),
+            DynamicSize::new(rays.len()),
+            (
+                (depth_intrinsics.width() / 2) as u32,
+                depth_intrinsics.height() as u32,
+                1,
+            ),
+        )
+        .block_on()?;
         let mut rays = Some(rays);
 
         // let mut depth_buffer = vec![];
@@ -303,43 +281,6 @@ impl SyncNode for RealSenseCamera {
                         &scale,
                     )
                     .block_on();
-                let points: Arc<[_]> = points_buf.par_drain(..)
-                    .filter_map(|[x, y, z, v]| {
-                        if v == 0.0 {
-                            return None;
-                        }
-                        Some((Point3::new(x, y, z), Rgb([0; 3])))
-                    })
-                    .collect();
-                // let points = Arc::new([]);
-
-                // assert_eq!(frame.width(), depth_intrinsics.width());
-                // assert_eq!(frame.height(), depth_intrinsics.height());
-
-                // let points: Arc<[_]> = (0..frame.height())
-                //     .into_iter()
-                //     .filter(|y| y % self.skip_n == 0)
-                //     .flat_map(|y| {
-                //         (0..frame.width())
-                //             .into_iter()
-                //             .filter(|x| x % self.skip_n == 0)
-                //             .zip(std::iter::repeat(y))
-                //     })
-                //     .enumerate()
-                //     .filter_map(|(i, (x, y))| {
-                //         let px = frame.get(x, y).unwrap();
-
-                //         let PixelKind::Z16 { depth } = px else {
-                //             unreachable!()
-                //         };
-                //         let depth = *depth as f32 * scale;
-                //         if depth < self.min_distance {
-                //             return None;
-                //         }
-                //         // None
-                //         Some(((rays[i].scale(depth)).into(), Rgb([0; 3])))
-                //     })
-                //     .collect();
 
                 // use unros::rayon::iter::{IntoParallelIterator, ParallelIterator};
                 // let min_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).min().unwrap().into_inner();
@@ -352,7 +293,9 @@ impl SyncNode for RealSenseCamera {
                 // let mut total: Vector3<f32> = points.into_par_iter().map(|p| (p.0.coords - origin).normalize()).sum();
                 // total.normalize_mut();
                 // println!("{total}");
-                self.point_cloud_received.set(PointCloud { points });
+                self.point_cloud_received.set(RealSensePoints {
+                    buffer: Arc::new(points_buf),
+                });
             }
         }
     }

@@ -2,12 +2,13 @@ use compute_shader::buffers::DynamicSize;
 use compute_shader::Compute;
 use std::sync::Arc;
 use wgpu::include_wgsl;
+use std::ops::Deref;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let compute = Compute::<(&[f32],), Vec<f32>>::new(
+    let compute = Compute::<(&[f32],), [f32]>::new(
         include_wgsl!("mul2.wgsl"),
         (DynamicSize::new(4),),
         DynamicSize::new(4),
@@ -21,14 +22,14 @@ async fn main() -> anyhow::Result<()> {
         for _ in 0..100 {
             assert_eq!(
                 "[4.0, 4.6, 3.2, 15.2]",
-                format!("{:?}", compute2.call(&[2.0, 2.3, 1.6, 7.6]).await)
+                format!("{:?}", compute2.call(&[2.0, 2.3, 1.6, 7.6]).await.deref())
             );
         }
     });
     for _ in 0..100 {
         assert_eq!(
             "[9.4, 12.6, 13.8, 4.2]",
-            format!("{:?}", compute.call(&[4.7, 6.3, 6.9, 2.1]).await)
+            format!("{:?}", compute.call(&[4.7, 6.3, 6.9, 2.1]).await.deref())
         );
     }
     task.await.unwrap();
