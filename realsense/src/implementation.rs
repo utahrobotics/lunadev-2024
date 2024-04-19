@@ -8,14 +8,20 @@ use std::{
 };
 
 use crate::iter::{ArcIter, ArcParIter};
+use compute_shader::{
+    buffers::{DynamicSize, StaticSize},
+    wgpu::include_wgsl,
+    Compute,
+};
 use image::{DynamicImage, Rgb};
 use localization::frames::IMUFrame;
 use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
+use pollster::FutureExt;
 use realsense_rust::{
     config::Config,
     context::Context,
     device::Device,
-    frame::{AccelFrame, DepthFrame, GyroFrame, PixelKind},
+    frame::{AccelFrame, DepthFrame, GyroFrame},
     kind::{Rs2CameraInfo, Rs2Format, Rs2StreamKind},
     pipeline::InactivePipeline,
 };
@@ -25,6 +31,7 @@ use unros::{
     anyhow,
     node::SyncNode,
     pubsub::{Publisher, PublisherRef},
+    rayon::iter::{ParallelDrainRange, ParallelIterator},
     runtime::RuntimeContext,
     setup_logging, DontDrop, ShouldNotDrop,
 };
@@ -180,11 +187,9 @@ impl SyncNode for RealSenseCamera {
 
         let rays: Box<[_]> = (0..depth_intrinsics.height())
             .into_iter()
-            .filter(|y| y % self.skip_n == 0)
             .flat_map(|y| {
                 (0..depth_intrinsics.width())
                     .into_iter()
-                    .filter(|x| x % self.skip_n == 0)
                     .zip(std::iter::repeat(y))
                     .map(|(x, y)| {
                         let mut ray = [0.0f32; 3];
@@ -199,10 +204,28 @@ impl SyncNode for RealSenseCamera {
                             );
                         }
 
-                        Vector3::new(ray[0], ray[1], -ray[2])
+                        [ray[0], ray[1], -ray[2]]
                     })
             })
             .collect();
+        let compute: Compute<(Option<&[[f32; 3]]>, &[u32], &f32, &f32), [[f32; 4]]> =
+            Compute::new(
+                include_wgsl!("project.wgsl"),
+                (
+                    DynamicSize::new(rays.len()),
+                    DynamicSize::new(rays.len() / 2),
+                    StaticSize::default(),
+                    StaticSize::default(),
+                ),
+                DynamicSize::new(rays.len()),
+                (
+                    (depth_intrinsics.width() / 2) as u32,
+                    depth_intrinsics.height() as u32,
+                    1,
+                ),
+            )
+            .block_on()?;
+        let mut rays = Some(rays);
 
         // let mut depth_buffer = vec![];
 
@@ -267,36 +290,58 @@ impl SyncNode for RealSenseCamera {
 
             for frame in frames.frames_of_type::<DepthFrame>() {
                 let scale = frame.depth_units().unwrap();
+                let depths = unsafe {
+                    let ptr: *const _ = frame.get_data();
+                    let ptr: *const u32 = ptr.cast();
+                    std::slice::from_raw_parts(ptr, frame.width() * frame.height() / 2)
+                };
+                let points_buf = compute
+                    .call(
+                        rays.take().as_ref().map(|x| x.deref()),
+                        depths,
+                        &self.min_distance,
+                        &scale,
+                    )
+                    .block_on();
+                let points: Arc<[_]> = points_buf.par_drain(..)
+                    .filter_map(|[x, y, z, v]| {
+                        if v == 0.0 {
+                            return None;
+                        }
+                        Some((Point3::new(x, y, z), Rgb([0; 3])))
+                    })
+                    .collect();
+                // let points = Arc::new([]);
 
                 // assert_eq!(frame.width(), depth_intrinsics.width());
                 // assert_eq!(frame.height(), depth_intrinsics.height());
 
-                let points: Arc<[_]> = (0..frame.height())
-                    .into_iter()
-                    .filter(|y| y % self.skip_n == 0)
-                    .flat_map(|y| {
-                        (0..frame.width())
-                            .into_iter()
-                            .filter(|x| x % self.skip_n == 0)
-                            .zip(std::iter::repeat(y))
-                    })
-                    .enumerate()
-                    .filter_map(|(i, (x, y))| {
-                        let px = frame.get(x, y).unwrap();
+                // let points: Arc<[_]> = (0..frame.height())
+                //     .into_iter()
+                //     .filter(|y| y % self.skip_n == 0)
+                //     .flat_map(|y| {
+                //         (0..frame.width())
+                //             .into_iter()
+                //             .filter(|x| x % self.skip_n == 0)
+                //             .zip(std::iter::repeat(y))
+                //     })
+                //     .enumerate()
+                //     .filter_map(|(i, (x, y))| {
+                //         let px = frame.get(x, y).unwrap();
 
-                        let PixelKind::Z16 { depth } = px else {
-                            unreachable!()
-                        };
-                        let depth = *depth as f32 * scale;
-                        if depth < self.min_distance {
-                            return None;
-                        }
-                        // None
-                        Some(((rays[i].scale(depth)).into(), Rgb([0; 3])))
-                    })
-                    .collect();
+                //         let PixelKind::Z16 { depth } = px else {
+                //             unreachable!()
+                //         };
+                //         let depth = *depth as f32 * scale;
+                //         if depth < self.min_distance {
+                //             return None;
+                //         }
+                //         // None
+                //         Some(((rays[i].scale(depth)).into(), Rgb([0; 3])))
+                //     })
+                //     .collect();
 
-                // use unros::rayon::iter::IntoParallelIterator;
+                // use unros::rayon::iter::{IntoParallelIterator, ParallelIterator};
                 // let min_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).min().unwrap().into_inner();
                 // let max_x = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.x).unwrap()).max().unwrap().into_inner();
                 // let min_y = points.into_par_iter().map(|p| ordered_float::NotNan::new(p.0.y).unwrap()).min().unwrap().into_inner();

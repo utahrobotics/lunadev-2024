@@ -1,18 +1,17 @@
-#![feature(once_cell_try)]
-use std::sync::{Arc, Mutex};
 
-use buffers::{BufferSize, BufferSizeIter, FromBuffer, IntoBuffer, IntoBuffers};
-pub use bytemuck;
-use crossbeam::{queue::SegQueue, utils::Backoff};
+use std::sync::Arc;
+
+use buffers::{BufferSize, BufferSizeIter, FromBuffer, IntoBuffer, IntoBuffers, ReturnBuffer};
+use crossbeam::queue::SegQueue;
 use tokio::sync::{oneshot, OnceCell};
 pub use wgpu;
-use wgpu::MapMode;
+use wgpu::{util::StagingBelt, MapMode};
 
 pub mod buffers;
 
 struct GpuDevice {
     device: wgpu::Device,
-    queue: Mutex<wgpu::Queue>,
+    queue: wgpu::Queue,
 }
 
 static GPU_DEVICE: OnceCell<GpuDevice> = OnceCell::const_new();
@@ -52,23 +51,20 @@ async fn get_gpu_device() -> anyhow::Result<&'static GpuDevice> {
                     None, // Trace path
                 )
                 .await?;
-            Ok(GpuDevice {
-                device,
-                queue: Mutex::new(queue),
-            })
+            Ok(GpuDevice { device, queue })
         })
         .await
 }
 
-pub struct Compute<A, V: FromBuffer> {
-    return_recv: Arc<SegQueue<V::Receiver>>,
-    return_size: V::Size,
+pub struct Compute<A, V: ?Sized> {
     arg_buffers: Box<[wgpu::Buffer]>,
+    staging_belt_size: u64,
     state: State,
-    phantom: std::marker::PhantomData<A>,
+    staging_belts: Arc<SegQueue<StagingBelt>>,
+    phantom: std::marker::PhantomData<(A, V)>,
 }
 
-impl<A: IntoBuffers, V: FromBuffer> Compute<A, V> {
+impl<A: IntoBuffers, V: FromBuffer + ?Sized> Compute<A, V> {
     pub async fn new(
         shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>,
         arg_sizes: A::Sizes,
@@ -83,11 +79,13 @@ impl<A: IntoBuffers, V: FromBuffer> Compute<A, V> {
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(&format!("Arg Buffer {i}")),
                     size: size,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 })
             })
             .collect();
+
+        let staging_belt_size = arg_sizes.into_iter().max().unwrap() as u64;
 
         let state = State::new(
             shader_module_decsriptor,
@@ -99,75 +97,96 @@ impl<A: IntoBuffers, V: FromBuffer> Compute<A, V> {
         .await;
 
         Ok(Self {
-            return_recv: Arc::default(),
-            return_size,
+            staging_belts: Arc::default(),
+            staging_belt_size,
             arg_buffers,
             state,
             phantom: std::marker::PhantomData,
         })
     }
-    pub fn provide_return_recv(&mut self, recv: V::Receiver) {
-        self.return_recv.push(recv);
-    }
 
-    async fn call_inner(&self, args: A) -> V {
-        let (sender, receiver) = oneshot::channel();
+    async fn call_inner(&self, args: A) -> ReturnBuffer<V> {
+        let GpuDevice { queue, device } = get_gpu_device().await.unwrap();
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Render Encoder"),
+        });
+        let mut stager = self
+            .staging_belts
+            .pop()
+            .unwrap_or_else(|| StagingBelt::new(self.staging_belt_size));
+        args.into_buffers(&mut encoder, &self.arg_buffers, &mut stager, device);
+        stager.finish();
         {
-            let GpuDevice { queue, device } = get_gpu_device().await.unwrap();
-            let queue_guard = queue.lock().unwrap();
-            // println!("lock_buf");
-            args.into_buffers(&self.arg_buffers, &queue_guard);
-            // println!("unlock_buf");
-            let ret_size = self.return_size;
-            let recv = self.return_recv.pop().unwrap_or_default();
-            self.state.run(
-                move |buffer, buffer_queue| {
-                    let mut buffer = Arc::new(buffer);
-                    let buffer2 = buffer.clone();
-                    buffer.slice(..).map_async(MapMode::Read, move |_| {
-                        let _ = sender.send(V::from_buffer(
-                            recv,
-                            &buffer2.slice(..).get_mapped_range(),
-                            ret_size,
-                        ));
-                        buffer2.unmap();
-                    });
-                    // println!("lock_queue");
-                    let idx = queue.lock().unwrap().submit(std::iter::empty());
-                    // println!("unlock_queue");
-                    device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(idx));
-                    let backoff = Backoff::new();
-                    loop {
-                        match Arc::try_unwrap(buffer) {
-                            Ok(x) => {
-                                buffer_queue.push(x);
-                                break;
-                            }
-                            Err(e) => {
-                                buffer = e;
-                                backoff.snooze();
-                                continue;
-                            }
-                        }
-                    }
-                },
-                device,
-                &queue_guard,
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Render Pass"),
+                timestamp_writes: None,
+            });
+
+            compute_pass.set_pipeline(&self.state.compute_pipeline);
+            compute_pass.set_bind_group(0, &self.state.bind_group, &[]);
+            compute_pass.dispatch_workgroups(
+                self.state.workgroup_size.0,
+                self.state.workgroup_size.1,
+                self.state.workgroup_size.2,
             );
         }
+        let return_staging_buffer = self.state.return_staging_buffers.pop().unwrap_or_else(|| {
+            Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Return Buffer")),
+                size: self.state.return_size,
+                mapped_at_creation: false,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            }))
+        });
+        encoder.copy_buffer_to_buffer(
+            &self.state.return_buffer,
+            0,
+            &return_staging_buffer,
+            0,
+            self.state.return_size,
+        );
+        let return_staging_buffers = self.state.return_staging_buffers.clone();
+
+        let idx = queue.submit(std::iter::once(encoder.finish()));
+        stager.recall();
+        self.staging_belts.push(stager);
+        let (sender, receiver) = oneshot::channel();
+        rayon::spawn(move || {
+            device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(idx));
+            let buffer = return_staging_buffer.clone();
+            buffer.slice(..).map_async(MapMode::Read, move |_| {
+                let _ = sender.send(ReturnBuffer::new(return_staging_buffer, return_staging_buffers));
+            });
+            device.poll(wgpu::MaintainBase::Poll);
+        });
         receiver.await.unwrap()
     }
 }
 
-impl<T: IntoBuffer, V: FromBuffer> Compute<(T,), V> {
-    pub async fn call(&self, arg: T) -> V {
+impl<T: IntoBuffer, V: FromBuffer + ?Sized> Compute<(T,), V> {
+    pub async fn call(&self, arg: T) -> ReturnBuffer<V> {
         self.call_inner((arg,)).await
     }
 }
 
-impl<T: IntoBuffer, T1: IntoBuffer, V: FromBuffer> Compute<(T, T1), V> {
-    pub async fn call(&self, arg1: T, arg2: T1) -> V {
+impl<T: IntoBuffer, T1: IntoBuffer, V: FromBuffer + ?Sized> Compute<(T, T1), V> {
+    pub async fn call(&self, arg1: T, arg2: T1) -> ReturnBuffer<V> {
         self.call_inner((arg1, arg2)).await
+    }
+}
+
+impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, V: FromBuffer + ?Sized> Compute<(T, T1, T2), V> {
+    pub async fn call(&self, arg1: T, arg2: T1, arg3: T2) -> ReturnBuffer<V> {
+        self.call_inner((arg1, arg2, arg3)).await
+    }
+}
+
+impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, T3: IntoBuffer, V: FromBuffer + ?Sized>
+    Compute<(T, T1, T2, T3), V>
+{
+    pub async fn call(&self, arg1: T, arg2: T1, arg3: T2, arg4: T3) -> ReturnBuffer<V> {
+        self.call_inner((arg1, arg2, arg3, arg4)).await
     }
 }
 
@@ -175,7 +194,7 @@ struct State {
     compute_pipeline: wgpu::ComputePipeline,
     bind_group: wgpu::BindGroup,
     return_buffer: wgpu::Buffer,
-    return_staging_buffers: Arc<SegQueue<wgpu::Buffer>>,
+    return_staging_buffers: Arc<SegQueue<Arc<wgpu::Buffer>>>,
     return_size: u64,
     workgroup_size: (u32, u32, u32),
 }
@@ -216,7 +235,7 @@ impl State {
                     binding: i as u32 + 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -273,52 +292,5 @@ impl State {
             return_size,
             workgroup_size,
         }
-    }
-
-    fn run(
-        &self,
-        callback: impl FnOnce(wgpu::Buffer, Arc<SegQueue<wgpu::Buffer>>) + Send + 'static,
-        device: &'static wgpu::Device,
-        queue: &wgpu::Queue,
-    ) {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
-        {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Render Pass"),
-                timestamp_writes: None,
-            });
-
-            compute_pass.set_pipeline(&self.compute_pipeline);
-            compute_pass.set_bind_group(0, &self.bind_group, &[]);
-            compute_pass.dispatch_workgroups(
-                self.workgroup_size.0,
-                self.workgroup_size.1,
-                self.workgroup_size.2,
-            );
-        }
-        let return_staging_buffer = self.return_staging_buffers.pop().unwrap_or_else(|| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("Return Buffer")),
-                size: self.return_size,
-                mapped_at_creation: false,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            })
-        });
-        encoder.copy_buffer_to_buffer(
-            &self.return_buffer,
-            0,
-            &return_staging_buffer,
-            0,
-            self.return_size,
-        );
-        let return_staging_buffers = self.return_staging_buffers.clone();
-
-        let idx = queue.submit(std::iter::once(encoder.finish()));
-        rayon::spawn(move || {
-            device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(idx));
-            callback(return_staging_buffer, return_staging_buffers);
-        });
     }
 }

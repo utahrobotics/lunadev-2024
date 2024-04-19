@@ -16,8 +16,11 @@ realsense-sys = { version = "2" }
 localization = { path = "../localization" }
 nalgebra = { workspace = true }
 rig = { path = "../rig" }
-# ordered-float = { workspace = true }
+compute-shader = { path = "../compute-shader" }
+ordered-float = { workspace = true }
 quaternion-core = { workspace = true }
+bytemuck = { workspace = true }
+pollster = "0"
 
 [dev-dependencies]
 costmap = { path = "../costmap" }

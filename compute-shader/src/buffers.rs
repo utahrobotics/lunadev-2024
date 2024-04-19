@@ -1,6 +1,8 @@
-use std::{marker::PhantomData, mem::size_of};
+use std::{marker::PhantomData, mem::size_of, num::NonZeroU64, ops::{Deref, DerefMut}, sync::Arc};
 
-use bytemuck::{bytes_of, bytes_of_mut, from_bytes};
+use bytemuck::{bytes_of, from_bytes_mut};
+use crossbeam::queue::SegQueue;
+use wgpu::{util::StagingBelt, CommandEncoder};
 
 pub trait BufferSize: Copy + Send + 'static {
     fn size(&self) -> u64;
@@ -47,7 +49,7 @@ impl<T> Clone for DynamicSize<T> {
     }
 }
 
-pub trait BufferSizeIter {
+pub trait BufferSizeIter: Copy {
     fn into_iter(self) -> impl Iterator<Item = u64>;
 }
 
@@ -69,51 +71,90 @@ impl<T: BufferSize, T1: BufferSize, T2: BufferSize> BufferSizeIter for (T, T1, T
     }
 }
 
+impl<T: BufferSize, T1: BufferSize, T2: BufferSize, T3: BufferSize> BufferSizeIter
+    for (T, T1, T2, T3)
+{
+    fn into_iter(self) -> impl Iterator<Item = u64> {
+        [self.0.size(), self.1.size(), self.2.size(), self.3.size()].into_iter()
+    }
+}
+
 pub trait IntoBuffer: Copy {
     type Size: BufferSize;
-    fn get_size(&self) -> Self::Size;
-    fn into_buffer(self, buffer: &wgpu::Buffer, queue: &wgpu::Queue);
+    fn into_buffer(
+        self,
+        command_encoder: &mut CommandEncoder,
+        buffer: &wgpu::Buffer,
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    );
 }
 
 impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &T {
     type Size = StaticSize<T>;
 
-    fn get_size(&self) -> Self::Size {
-        StaticSize::default()
-    }
-
-    fn into_buffer(self, buffer: &wgpu::Buffer, queue: &wgpu::Queue) {
-        queue.write_buffer(buffer, 0, bytes_of(self));
+    fn into_buffer(
+        self,
+        command_encoder: &mut CommandEncoder,
+        buffer: &wgpu::Buffer,
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    ) {
+        stager
+            .write_buffer(
+                command_encoder,
+                buffer,
+                0,
+                NonZeroU64::new(size_of::<T>() as u64).unwrap(),
+                device,
+            )
+            .copy_from_slice(bytes_of(self));
     }
 }
 
 impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &[T] {
     type Size = DynamicSize<T>;
 
-    fn get_size(&self) -> Self::Size {
-        DynamicSize::new(self.len())
-    }
+    // fn get_size(&self) -> Self::Size {
+    //     DynamicSize::new(self.len())
+    // }
 
-    fn into_buffer(self, buffer: &wgpu::Buffer, queue: &wgpu::Queue) {
+    fn into_buffer(
+        self,
+        command_encoder: &mut CommandEncoder,
+        buffer: &wgpu::Buffer,
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    ) {
         for (i, item) in self.iter().enumerate() {
-            queue.write_buffer(buffer, (i * size_of::<T>()) as u64, bytes_of(item));
+            stager
+                .write_buffer(
+                    command_encoder,
+                    buffer,
+                    (i * size_of::<T>()) as u64,
+                    NonZeroU64::new(size_of::<T>() as u64).unwrap(),
+                    device,
+                )
+                .copy_from_slice(bytes_of(item));
         }
     }
 }
 
-impl<T: Send + 'static> IntoBuffer for Option<&T>
+impl<'a, T: ?Sized> IntoBuffer for Option<&'a T>
 where
-    for<'a> &'a T: IntoBuffer,
+    &'a T: IntoBuffer,
 {
-    type Size = StaticSize<T>;
+    type Size = <&'a T as IntoBuffer>::Size;
 
-    fn get_size(&self) -> Self::Size {
-        StaticSize::default()
-    }
-
-    fn into_buffer(self, buffer: &wgpu::Buffer, queue: &wgpu::Queue) {
+    fn into_buffer(
+        self,
+        command_encoder: &mut CommandEncoder,
+        buffer: &wgpu::Buffer,
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    ) {
         match self {
-            Some(item) => item.into_buffer(buffer, queue),
+            Some(item) => item.into_buffer(command_encoder, buffer, stager, device),
             None => {}
         }
     }
@@ -121,68 +162,157 @@ where
 
 pub trait IntoBuffers {
     type Sizes: BufferSizeIter;
-    fn into_buffers(&self, buffers: &[wgpu::Buffer], queue: &wgpu::Queue);
+    fn into_buffers(
+        &self,
+        command_encoder: &mut CommandEncoder,
+        buffers: &[wgpu::Buffer],
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    );
 }
 
 impl<T: IntoBuffer> IntoBuffers for (T,) {
     type Sizes = (T::Size,);
 
-    fn into_buffers(&self, buffers: &[wgpu::Buffer], queue: &wgpu::Queue) {
-        (&self.0).into_buffer(&buffers[0], queue);
+    fn into_buffers(
+        &self,
+        command_encoder: &mut CommandEncoder,
+        buffers: &[wgpu::Buffer],
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    ) {
+        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
     }
 }
 
 impl<T: IntoBuffer, T1: IntoBuffer> IntoBuffers for (T, T1) {
     type Sizes = (T::Size, T1::Size);
 
-    fn into_buffers(&self, buffers: &[wgpu::Buffer], queue: &wgpu::Queue) {
-        self.0.into_buffer(&buffers[0], queue);
-        self.1.into_buffer(&buffers[1], queue);
+    fn into_buffers(
+        &self,
+        command_encoder: &mut CommandEncoder,
+        buffers: &[wgpu::Buffer],
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    ) {
+        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
+        (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
     }
 }
 
 impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer> IntoBuffers for (T, T1, T2) {
     type Sizes = (T::Size, T1::Size, T2::Size);
 
-    fn into_buffers(&self, buffers: &[wgpu::Buffer], queue: &wgpu::Queue) {
-        self.0.into_buffer(&buffers[0], queue);
-        self.1.into_buffer(&buffers[1], queue);
-        self.2.into_buffer(&buffers[2], queue);
+    fn into_buffers(
+        &self,
+        command_encoder: &mut CommandEncoder,
+        buffers: &[wgpu::Buffer],
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    ) {
+        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
+        (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
+        (&self.2).into_buffer(command_encoder, &buffers[2], stager, device);
+    }
+}
+
+impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, T3: IntoBuffer> IntoBuffers
+    for (T, T1, T2, T3)
+{
+    type Sizes = (T::Size, T1::Size, T2::Size, T3::Size);
+
+    fn into_buffers(
+        &self,
+        command_encoder: &mut CommandEncoder,
+        buffers: &[wgpu::Buffer],
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    ) {
+        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
+        (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
+        (&self.2).into_buffer(command_encoder, &buffers[2], stager, device);
+        (&self.3).into_buffer(command_encoder, &buffers[3], stager, device);
     }
 }
 
 pub trait FromBuffer: Send + 'static {
-    type Receiver: Default + Send + 'static;
     type Size: BufferSize;
 
-    fn from_buffer(recv: Self::Receiver, buffer: &wgpu::BufferView, size: Self::Size) -> Self;
+    fn from_buffer<'a>(buffer: &'a mut wgpu::BufferViewMut) -> &'a mut Self;
 }
 
-pub struct Single<T>(pub T);
-
-impl<T: bytemuck::Pod + Send + 'static> FromBuffer for Single<T> {
-    type Receiver = ();
+impl<T: bytemuck::Pod + Send> FromBuffer for T {
     type Size = StaticSize<T>;
 
-    fn from_buffer(_recv: Self::Receiver, buffer: &wgpu::BufferView, _size: Self::Size) -> Self {
-        let mut return_val = T::zeroed();
-        let return_val_bytes = bytes_of_mut(&mut return_val);
-        return_val_bytes.copy_from_slice(buffer);
-        Single(return_val)
+    fn from_buffer<'a>(buffer: &'a mut wgpu::BufferViewMut) -> &'a mut Self {
+        from_bytes_mut(buffer)
     }
 }
 
-impl<T: bytemuck::Pod + Send + 'static> FromBuffer for Vec<T> {
-    type Receiver = Vec<T>;
+impl<T: bytemuck::Pod + Send> FromBuffer for [T] {
     type Size = DynamicSize<T>;
 
-    fn from_buffer(mut recv: Self::Receiver, buffer: &wgpu::BufferView, size: Self::Size) -> Self {
-        recv.reserve(size.0 as usize);
-        for i in 0..size.0 as usize {
-            let item_slice = &buffer[(i * size_of::<T>())..((i + 1) * size_of::<T>())];
-            let item: &T = from_bytes(item_slice);
-            recv.push(*item);
+    fn from_buffer<'a>(buffer: &'a mut wgpu::BufferViewMut) -> &'a mut Self {
+        let buffer: &mut [u8] = buffer;
+        if buffer.len() % size_of::<T>() != 0 {
+            panic!("Buffer size is not a multiple of the size of T");
         }
-        recv
+        let items: &mut [T] = unsafe {
+            std::mem::transmute(buffer)
+        };
+        items
+    }
+}
+
+pub struct ReturnBuffer<T: ?Sized> {
+    buffer: Arc<wgpu::Buffer>,
+    pointer: *mut T,
+    buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>
+}
+
+
+impl<T: FromBuffer + ?Sized> ReturnBuffer<T> {
+    pub fn new(buffer: Arc<wgpu::Buffer>, buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>) -> Self {
+        let pointer: *mut T = {
+            let mut view = buffer.slice(..).get_mapped_range_mut();
+            T::from_buffer(&mut view)
+        };
+        Self {
+            buffer,
+            pointer,
+            buffer_queue
+        }
+    }
+}
+
+
+impl<T: FromBuffer> Deref for ReturnBuffer<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            &*self.pointer
+        }
+    }
+}
+
+
+impl<T: FromBuffer> DerefMut for ReturnBuffer<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe {
+            &mut *self.pointer
+        }
+    }
+}
+
+
+unsafe impl<T: Send + ?Sized> Send for ReturnBuffer<T> {}
+unsafe impl<T: Sync + ?Sized> Sync for ReturnBuffer<T> {}
+
+
+impl<T: ?Sized> Drop for ReturnBuffer<T> {
+    fn drop(&mut self) {
+        self.buffer.unmap();
+        self.buffer_queue.push(self.buffer.clone());
     }
 }
