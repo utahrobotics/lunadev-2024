@@ -203,7 +203,6 @@ pub trait Subscription {
                 .build()
                 .unwrap();
             thread_pool.broadcast(move |ctx| {
-                println!("{ctx:?}");
                 loop {
                     let msg = {
                         let Ok(receiver) = receiver.lock() else {
@@ -580,7 +579,6 @@ impl<T> Subscription for SequencedDetached<T> {
     type Item = T;
 
     fn push(&mut self, value: Self::Item, _token: PublisherToken) -> bool {
-        println!("b");
         let index = self.index.fetch_add(1, Ordering::AcqRel);
         self.sender.send(DetachedCommand::NewValue((index, value))).is_ok()
     }

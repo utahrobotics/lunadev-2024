@@ -308,7 +308,6 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
         self.quadtree_sub
             .create_subscription()
             .filter_map(move |original_points: Points<T>| {
-                println!("a");
                 let original_points_iter = original_points.points.into_iter();
                 let size = original_points_iter.len();
 

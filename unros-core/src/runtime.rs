@@ -300,7 +300,7 @@ pub fn start_unros_runtime<T: Send + 'static, F: Future<Output = T> + Send + 'st
 ) -> Option<T> {
     let pid = std::process::id();
 
-    let _ = ThreadPoolBuilder::default()
+    let _ = rayon::ThreadPoolBuilder::default()
         .panic_handler(|_| {
             // Panics in rayon still get logged, but this prevents
             // the thread pool from aborting the entire process
