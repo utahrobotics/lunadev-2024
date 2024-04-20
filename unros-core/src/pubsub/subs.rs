@@ -6,9 +6,10 @@ use std::{
     borrow::Cow,
     marker::PhantomData,
     ops::{Deref, DerefMut},
-    sync::{atomic::Ordering, Weak},
+    sync::{atomic::{AtomicUsize, Ordering}, mpsc::{sync_channel, SyncSender}, Arc, Mutex, Weak},
 };
 
+use crossbeam::utils::Backoff;
 use log::warn;
 
 use super::{MonoPublisher, Publisher, SubscriberInner};
@@ -61,6 +62,167 @@ pub trait Subscription {
         Self: Sized + Send + 'static,
     {
         Box::new(self)
+    }
+
+    fn detach_unordered(self) -> UnorderedDetached<Self::Item>
+    where
+        Self: Sized + Send + Sync + 'static,
+        Self::Item: Send,
+    {
+        let (sender, receiver) = sync_channel(0);
+        let receiver = Mutex::new(receiver);
+        let sub = Mutex::new(self);
+
+        rayon::spawn(move || {
+            rayon::broadcast(move |_| {
+                loop {
+                    let msg = {
+                        let Ok(receiver) = receiver.lock() else {
+                            break;
+                        };
+                        receiver.recv()
+                    };
+
+                    let Ok(mut sub) = sub.lock() else {
+                        break;
+                    };
+                    
+                    match msg {
+                        Ok(DetachedCommand::NewValue(value)) => {
+                            sub.push(value, PublisherToken(PhantomData));
+                        }
+                        Ok(DetachedCommand::Increment) => {
+                            sub.increment_publishers(PublisherToken(PhantomData));
+                        }
+                        Ok(DetachedCommand::Decrement) => {
+                            sub.decrement_publishers(PublisherToken(PhantomData));
+                        }
+                        Ok(DetachedCommand::SetName(name)) => {
+                            sub.set_name_mut(name);
+                        }
+                        Err(_) => {
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+        UnorderedDetached {
+            sender,
+        }
+    }
+
+    fn detach_ordered(self) -> OrderedDetached<Self::Item>
+    where
+        Self: Sized + Send + Sync + 'static,
+        Self::Item: Send,
+    {
+        let (sender, receiver) = sync_channel(0);
+        let receiver = Mutex::new(receiver);
+        let sub = Mutex::new(self);
+        let task_index = AtomicUsize::new(0);
+
+        rayon::spawn(move || {
+            rayon::broadcast(move |_| {
+                let backoff = Backoff::new();
+                loop {
+                    let msg = {
+                        let Ok(receiver) = receiver.lock() else {
+                            break;
+                        };
+                        receiver.recv()
+                    };
+
+                    let Ok(mut sub) = sub.lock() else {
+                        break;
+                    };
+                    
+                    match msg {
+                        Ok(DetachedCommand::NewValue((index, value))) => {
+                            while task_index.load(Ordering::Acquire) != index {
+                                backoff.snooze();
+                            }
+                            backoff.reset();
+                            sub.push(value, PublisherToken(PhantomData));
+                            task_index.fetch_add(1, Ordering::AcqRel);
+                        }
+                        Ok(DetachedCommand::Increment) => {
+                            sub.increment_publishers(PublisherToken(PhantomData));
+                        }
+                        Ok(DetachedCommand::Decrement) => {
+                            sub.decrement_publishers(PublisherToken(PhantomData));
+                        }
+                        Ok(DetachedCommand::SetName(name)) => {
+                            sub.set_name_mut(name);
+                        }
+                        Err(_) => {
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+        OrderedDetached {
+            sender,
+            index: Arc::default()
+        }
+    }
+
+    fn detach_sequenced(self) -> SequencedDetached<Self::Item>
+    where
+        Self: Sized + Send + Sync + 'static,
+        Self::Item: Send,
+    {
+        let (sender, receiver) = sync_channel(0);
+        let receiver = Mutex::new(receiver);
+        let mut task_index = 0usize;
+        let sub = Mutex::new(self.filter_map(move |(index, value)| {
+            if index >= task_index {
+                task_index = task_index.wrapping_add(index + 1);
+                Some(value)
+            } else {
+                None
+            }
+        }));
+
+        rayon::spawn(move || {
+            rayon::broadcast(move |_| {
+                loop {
+                    let msg = {
+                        let Ok(receiver) = receiver.lock() else {
+                            break;
+                        };
+                        receiver.recv()
+                    };
+
+                    let Ok(mut sub) = sub.lock() else {
+                        break;
+                    };
+                    
+                    match msg {
+                        Ok(DetachedCommand::NewValue(item)) => {
+                            sub.push(item, PublisherToken(PhantomData));
+                        }
+                        Ok(DetachedCommand::Increment) => {
+                            sub.increment_publishers(PublisherToken(PhantomData));
+                        }
+                        Ok(DetachedCommand::Decrement) => {
+                            sub.decrement_publishers(PublisherToken(PhantomData));
+                        }
+                        Ok(DetachedCommand::SetName(name)) => {
+                            sub.set_name_mut(name);
+                        }
+                        Err(_) => {
+                            break;
+                        }
+                    }
+                }
+            });
+        });
+        SequencedDetached {
+            sender,
+            index: Arc::default()
+        }
     }
 
     // fn zip<V: 'static>(mut self, mut other: DirectSubscription<V>) -> DirectSubscription<(T, V)> where Self: Sized {
@@ -299,5 +461,121 @@ impl<T> Subscription for BoxedSubscription<T> {
 
     fn decrement_publishers(&self, token: PublisherToken) {
         self.deref().decrement_publishers(token);
+    }
+}
+
+
+enum DetachedCommand<T> {
+    NewValue(T),
+    Increment,
+    Decrement,
+    SetName(Cow<'static, str>)
+}
+
+
+pub struct UnorderedDetached<T> {
+    sender: SyncSender<DetachedCommand<T>>,
+}
+
+impl<T> Clone for UnorderedDetached<T> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
+}
+
+
+impl<T> Subscription for UnorderedDetached<T> {
+    type Item = T;
+
+    fn push(&mut self, value: Self::Item, _token: PublisherToken) -> bool {
+        self.sender.send(DetachedCommand::NewValue(value)).is_ok()
+    }
+
+    fn set_name_mut(&mut self, name: Cow<'static, str>) {
+        let _ = self.sender.send(DetachedCommand::SetName(name));
+    }
+
+    fn increment_publishers(&self, _token: PublisherToken) {
+        let _ = self.sender.send(DetachedCommand::Increment);
+    }
+
+    fn decrement_publishers(&self, _token: PublisherToken) {
+        let _ = self.sender.send(DetachedCommand::Decrement);
+    }
+}
+
+
+pub struct OrderedDetached<T> {
+    sender: SyncSender<DetachedCommand<(usize, T)>>,
+    index: Arc<AtomicUsize>,
+}
+
+impl<T> Clone for OrderedDetached<T> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            index: self.index.clone(),
+        }
+    }
+}
+
+
+impl<T> Subscription for OrderedDetached<T> {
+    type Item = T;
+
+    fn push(&mut self, value: Self::Item, _token: PublisherToken) -> bool {
+        let index = self.index.fetch_add(1, Ordering::AcqRel);
+        self.sender.send(DetachedCommand::NewValue((index, value))).is_ok()
+    }
+
+    fn set_name_mut(&mut self, name: Cow<'static, str>) {
+        let _ = self.sender.send(DetachedCommand::SetName(name));
+    }
+
+    fn increment_publishers(&self, _token: PublisherToken) {
+        let _ = self.sender.send(DetachedCommand::Increment);
+    }
+
+    fn decrement_publishers(&self, _token: PublisherToken) {
+        let _ = self.sender.send(DetachedCommand::Decrement);
+    }
+}
+
+
+pub struct SequencedDetached<T> {
+    sender: SyncSender<DetachedCommand<(usize, T)>>,
+    index: Arc<AtomicUsize>,
+}
+
+impl<T> Clone for SequencedDetached<T> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            index: self.index.clone(),
+        }
+    }
+}
+
+
+impl<T> Subscription for SequencedDetached<T> {
+    type Item = T;
+
+    fn push(&mut self, value: Self::Item, _token: PublisherToken) -> bool {
+        let index = self.index.fetch_add(1, Ordering::AcqRel);
+        self.sender.send(DetachedCommand::NewValue((index, value))).is_ok()
+    }
+
+    fn set_name_mut(&mut self, name: Cow<'static, str>) {
+        let _ = self.sender.send(DetachedCommand::SetName(name));
+    }
+
+    fn increment_publishers(&self, _token: PublisherToken) {
+        let _ = self.sender.send(DetachedCommand::Increment);
+    }
+
+    fn decrement_publishers(&self, _token: PublisherToken) {
+        let _ = self.sender.send(DetachedCommand::Decrement);
     }
 }
