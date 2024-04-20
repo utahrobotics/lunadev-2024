@@ -15,7 +15,6 @@ use std::{
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 use crossbeam::queue::SegQueue;
-use rayon::ThreadPoolBuilder;
 use sysinfo::Pid;
 use tokio::{
     runtime::{Builder as TokioBuilder, Handle},

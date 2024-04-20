@@ -299,7 +299,7 @@ impl CostmapGenerator {
 impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerator<N> {
     pub fn create_points_sub<T>(&self, resolution: N) -> impl Subscription<Item = Points<T>>
     where
-        T: IntoIterator<Item = Point3<N>, IntoIter: ExactSizeIterator>,
+        T: IntoIterator<Item = Point3<N>, IntoIter: ExactSizeIterator> + Send + Sync + 'static,
         f32: SubsetOf<N>,
     {
         assert!(resolution.is_positive());
@@ -308,6 +308,7 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
         self.quadtree_sub
             .create_subscription()
             .filter_map(move |original_points: Points<T>| {
+                println!("a");
                 let original_points_iter = original_points.points.into_iter();
                 let size = original_points_iter.len();
 
@@ -436,6 +437,7 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
                     resolution,
                 })
             })
+        .detach_sequenced(0)
     }
 
     pub fn get_costmap_pub(&self) -> PublisherRef<Costmap<N>> {

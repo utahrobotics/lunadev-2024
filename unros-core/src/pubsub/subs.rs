@@ -11,6 +11,7 @@ use std::{
 
 use crossbeam::utils::Backoff;
 use log::warn;
+use rayon::ThreadPoolBuilder;
 
 use super::{MonoPublisher, Publisher, SubscriberInner};
 
@@ -64,7 +65,7 @@ pub trait Subscription {
         Box::new(self)
     }
 
-    fn detach_unordered(self) -> UnorderedDetached<Self::Item>
+    fn detach_unordered(self, num_threads: usize) -> UnorderedDetached<Self::Item>
     where
         Self: Sized + Send + Sync + 'static,
         Self::Item: Send,
@@ -73,8 +74,13 @@ pub trait Subscription {
         let receiver = Mutex::new(receiver);
         let sub = Mutex::new(self);
 
-        rayon::spawn(move || {
-            rayon::broadcast(move |_| {
+        std::thread::spawn(move || {
+            let thread_pool = ThreadPoolBuilder::new()
+                .panic_handler(|_| {})
+                .num_threads(num_threads)
+                .build()
+                .unwrap();
+            thread_pool.broadcast(move |_| {
                 loop {
                     let msg = {
                         let Ok(receiver) = receiver.lock() else {
@@ -112,7 +118,7 @@ pub trait Subscription {
         }
     }
 
-    fn detach_ordered(self) -> OrderedDetached<Self::Item>
+    fn detach_ordered(self, num_threads: usize) -> OrderedDetached<Self::Item>
     where
         Self: Sized + Send + Sync + 'static,
         Self::Item: Send,
@@ -122,8 +128,13 @@ pub trait Subscription {
         let sub = Mutex::new(self);
         let task_index = AtomicUsize::new(0);
 
-        rayon::spawn(move || {
-            rayon::broadcast(move |_| {
+        std::thread::spawn(move || {
+            let thread_pool = ThreadPoolBuilder::new()
+                .panic_handler(|_| {})
+                .num_threads(num_threads)
+                .build()
+                .unwrap();
+            thread_pool.broadcast(move |_| {
                 let backoff = Backoff::new();
                 loop {
                     let msg = {
@@ -168,7 +179,7 @@ pub trait Subscription {
         }
     }
 
-    fn detach_sequenced(self) -> SequencedDetached<Self::Item>
+    fn detach_sequenced(self, num_threads: usize) -> SequencedDetached<Self::Item>
     where
         Self: Sized + Send + Sync + 'static,
         Self::Item: Send,
@@ -185,8 +196,14 @@ pub trait Subscription {
             }
         }));
 
-        rayon::spawn(move || {
-            rayon::broadcast(move |_| {
+        std::thread::spawn(move || {
+            let thread_pool = ThreadPoolBuilder::new()
+                .panic_handler(|_| {})
+                .num_threads(num_threads)
+                .build()
+                .unwrap();
+            thread_pool.broadcast(move |ctx| {
+                println!("{ctx:?}");
                 loop {
                     let msg = {
                         let Ok(receiver) = receiver.lock() else {
@@ -563,6 +580,7 @@ impl<T> Subscription for SequencedDetached<T> {
     type Item = T;
 
     fn push(&mut self, value: Self::Item, _token: PublisherToken) -> bool {
+        println!("b");
         let index = self.index.fetch_add(1, Ordering::AcqRel);
         self.sender.send(DetachedCommand::NewValue((index, value))).is_ok()
     }
