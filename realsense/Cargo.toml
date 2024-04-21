@@ -8,15 +8,15 @@ edition = "2021"
 [dependencies]
 unros = { path = "../unros" }
 image = { workspace = true }
+compute-shader = { path = "../compute-shader" }
+nalgebra = { workspace = true }
 # bytemuck = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 realsense-rust = { version = "1.2", features = ["buildtime-bindgen"] }
 realsense-sys = { version = "2" }
 localization = { path = "../localization" }
-nalgebra = { workspace = true }
 rig = { path = "../rig" }
-compute-shader = { path = "../compute-shader" }
 ordered-float = { workspace = true }
 quaternion-core = { workspace = true }
 bytemuck = { workspace = true }

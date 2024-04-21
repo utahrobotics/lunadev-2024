@@ -202,7 +202,7 @@ pub trait Subscription {
                 .num_threads(num_threads)
                 .build()
                 .unwrap();
-            thread_pool.broadcast(move |ctx| {
+            thread_pool.broadcast(move |_| {
                 loop {
                     let msg = {
                         let Ok(receiver) = receiver.lock() else {
