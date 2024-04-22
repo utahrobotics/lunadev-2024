@@ -114,6 +114,7 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(
 struct Cylinder<N: Float> {
     height: N,
     radius: N,
+    matrix: [[N; 4]; 4],
     inv_matrix: [[N; 4]; 4],
 }
 unsafe impl<N: Float + bytemuck::Pod + bytemuck::NoUninit> bytemuck::Pod for Cylinder<N> {}
@@ -180,11 +181,12 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             height,
                             isometry,
                         } => {
-                            let inv_matrix: Matrix4<f32> =
-                                isometry.to_homogeneous().try_inverse().unwrap();
+                            let matrix = isometry.to_homogeneous();
+                            let inv_matrix = matrix.try_inverse().unwrap();
                             cylinder_buf.push(Cylinder {
                                 radius,
                                 height,
+                                matrix: matrix.data.0,
                                 inv_matrix: inv_matrix.data.0,
                             });
                         }
@@ -198,7 +200,7 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             &transform,
                         )
                         .await;
-                    let _ = sender.send(HeightOnly::from_iter(heights.into_iter().copied().map(
+                    let _ = sender.send(HeightOnly::from_iter(heights.into_iter().copied().filter(|n| *n != f32::MAX).map(
                         |n| {
                             if n == f32::MIN {
                                 None
@@ -217,11 +219,12 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             height,
                             isometry,
                         } => {
-                            let inv_matrix: Matrix4<f32> =
-                                isometry.to_homogeneous().try_inverse().unwrap();
+                            let matrix = isometry.to_homogeneous();
+                            let inv_matrix = matrix.try_inverse().unwrap();
                             cylinder_buf.push(Cylinder {
                                 radius,
                                 height,
+                                matrix: matrix.data.0,
                                 inv_matrix: inv_matrix.data.0,
                             });
                         }
@@ -236,7 +239,7 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                         )
                         .await;
                     let _ = sender.send(HeightAndVariance::from_iter(
-                        heights.into_iter().copied().map(|n| {
+                        heights.into_iter().copied().filter(|n| *n != f32::MAX).map(|n| {
                             if n == f32::MIN {
                                 None
                             } else {
