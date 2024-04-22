@@ -3,9 +3,9 @@ use std::ops::DerefMut;
 use nalgebra::{convert as nconvert, Point3, UnitQuaternion, Vector3};
 use rand_distr::{Distribution, Normal};
 use rig::RobotElementRef;
-use unros::rng::quick_rng;
+use unros::{float::Float, rng::quick_rng};
 
-use crate::{random_unit_vector, utils::Float};
+use crate::random_unit_vector;
 
 /// A position and variance measurement.
 #[derive(Clone)]

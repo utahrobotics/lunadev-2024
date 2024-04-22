@@ -27,3 +27,5 @@ config = "0.14"
 color-eyre = { version = "0.6", default-features = false }
 ctrlc = "3.4.2"
 rayon = { workspace = true }
+nalgebra = { workspace = true }
+simba = { workspace = true }

@@ -2842,6 +2842,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "obstacles"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytemuck",
+ "compute-shader",
+ "crossbeam",
+ "nalgebra",
+ "unros",
+]
+
+[[package]]
 name = "ogg"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4088,9 +4100,11 @@ dependencies = [
  "ffmpeg-sidecar",
  "image",
  "log",
+ "nalgebra",
  "rand",
  "rayon",
  "serde",
+ "simba",
  "sysinfo",
  "tokio",
 ]

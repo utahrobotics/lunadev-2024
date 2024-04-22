@@ -436,7 +436,7 @@ impl<N: RealField + Copy + SupersetOf<usize> + SupersetOf<isize>> CostmapGenerat
                     resolution,
                 })
             })
-        .detach_sequenced(0)
+            .detach_sequenced(0)
     }
 
     pub fn get_costmap_pub(&self) -> PublisherRef<Costmap<N>> {

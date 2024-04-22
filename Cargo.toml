@@ -8,9 +8,10 @@ members = [
     "localization",
     "serial",
     "navigator",
-    "rig", "tools", "smach", "costmap",
+    "rig", "tools", "smach",
+    # "costmap",
     "lunasimbot", "unros-macros", "unros", "lunabase-lib", "camera-info", "networking", "py-repl"
-, "compute-shader"]
+, "compute-shader", "obstacles"]
 resolver = "2"
 exclude = ["publishing/", "dump/", "lunabase/", "camera-db/"]
 

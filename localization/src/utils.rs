@@ -1,15 +1,12 @@
-use std::iter::Sum;
-
 use eigenvalues::{
     lanczos::{HermitianLanczos, LanczosError},
     SpectrumTarget,
 };
 use nalgebra::{
-    convert as nconvert, DMatrix, Matrix4, Quaternion, RealField, UnitQuaternion, UnitVector3,
-    Vector3,
+    convert as nconvert, DMatrix, Matrix4, Quaternion, UnitQuaternion, UnitVector3, Vector3,
 };
 use rand::{rngs::SmallRng, Rng};
-use simba::scalar::{SubsetOf, SupersetOf};
+use unros::float::Float;
 
 // pub(crate) struct UnorderedQueue<T> {
 //     queue: Box<[T]>,
@@ -42,49 +39,6 @@ use simba::scalar::{SubsetOf, SupersetOf};
 //         }
 //     }
 // }
-
-pub trait Float:
-    RealField
-    + Copy
-    + Default
-    + SupersetOf<f32>
-    + SupersetOf<f64>
-    + SubsetOf<f32>
-    + SubsetOf<f64>
-    + SupersetOf<usize>
-    + Sum
-{
-    fn to_f32(self) -> f32;
-    fn to_f64(self) -> f64;
-    fn is_nan(self) -> bool;
-}
-
-impl Float for f32 {
-    fn to_f32(self) -> f32 {
-        self
-    }
-
-    fn to_f64(self) -> f64 {
-        self as f64
-    }
-
-    fn is_nan(self) -> bool {
-        self.is_nan()
-    }
-}
-impl Float for f64 {
-    fn to_f32(self) -> f32 {
-        self as f32
-    }
-
-    fn to_f64(self) -> f64 {
-        self
-    }
-
-    fn is_nan(self) -> bool {
-        self.is_nan()
-    }
-}
 
 pub fn quat_mean<N, T, I>(quats: T) -> Option<Result<UnitQuaternion<N>, LanczosError>>
 where

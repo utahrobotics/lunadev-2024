@@ -1,0 +1,12 @@
+[package]
+name = "obstacles"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+unros = { path = "../unros" }
+compute-shader = { path = "../compute-shader" }
+nalgebra = { workspace = true }
+crossbeam = { workspace = true }
+bytemuck = { workspace = true }
+async-trait = "0"

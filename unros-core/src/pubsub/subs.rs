@@ -6,7 +6,11 @@ use std::{
     borrow::Cow,
     marker::PhantomData,
     ops::{Deref, DerefMut},
-    sync::{atomic::{AtomicUsize, Ordering}, mpsc::{sync_channel, SyncSender}, Arc, Mutex, Weak},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::{sync_channel, SyncSender},
+        Arc, Mutex, Weak,
+    },
 };
 
 use crossbeam::utils::Backoff;
@@ -80,42 +84,38 @@ pub trait Subscription {
                 .num_threads(num_threads)
                 .build()
                 .unwrap();
-            thread_pool.broadcast(move |_| {
-                loop {
-                    let msg = {
-                        let Ok(receiver) = receiver.lock() else {
-                            break;
-                        };
-                        receiver.recv()
-                    };
-
-                    let Ok(mut sub) = sub.lock() else {
+            thread_pool.broadcast(move |_| loop {
+                let msg = {
+                    let Ok(receiver) = receiver.lock() else {
                         break;
                     };
-                    
-                    match msg {
-                        Ok(DetachedCommand::NewValue(value)) => {
-                            sub.push(value, PublisherToken(PhantomData));
-                        }
-                        Ok(DetachedCommand::Increment) => {
-                            sub.increment_publishers(PublisherToken(PhantomData));
-                        }
-                        Ok(DetachedCommand::Decrement) => {
-                            sub.decrement_publishers(PublisherToken(PhantomData));
-                        }
-                        Ok(DetachedCommand::SetName(name)) => {
-                            sub.set_name_mut(name);
-                        }
-                        Err(_) => {
-                            break;
-                        }
+                    receiver.recv()
+                };
+
+                let Ok(mut sub) = sub.lock() else {
+                    break;
+                };
+
+                match msg {
+                    Ok(DetachedCommand::NewValue(value)) => {
+                        sub.push(value, PublisherToken(PhantomData));
+                    }
+                    Ok(DetachedCommand::Increment) => {
+                        sub.increment_publishers(PublisherToken(PhantomData));
+                    }
+                    Ok(DetachedCommand::Decrement) => {
+                        sub.decrement_publishers(PublisherToken(PhantomData));
+                    }
+                    Ok(DetachedCommand::SetName(name)) => {
+                        sub.set_name_mut(name);
+                    }
+                    Err(_) => {
+                        break;
                     }
                 }
             });
         });
-        UnorderedDetached {
-            sender,
-        }
+        UnorderedDetached { sender }
     }
 
     fn detach_ordered(self, num_threads: usize) -> OrderedDetached<Self::Item>
@@ -147,7 +147,7 @@ pub trait Subscription {
                     let Ok(mut sub) = sub.lock() else {
                         break;
                     };
-                    
+
                     match msg {
                         Ok(DetachedCommand::NewValue((index, value))) => {
                             while task_index.load(Ordering::Acquire) != index {
@@ -175,7 +175,7 @@ pub trait Subscription {
         });
         OrderedDetached {
             sender,
-            index: Arc::default()
+            index: Arc::default(),
         }
     }
 
@@ -202,42 +202,40 @@ pub trait Subscription {
                 .num_threads(num_threads)
                 .build()
                 .unwrap();
-            thread_pool.broadcast(move |_| {
-                loop {
-                    let msg = {
-                        let Ok(receiver) = receiver.lock() else {
-                            break;
-                        };
-                        receiver.recv()
-                    };
-
-                    let Ok(mut sub) = sub.lock() else {
+            thread_pool.broadcast(move |_| loop {
+                let msg = {
+                    let Ok(receiver) = receiver.lock() else {
                         break;
                     };
-                    
-                    match msg {
-                        Ok(DetachedCommand::NewValue(item)) => {
-                            sub.push(item, PublisherToken(PhantomData));
-                        }
-                        Ok(DetachedCommand::Increment) => {
-                            sub.increment_publishers(PublisherToken(PhantomData));
-                        }
-                        Ok(DetachedCommand::Decrement) => {
-                            sub.decrement_publishers(PublisherToken(PhantomData));
-                        }
-                        Ok(DetachedCommand::SetName(name)) => {
-                            sub.set_name_mut(name);
-                        }
-                        Err(_) => {
-                            break;
-                        }
+                    receiver.recv()
+                };
+
+                let Ok(mut sub) = sub.lock() else {
+                    break;
+                };
+
+                match msg {
+                    Ok(DetachedCommand::NewValue(item)) => {
+                        sub.push(item, PublisherToken(PhantomData));
+                    }
+                    Ok(DetachedCommand::Increment) => {
+                        sub.increment_publishers(PublisherToken(PhantomData));
+                    }
+                    Ok(DetachedCommand::Decrement) => {
+                        sub.decrement_publishers(PublisherToken(PhantomData));
+                    }
+                    Ok(DetachedCommand::SetName(name)) => {
+                        sub.set_name_mut(name);
+                    }
+                    Err(_) => {
+                        break;
                     }
                 }
             });
         });
         SequencedDetached {
             sender,
-            index: Arc::default()
+            index: Arc::default(),
         }
     }
 
@@ -480,14 +478,12 @@ impl<T> Subscription for BoxedSubscription<T> {
     }
 }
 
-
 enum DetachedCommand<T> {
     NewValue(T),
     Increment,
     Decrement,
-    SetName(Cow<'static, str>)
+    SetName(Cow<'static, str>),
 }
-
 
 pub struct UnorderedDetached<T> {
     sender: SyncSender<DetachedCommand<T>>,
@@ -500,7 +496,6 @@ impl<T> Clone for UnorderedDetached<T> {
         }
     }
 }
-
 
 impl<T> Subscription for UnorderedDetached<T> {
     type Item = T;
@@ -522,7 +517,6 @@ impl<T> Subscription for UnorderedDetached<T> {
     }
 }
 
-
 pub struct OrderedDetached<T> {
     sender: SyncSender<DetachedCommand<(usize, T)>>,
     index: Arc<AtomicUsize>,
@@ -537,13 +531,14 @@ impl<T> Clone for OrderedDetached<T> {
     }
 }
 
-
 impl<T> Subscription for OrderedDetached<T> {
     type Item = T;
 
     fn push(&mut self, value: Self::Item, _token: PublisherToken) -> bool {
         let index = self.index.fetch_add(1, Ordering::AcqRel);
-        self.sender.send(DetachedCommand::NewValue((index, value))).is_ok()
+        self.sender
+            .send(DetachedCommand::NewValue((index, value)))
+            .is_ok()
     }
 
     fn set_name_mut(&mut self, name: Cow<'static, str>) {
@@ -559,7 +554,6 @@ impl<T> Subscription for OrderedDetached<T> {
     }
 }
 
-
 pub struct SequencedDetached<T> {
     sender: SyncSender<DetachedCommand<(usize, T)>>,
     index: Arc<AtomicUsize>,
@@ -574,13 +568,14 @@ impl<T> Clone for SequencedDetached<T> {
     }
 }
 
-
 impl<T> Subscription for SequencedDetached<T> {
     type Item = T;
 
     fn push(&mut self, value: Self::Item, _token: PublisherToken) -> bool {
         let index = self.index.fetch_add(1, Ordering::AcqRel);
-        self.sender.send(DetachedCommand::NewValue((index, value))).is_ok()
+        self.sender
+            .send(DetachedCommand::NewValue((index, value)))
+            .is_ok()
     }
 
     fn set_name_mut(&mut self, name: Cow<'static, str>) {

@@ -20,6 +20,7 @@
 
 use std::{borrow::Cow, marker::PhantomData, path::Path, sync::OnceLock};
 
+pub mod float;
 pub mod logging;
 pub mod node;
 pub mod pubsub;

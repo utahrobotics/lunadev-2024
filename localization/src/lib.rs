@@ -13,6 +13,7 @@ use rig::{RobotBase, RobotElementRef};
 use run::run_localizer;
 use smach::State;
 use unros::{
+    float::Float,
     node::AsyncNode,
     pubsub::{subs::DirectSubscription, Subscriber},
     runtime::RuntimeContext,
@@ -26,7 +27,7 @@ pub mod frames;
 mod run;
 mod utils;
 
-pub use utils::{gravity, Float};
+pub use utils::gravity;
 
 /// A Node that can digest multiple streams of spatial input to
 /// determine where an object is in global space.

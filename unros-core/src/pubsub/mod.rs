@@ -394,7 +394,7 @@ impl<T> DerefMut for WatchSubscriber<T> {
     }
 }
 
-impl<T: Clone + Send + 'static> WatchSubscriber<T> {
+impl<T: Send + 'static> WatchSubscriber<T> {
     /// Creates a new `WatchSubscriber` initialized with the given value and no subscriptions.
     pub fn new(value: T) -> Self {
         Self {
