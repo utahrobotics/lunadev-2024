@@ -22,7 +22,7 @@ use unros::{
 
 use crate::Shape;
 
-use super::{Busy, HeightAndVariance, HeightOnly, ObstacleSource};
+use super::{HeightAndVariance, HeightOnly, ObstacleSource};
 
 enum Request<N: Float> {
     HeightOnlyWithin {
@@ -58,12 +58,13 @@ pub struct DepthMapSource<N: Float> {
 
 #[async_trait]
 impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
-    async fn get_height_only_within(&self, shape: Shape<N>) -> Result<HeightOnly<N>, Busy> {
+    async fn get_height_only_within(&self, shape: Shape<N>) -> Option<HeightOnly<N>> {
         let (sender, receiver) = oneshot::channel();
         self.requests_sender
-            .try_send(Request::HeightOnlyWithin { shape, sender })
-            .map_err(|_| Busy)?;
-        Ok(receiver.await.unwrap_or_else(|_| HeightOnly {
+            .send(Request::HeightOnlyWithin { shape, sender })
+            .await
+            .ok()?;
+        Some(receiver.await.unwrap_or_else(|_| HeightOnly {
             height: N::zero(),
             unknown: N::one(),
         }))
@@ -71,12 +72,13 @@ impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
     async fn get_height_and_variance_within(
         &self,
         shape: Shape<N>,
-    ) -> Result<HeightAndVariance<N>, Busy> {
+    ) -> Option<HeightAndVariance<N>> {
         let (sender, receiver) = oneshot::channel();
         self.requests_sender
-            .try_send(Request::HeightVarianceWithin { shape, sender })
-            .map_err(|_| Busy)?;
-        Ok(receiver.await.unwrap_or_else(|_| HeightAndVariance {
+            .send(Request::HeightVarianceWithin { shape, sender })
+            .await
+            .ok()?;
+        Some(receiver.await.unwrap_or_else(|_| HeightAndVariance {
             height: N::zero(),
             variance: N::zero(),
             unknown: N::one(),
@@ -116,21 +118,6 @@ struct Cylinder<N: Float> {
 }
 unsafe impl<N: Float + bytemuck::Pod + bytemuck::NoUninit> bytemuck::Pod for Cylinder<N> {}
 unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroable for Cylinder<N> {}
-
-// #[repr(C)]
-// #[derive(Copy, Clone, Debug)]
-// struct HeightAndVarianceReturn<N: Float> {
-//     height: N,
-//     variance: N,
-// }
-// unsafe impl<N: Float + bytemuck::Pod + bytemuck::NoUninit> bytemuck::Pod
-//     for HeightAndVarianceReturn<N>
-// {
-// }
-// unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroable
-//     for HeightAndVarianceReturn<N>
-// {
-// }
 
 impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
     type Result = anyhow::Result<()>;
@@ -213,7 +200,7 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                         .await;
                     let _ = sender.send(HeightOnly::from_iter(heights.into_iter().copied().map(
                         |n| {
-                            if n.is_sign_negative() {
+                            if n == f32::MIN {
                                 None
                             } else {
                                 Some(n)
@@ -250,7 +237,7 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                         .await;
                     let _ = sender.send(HeightAndVariance::from_iter(
                         heights.into_iter().copied().map(|n| {
-                            if n.is_sign_negative() {
+                            if n == f32::MIN {
                                 None
                             } else {
                                 Some(n)

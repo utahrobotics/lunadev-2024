@@ -2,8 +2,11 @@ use std::sync::Arc;
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use nalgebra::Isometry3;
-use sources::{Busy, HeightAndVariance, HeightOnly, ObstacleSource};
-use unros::{float::Float, tokio::sync::RwLock};
+use sources::{HeightAndVariance, HeightOnly, ObstacleSource};
+use unros::{
+    float::Float,
+    tokio::sync::RwLock,
+};
 
 pub mod sources;
 
@@ -42,33 +45,68 @@ impl<N: Float> ObstacleHub<N> {
     pub async fn get_height_only_within(
         &self,
         shape: Shape<N>,
-        mut callback: impl FnMut(Result<HeightOnly<N>, Busy>) -> bool,
+        mut callback: impl FnMut(HeightOnly<N>) -> bool,
     ) {
-        let sources = self.inner.sources.read().await;
-        let mut futures = FuturesUnordered::new();
-        for source in sources.iter() {
-            futures.push(source.get_height_only_within(shape.clone()));
-        }
-        while let Some(result) = futures.next().await {
-            if !callback(result) {
-                break;
+        let mut indices_to_remove = Vec::new();
+        {
+            let sources = self.inner.sources.read().await;
+            let mut futures = FuturesUnordered::new();
+            for (i, source) in sources.iter().enumerate() {
+                let shape = shape.clone();
+                futures.push(async move { (i, source.get_height_only_within(shape).await) });
             }
+            while let Some((i, result)) = futures.next().await {
+                let Some(value) = result else {
+                    indices_to_remove.push(i);
+                    continue;
+                };
+                if !callback(value) {
+                    break;
+                }
+            }
+        }
+
+        if indices_to_remove.is_empty() {
+            return;
+        }
+        indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
+        let mut sources = self.inner.sources.write().await;
+        for i in indices_to_remove {
+            sources.swap_remove(i);
         }
     }
     pub async fn get_height_and_variance_within(
         &self,
         shape: Shape<N>,
-        mut callback: impl FnMut(Result<HeightAndVariance<N>, Busy>) -> bool,
+        mut callback: impl FnMut(HeightAndVariance<N>) -> bool,
     ) {
-        let sources = self.inner.sources.read().await;
-        let mut futures = FuturesUnordered::new();
-        for source in sources.iter() {
-            futures.push(source.get_height_and_variance_within(shape.clone()));
-        }
-        while let Some(result) = futures.next().await {
-            if !callback(result) {
-                break;
+        let mut indices_to_remove = Vec::new();
+        {
+            let sources = self.inner.sources.read().await;
+            let mut futures = FuturesUnordered::new();
+            for (i, source) in sources.iter().enumerate() {
+                let shape = shape.clone();
+                futures
+                    .push(async move { (i, source.get_height_and_variance_within(shape).await) });
             }
+            while let Some((i, result)) = futures.next().await {
+                let Some(value) = result else {
+                    indices_to_remove.push(i);
+                    continue;
+                };
+                if !callback(value) {
+                    break;
+                }
+            }
+        }
+
+        if indices_to_remove.is_empty() {
+            return;
+        }
+        indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
+        let mut sources = self.inner.sources.write().await;
+        for i in indices_to_remove {
+            sources.swap_remove(i);
         }
     }
 }

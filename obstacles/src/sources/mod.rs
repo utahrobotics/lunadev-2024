@@ -85,13 +85,9 @@ impl<N: Float> HeightAndVariance<N> {
     }
 }
 
-pub struct Busy;
-
 #[async_trait]
 pub trait ObstacleSource<N: Float>: Send + Sync {
-    async fn get_height_only_within(&self, shape: Shape<N>) -> Result<HeightOnly<N>, Busy>;
-    async fn get_height_and_variance_within(
-        &self,
-        shape: Shape<N>,
-    ) -> Result<HeightAndVariance<N>, Busy>;
+    async fn get_height_only_within(&self, shape: Shape<N>) -> Option<HeightOnly<N>>;
+    async fn get_height_and_variance_within(&self, shape: Shape<N>)
+        -> Option<HeightAndVariance<N>>;
 }
