@@ -10,3 +10,4 @@ nalgebra = { workspace = true }
 crossbeam = { workspace = true }
 bytemuck = { workspace = true }
 async-trait = "0"
+futures = "0"

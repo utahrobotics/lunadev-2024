@@ -1,57 +1,39 @@
-use std::{
-    any::Any,
-    marker::PhantomData,
-    ops::Deref,
-    sync::{
-        mpsc::{Receiver, SyncSender},
-        Arc,
-    },
-};
+use std::{ops::Deref, sync::Arc};
 
+use async_trait::async_trait;
 use compute_shader::{
     buffers::{DynamicSize, StaticSize},
     wgpu::include_wgsl,
     Compute,
 };
-use crossbeam::queue::ArrayQueue;
-use nalgebra::{UnitVector3, Vector3};
+use nalgebra::{Point3, UnitVector3};
 use unros::{
     anyhow,
     float::Float,
-    node::{AsyncNode, SyncNode},
-    pubsub::{subs::DirectSubscription, Subscriber, WatchSubscriber},
-    rayon, setup_logging,
+    node::AsyncNode,
+    pubsub::{subs::DirectSubscription, Subscriber},
+    setup_logging,
     tokio::sync::{
-        mpsc::{Receiver as AsyncReceiver, Sender as AsyncSender, channel as async_channel},
+        mpsc::{channel as async_channel, Receiver as AsyncReceiver, Sender as AsyncSender},
         oneshot,
     },
 };
 
-use crate::{sources::HeightDistribution, Shape};
+use crate::Shape;
 
-use super::{HeightAndVariance, HeightOnly};
+use super::{Busy, HeightAndVariance, HeightOnly, ObstacleSource};
 
 enum Request<N: Float> {
     HeightOnlyWithin {
-        origin: Vector3<N>,
+        origin: Point3<N>,
         shape: Shape<N>,
-        sender: AsyncSender<HeightOnly<N>>,
-        sender_sender: oneshot::Sender<AsyncSender<HeightOnly<N>>>,
+        sender: oneshot::Sender<HeightOnly<N>>,
     },
     HeightVarianceWithin {
-        origin: Vector3<N>,
+        origin: Point3<N>,
         shape: Shape<N>,
-        sender: AsyncSender<HeightAndVariance<N>>,
-        sender_sender: oneshot::Sender<AsyncSender<HeightAndVariance<N>>>,
+        sender: oneshot::Sender<HeightAndVariance<N>>,
     },
-}
-
-struct Queues<N: Float> {
-    height: ArrayQueue<(AsyncSender<HeightOnly<N>>, AsyncReceiver<HeightOnly<N>>)>,
-    height_variance: ArrayQueue<(
-        AsyncSender<HeightAndVariance<N>>,
-        AsyncReceiver<HeightAndVariance<N>>,
-    )>,
 }
 
 pub struct DepthMap<N: Float, D> {
@@ -70,22 +52,57 @@ impl<N: Float, D: Send + 'static> DepthMap<N, D> {
     }
 }
 
-struct DepthMapSourceInner<N: Float> {
-    queues: Queues<N>,
+pub struct DepthMapSource<N: Float> {
     requests_sender: AsyncSender<Request<N>>,
 }
 
-
-pub struct DepthMapSource<N: Float> {
-    inner: Arc<DepthMapSourceInner<N>>,
+#[async_trait]
+impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
+    
+    async fn get_height_only_within(
+        &self,
+        origin: Point3<N>,
+        shape: Shape<N>,
+    ) -> Result<HeightOnly<N>, Busy> {
+        let (sender, receiver) = oneshot::channel();
+        self.requests_sender
+            .try_send(Request::HeightOnlyWithin {
+                origin,
+                shape,
+                sender,
+            })
+            .map_err(|_| Busy)?;
+        Ok(receiver.await.unwrap_or_else(|_| HeightOnly {
+            height: N::zero(),
+            unknown: N::one(),
+        }))
+    }
+    async fn get_height_and_variance_within(
+        &self,
+        origin: Point3<N>,
+        shape: Shape<N>,
+    ) -> Result<HeightAndVariance<N>, Busy> {
+        let (sender, receiver) = oneshot::channel();
+        self.requests_sender
+            .try_send(Request::HeightVarianceWithin {
+                origin,
+                shape,
+                sender,
+            })
+            .map_err(|_| Busy)?;
+        Ok(receiver.await.unwrap_or_else(|_| HeightAndVariance {
+            height: N::zero(),
+            variance: N::zero(),
+            unknown: N::one(),
+        }))
+    }
 }
 
-
-impl<N: Float> ObstacleSource for DepthMapSource<N> {
-
-}
-
-pub fn new_depth_map<N: Float, D: Send + 'static>(queue_size: usize, rays: impl IntoIterator<Item=UnitVector3<N>>, map_width: usize) -> (DepthMap<N, D>, DepthMapSource<N>) {
+pub fn new_depth_map<N: Float, D: Send + 'static>(
+    queue_size: usize,
+    rays: impl IntoIterator<Item = UnitVector3<N>>,
+    map_width: usize,
+) -> (DepthMap<N, D>, DepthMapSource<N>) {
     let (requests_sender, requests) = async_channel(queue_size);
     let rays: Arc<[_]> = rays.into_iter().map(|v| v.into_inner().into()).collect();
     assert_eq!(rays.len() % map_width, 0);
@@ -98,15 +115,7 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(queue_size: usize, rays: impl 
             depth_sub: Subscriber::new(1),
             requests,
         },
-        DepthMapSource {
-            inner: Arc::new(DepthMapSourceInner {
-                queues: Queues {
-                    height: ArrayQueue::new(queue_size),
-                    height_variance: ArrayQueue::new(queue_size),
-                },
-                requests_sender
-            }),
-        },
+        DepthMapSource { requests_sender },
     )
 }
 
@@ -151,19 +160,21 @@ impl<N: Float + bytemuck::Pod, D: Deref<Target = [N]> + Send + 'static> AsyncNod
         };
         let pixel_count = self.rays.len();
         let map_height = pixel_count / self.map_width;
-        let height_within_compute: Compute<(Option<&[[N; 3]]>, Option<&[N]>, &[N; 3], &[Cylinder<N>]), [N]> =
-            Compute::new(
-                shader,
-                (
-                    DynamicSize::new(pixel_count),
-                    DynamicSize::new(pixel_count),
-                    StaticSize::default(),
-                    DynamicSize::new(self.max_cylinders),
-                ),
+        let height_within_compute: Compute<
+            (Option<&[[N; 3]]>, Option<&[N]>, &[N; 3], &[Cylinder<N>]),
+            [N],
+        > = Compute::new(
+            shader,
+            (
                 DynamicSize::new(pixel_count),
-                (self.map_width as u32, map_height as u32, 1),
-            )
-            .await?;
+                DynamicSize::new(pixel_count),
+                StaticSize::default(),
+                DynamicSize::new(self.max_cylinders),
+            ),
+            DynamicSize::new(pixel_count),
+            (self.map_width as u32, map_height as u32, 1),
+        )
+        .await?;
         let mut height_within_compute_rays = Some(self.rays);
         let mut height_within_compute_depth = Some(depth.deref());
 
@@ -183,7 +194,6 @@ impl<N: Float + bytemuck::Pod, D: Deref<Target = [N]> + Send + 'static> AsyncNod
                     origin,
                     shape,
                     sender,
-                    sender_sender,
                 } => {
                     cylinder_buf.clear();
                     match shape {
@@ -199,23 +209,21 @@ impl<N: Float + bytemuck::Pod, D: Deref<Target = [N]> + Send + 'static> AsyncNod
                             &cylinder_buf,
                         )
                         .await;
-                    let _ = sender.send(HeightOnly::from_iter(
-                        heights.into_iter().copied().map(|n| {
+                    let _ = sender.send(HeightOnly::from_iter(heights.into_iter().copied().map(
+                        |n| {
                             if n.is_sign_negative() {
                                 None
                             } else {
                                 Some(n)
                             }
-                        }),
-                    ));
-                    let _ = sender_sender.send(sender);
+                        },
+                    )));
                 }
 
                 Request::HeightVarianceWithin {
                     origin,
                     shape,
                     sender,
-                    sender_sender,
                 } => {
                     cylinder_buf.clear();
                     match shape {
@@ -240,7 +248,6 @@ impl<N: Float + bytemuck::Pod, D: Deref<Target = [N]> + Send + 'static> AsyncNod
                             }
                         }),
                     ));
-                    let _ = sender_sender.send(sender);
                 }
             }
         }

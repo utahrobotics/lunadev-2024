@@ -6,11 +6,6 @@ use crate::Shape;
 
 pub mod depth;
 
-pub trait HeightDistribution<N> {
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = Option<N>>;
-}
 
 pub struct HeightOnly<N: Float> {
     pub height: N,
@@ -23,7 +18,7 @@ pub struct HeightAndVariance<N: Float> {
     pub unknown: N,
 }
 
-impl<N: Float> HeightDistribution<N> for HeightOnly<N> {
+impl<N: Float> HeightOnly<N> {
     fn from_iter<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = Option<N>>,
@@ -52,7 +47,7 @@ impl<N: Float> HeightDistribution<N> for HeightOnly<N> {
     }
 }
 
-impl<N: Float> HeightDistribution<N> for HeightAndVariance<N> {
+impl<N: Float> HeightAndVariance<N> {
     fn from_iter<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = Option<N>>,
@@ -91,31 +86,18 @@ impl<N: Float> HeightDistribution<N> for HeightAndVariance<N> {
     }
 }
 
-#[async_trait]
-pub trait ObstacleSourceHeightGeneric<N: Float, H: HeightDistribution<N>> {
-    async fn get_height_distr_within(&self, origin: Point3<N>, shape: Shape<N>) -> H
-    where
-        Self: Sized;
-}
+pub struct Busy;
 
 #[async_trait]
-pub trait ObstacleSource<N: Float>:
-    ObstacleSourceHeightGeneric<N, HeightOnly<N>> + ObstacleSourceHeightGeneric<N, HeightAndVariance<N>>
-{
-    async fn get_height_only_within(&self, origin: Point3<N>, shape: Shape<N>) -> HeightOnly<N>
-    where
-        Self: Sized,
-    {
-        self.get_height_distr_within(origin, shape).await
-    }
+pub trait ObstacleSource<N: Float>: Send + Sync {
+    async fn get_height_only_within(
+        &self,
+        origin: Point3<N>,
+        shape: Shape<N>,
+    ) -> Result<HeightOnly<N>, Busy>;
     async fn get_height_and_variance_within(
         &self,
         origin: Point3<N>,
         shape: Shape<N>,
-    ) -> HeightAndVariance<N>
-    where
-        Self: Sized,
-    {
-        self.get_height_distr_within(origin, shape).await
-    }
+    ) -> Result<HeightAndVariance<N>, Busy>;
 }

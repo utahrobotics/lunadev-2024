@@ -2849,6 +2849,7 @@ dependencies = [
  "bytemuck",
  "compute-shader",
  "crossbeam",
+ "futures",
  "nalgebra",
  "unros",
 ]
