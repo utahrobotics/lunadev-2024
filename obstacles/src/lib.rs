@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::{stream::FuturesUnordered, StreamExt};
-use nalgebra::Point3;
+use nalgebra::Isometry3;
 use sources::{Busy, HeightAndVariance, HeightOnly, ObstacleSource};
 use unros::{float::Float, tokio::sync::RwLock};
 
@@ -10,7 +10,11 @@ pub mod sources;
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum Shape<N: Float> {
-    Cylinder { radius: N, height: N },
+    Cylinder {
+        radius: N,
+        height: N,
+        isometry: Isometry3<N>,
+    },
     // Composite(Vec<Self>),
 }
 
@@ -37,14 +41,13 @@ impl<N: Float> ObstacleHub<N> {
 
     pub async fn get_height_only_within(
         &self,
-        origin: Point3<N>,
         shape: Shape<N>,
-        mut callback: impl FnMut(Result<HeightOnly<N>, Busy>) -> bool
+        mut callback: impl FnMut(Result<HeightOnly<N>, Busy>) -> bool,
     ) {
         let sources = self.inner.sources.read().await;
         let mut futures = FuturesUnordered::new();
         for source in sources.iter() {
-            futures.push(source.get_height_only_within(origin, shape.clone()));
+            futures.push(source.get_height_only_within(shape.clone()));
         }
         while let Some(result) = futures.next().await {
             if !callback(result) {
@@ -54,14 +57,13 @@ impl<N: Float> ObstacleHub<N> {
     }
     pub async fn get_height_and_variance_within(
         &self,
-        origin: Point3<N>,
         shape: Shape<N>,
-        mut callback: impl FnMut(Result<HeightAndVariance<N>, Busy>) -> bool
+        mut callback: impl FnMut(Result<HeightAndVariance<N>, Busy>) -> bool,
     ) {
         let sources = self.inner.sources.read().await;
         let mut futures = FuturesUnordered::new();
         for source in sources.iter() {
-            futures.push(source.get_height_and_variance_within(origin, shape.clone()));
+            futures.push(source.get_height_and_variance_within(shape.clone()));
         }
         while let Some(result) = futures.next().await {
             if !callback(result) {

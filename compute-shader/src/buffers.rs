@@ -85,6 +85,21 @@ impl<T: BufferSize, T1: BufferSize, T2: BufferSize, T3: BufferSize> BufferSizeIt
     }
 }
 
+impl<T: BufferSize, T1: BufferSize, T2: BufferSize, T3: BufferSize, T4: BufferSize> BufferSizeIter
+    for (T, T1, T2, T3, T4)
+{
+    fn into_iter(self) -> impl Iterator<Item = u64> {
+        [
+            self.0.size(),
+            self.1.size(),
+            self.2.size(),
+            self.3.size(),
+            self.4.size(),
+        ]
+        .into_iter()
+    }
+}
+
 pub trait IntoBuffer: Copy {
     type Size: BufferSize;
     fn into_buffer(
@@ -238,6 +253,26 @@ impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, T3: IntoBuffer> IntoBuffers
         (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
         (&self.2).into_buffer(command_encoder, &buffers[2], stager, device);
         (&self.3).into_buffer(command_encoder, &buffers[3], stager, device);
+    }
+}
+
+impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, T3: IntoBuffer, T4: IntoBuffer> IntoBuffers
+    for (T, T1, T2, T3, T4)
+{
+    type Sizes = (T::Size, T1::Size, T2::Size, T3::Size, T4::Size);
+
+    fn into_buffers(
+        &self,
+        command_encoder: &mut CommandEncoder,
+        buffers: &[wgpu::Buffer],
+        stager: &mut StagingBelt,
+        device: &wgpu::Device,
+    ) {
+        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
+        (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
+        (&self.2).into_buffer(command_encoder, &buffers[2], stager, device);
+        (&self.3).into_buffer(command_encoder, &buffers[3], stager, device);
+        (&self.4).into_buffer(command_encoder, &buffers[4], stager, device);
     }
 }
 

@@ -23,6 +23,9 @@ pub trait Float:
     + SupersetOf<i8>
     + Sum
 {
+    const MAX: Self;
+    const MIN: Self;
+
     fn to_f32(self) -> f32;
     fn to_f64(self) -> f64;
     fn is_nan(self) -> bool;
@@ -32,6 +35,9 @@ pub trait Float:
 }
 
 impl Float for f32 {
+    const MAX: Self = f32::MAX;
+    const MIN: Self = f32::MIN;
+
     fn to_f32(self) -> f32 {
         self
     }
@@ -53,6 +59,9 @@ impl Float for f32 {
     }
 }
 impl Float for f64 {
+    const MAX: Self = f64::MAX;
+    const MIN: Self = f64::MIN;
+
     fn to_f32(self) -> f32 {
         self as f32
     }

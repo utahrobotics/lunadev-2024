@@ -1,11 +1,10 @@
 use async_trait::async_trait;
-use nalgebra::{convert as nconvert, Point3};
+use nalgebra::convert as nconvert;
 use unros::float::Float;
 
 use crate::Shape;
 
 pub mod depth;
-
 
 pub struct HeightOnly<N: Float> {
     pub height: N,
@@ -90,14 +89,9 @@ pub struct Busy;
 
 #[async_trait]
 pub trait ObstacleSource<N: Float>: Send + Sync {
-    async fn get_height_only_within(
-        &self,
-        origin: Point3<N>,
-        shape: Shape<N>,
-    ) -> Result<HeightOnly<N>, Busy>;
+    async fn get_height_only_within(&self, shape: Shape<N>) -> Result<HeightOnly<N>, Busy>;
     async fn get_height_and_variance_within(
         &self,
-        origin: Point3<N>,
         shape: Shape<N>,
     ) -> Result<HeightAndVariance<N>, Busy>;
 }

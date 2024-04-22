@@ -9,5 +9,6 @@ compute-shader = { path = "../compute-shader" }
 nalgebra = { workspace = true }
 crossbeam = { workspace = true }
 bytemuck = { workspace = true }
+rig = { path = "../rig" }
 async-trait = "0"
 futures = "0"

@@ -6,7 +6,8 @@ use compute_shader::{
     wgpu::include_wgsl,
     Compute,
 };
-use nalgebra::{Point3, UnitVector3};
+use nalgebra::{Matrix4, UnitVector3};
+use rig::RobotElementRef;
 use unros::{
     anyhow,
     float::Float,
@@ -25,12 +26,10 @@ use super::{Busy, HeightAndVariance, HeightOnly, ObstacleSource};
 
 enum Request<N: Float> {
     HeightOnlyWithin {
-        origin: Point3<N>,
         shape: Shape<N>,
         sender: oneshot::Sender<HeightOnly<N>>,
     },
     HeightVarianceWithin {
-        origin: Point3<N>,
         shape: Shape<N>,
         sender: oneshot::Sender<HeightAndVariance<N>>,
     },
@@ -44,6 +43,7 @@ pub struct DepthMap<N: Float, D> {
 
     depth_sub: Subscriber<D>,
     requests: AsyncReceiver<Request<N>>,
+    robot_element_ref: RobotElementRef,
 }
 
 impl<N: Float, D: Send + 'static> DepthMap<N, D> {
@@ -58,19 +58,10 @@ pub struct DepthMapSource<N: Float> {
 
 #[async_trait]
 impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
-    
-    async fn get_height_only_within(
-        &self,
-        origin: Point3<N>,
-        shape: Shape<N>,
-    ) -> Result<HeightOnly<N>, Busy> {
+    async fn get_height_only_within(&self, shape: Shape<N>) -> Result<HeightOnly<N>, Busy> {
         let (sender, receiver) = oneshot::channel();
         self.requests_sender
-            .try_send(Request::HeightOnlyWithin {
-                origin,
-                shape,
-                sender,
-            })
+            .try_send(Request::HeightOnlyWithin { shape, sender })
             .map_err(|_| Busy)?;
         Ok(receiver.await.unwrap_or_else(|_| HeightOnly {
             height: N::zero(),
@@ -79,16 +70,11 @@ impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
     }
     async fn get_height_and_variance_within(
         &self,
-        origin: Point3<N>,
         shape: Shape<N>,
     ) -> Result<HeightAndVariance<N>, Busy> {
         let (sender, receiver) = oneshot::channel();
         self.requests_sender
-            .try_send(Request::HeightVarianceWithin {
-                origin,
-                shape,
-                sender,
-            })
+            .try_send(Request::HeightVarianceWithin { shape, sender })
             .map_err(|_| Busy)?;
         Ok(receiver.await.unwrap_or_else(|_| HeightAndVariance {
             height: N::zero(),
@@ -102,6 +88,7 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(
     queue_size: usize,
     rays: impl IntoIterator<Item = UnitVector3<N>>,
     map_width: usize,
+    robot_element_ref: RobotElementRef,
 ) -> (DepthMap<N, D>, DepthMapSource<N>) {
     let (requests_sender, requests) = async_channel(queue_size);
     let rays: Arc<[_]> = rays.into_iter().map(|v| v.into_inner().into()).collect();
@@ -114,6 +101,7 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(
             max_cylinders: 8,
             depth_sub: Subscriber::new(1),
             requests,
+            robot_element_ref,
         },
         DepthMapSource { requests_sender },
     )
@@ -124,6 +112,7 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(
 struct Cylinder<N: Float> {
     height: N,
     radius: N,
+    inv_matrix: [[N; 4]; 4],
 }
 unsafe impl<N: Float + bytemuck::Pod + bytemuck::NoUninit> bytemuck::Pod for Cylinder<N> {}
 unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroable for Cylinder<N> {}
@@ -143,9 +132,7 @@ unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroab
 // {
 // }
 
-impl<N: Float + bytemuck::Pod, D: Deref<Target = [N]> + Send + 'static> AsyncNode
-    for DepthMap<N, D>
-{
+impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
     type Result = anyhow::Result<()>;
 
     async fn run(mut self, context: unros::runtime::RuntimeContext) -> Self::Result {
@@ -153,23 +140,25 @@ impl<N: Float + bytemuck::Pod, D: Deref<Target = [N]> + Send + 'static> AsyncNod
         let Some(mut depth) = self.depth_sub.recv_or_closed().await else {
             return Ok(());
         };
-        let shader = if N::is_f32() {
-            include_wgsl!("depthf32.wgsl")
-        } else {
-            include_wgsl!("depthf64.wgsl")
-        };
         let pixel_count = self.rays.len();
         let map_height = pixel_count / self.map_width;
         let height_within_compute: Compute<
-            (Option<&[[N; 3]]>, Option<&[N]>, &[N; 3], &[Cylinder<N>]),
-            [N],
+            (
+                Option<&[[f32; 3]]>,
+                Option<&[f32]>,
+                &[Cylinder<f32>],
+                &u32,
+                &[[f32; 4]; 4],
+            ),
+            [f32],
         > = Compute::new(
-            shader,
+            include_wgsl!("depthf32.wgsl"),
             (
                 DynamicSize::new(pixel_count),
                 DynamicSize::new(pixel_count),
-                StaticSize::default(),
                 DynamicSize::new(self.max_cylinders),
+                StaticSize::default(),
+                StaticSize::default(),
             ),
             DynamicSize::new(pixel_count),
             (self.map_width as u32, map_height as u32, 1),
@@ -188,25 +177,38 @@ impl<N: Float + bytemuck::Pod, D: Deref<Target = [N]> + Send + 'static> AsyncNod
                 depth = new_depth;
                 height_within_compute_depth = Some(depth.deref());
             }
+            let transform = self
+                .robot_element_ref
+                .get_isometry_from_base()
+                .to_homogeneous()
+                .data
+                .0;
 
             match request {
-                Request::HeightOnlyWithin {
-                    origin,
-                    shape,
-                    sender,
-                } => {
+                Request::HeightOnlyWithin { shape, sender } => {
                     cylinder_buf.clear();
                     match shape {
-                        Shape::Cylinder { radius, height } => {
-                            cylinder_buf.push(Cylinder { radius, height });
+                        Shape::Cylinder {
+                            radius,
+                            height,
+                            isometry,
+                        } => {
+                            let inv_matrix: Matrix4<f32> =
+                                isometry.to_homogeneous().try_inverse().unwrap();
+                            cylinder_buf.push(Cylinder {
+                                radius,
+                                height,
+                                inv_matrix: inv_matrix.data.0,
+                            });
                         }
                     }
                     let heights = height_within_compute
                         .call(
                             height_within_compute_rays.take().as_deref(),
                             height_within_compute_depth.take(),
-                            &origin.into(),
                             &cylinder_buf,
+                            &(cylinder_buf.len() as u32),
+                            &transform,
                         )
                         .await;
                     let _ = sender.send(HeightOnly::from_iter(heights.into_iter().copied().map(
@@ -220,23 +222,30 @@ impl<N: Float + bytemuck::Pod, D: Deref<Target = [N]> + Send + 'static> AsyncNod
                     )));
                 }
 
-                Request::HeightVarianceWithin {
-                    origin,
-                    shape,
-                    sender,
-                } => {
+                Request::HeightVarianceWithin { shape, sender } => {
                     cylinder_buf.clear();
                     match shape {
-                        Shape::Cylinder { radius, height } => {
-                            cylinder_buf.push(Cylinder { radius, height });
+                        Shape::Cylinder {
+                            radius,
+                            height,
+                            isometry,
+                        } => {
+                            let inv_matrix: Matrix4<f32> =
+                                isometry.to_homogeneous().try_inverse().unwrap();
+                            cylinder_buf.push(Cylinder {
+                                radius,
+                                height,
+                                inv_matrix: inv_matrix.data.0,
+                            });
                         }
                     }
                     let heights = height_within_compute
                         .call(
                             height_within_compute_rays.take().as_deref(),
                             height_within_compute_depth.take(),
-                            &origin.into(),
                             &cylinder_buf,
+                            &(cylinder_buf.len() as u32),
+                            &transform,
                         )
                         .await;
                     let _ = sender.send(HeightAndVariance::from_iter(

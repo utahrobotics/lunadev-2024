@@ -194,6 +194,20 @@ impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, T3: IntoBuffer, V: FromBuffe
     }
 }
 
+impl<
+        T: IntoBuffer,
+        T1: IntoBuffer,
+        T2: IntoBuffer,
+        T3: IntoBuffer,
+        T4: IntoBuffer,
+        V: FromBuffer + ?Sized,
+    > Compute<(T, T1, T2, T3, T4), V>
+{
+    pub async fn call(&self, arg1: T, arg2: T1, arg3: T2, arg4: T3, arg5: T4) -> ReturnBuffer<V> {
+        self.call_inner((arg1, arg2, arg3, arg4, arg5)).await
+    }
+}
+
 struct State {
     compute_pipeline: wgpu::ComputePipeline,
     bind_group: wgpu::BindGroup,

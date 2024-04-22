@@ -2851,6 +2851,7 @@ dependencies = [
  "crossbeam",
  "futures",
  "nalgebra",
+ "rig",
  "unros",
 ]
 
