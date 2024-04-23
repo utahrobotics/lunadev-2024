@@ -127,21 +127,6 @@ unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroab
     for Transform<N>
 {
 }
-#[repr(C, align(16))]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Transform2 {
-    origin: [f32; 4],
-    matrix: [[f32; 4]; 3],
-}
-// #[repr(C, align(16))]
-// #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-// struct Cylinder2 {
-//     origin: [f32; 4],
-//     inv_matrix: [[f32; 4]; 3],
-//     height: f32,
-//     radius: f32,
-// }
-
 impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
     type Result = anyhow::Result<()>;
 

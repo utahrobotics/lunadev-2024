@@ -74,15 +74,15 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             obstacle_hub
                 .get_height_and_variance_within(
                     obstacles::Shape::Cylinder {
-                        radius: 0.5,
-                        height: 1.0,
+                        radius: 0.25,
+                        height: 0.5,
                         isometry: Isometry3::from_parts(
-                            Point3::new(0.0, 0.0, -1.0).into(),
+                            Point3::new(0.0, 0.0, -0.5).into(),
                             UnitQuaternion::default(),
                         ),
                     },
                     |heights| {
-                        // log::info!("{:?}", heights);
+                        log::info!("{:?}", heights);
                         true
                     },
                 )
@@ -258,9 +258,10 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             depths.reserve(n.saturating_sub(depths.capacity()));
             let distr = Normal::new(0.0, 0.05).unwrap();
             let mut rng = quick_rng();
+            assert_eq!(n, rays::RAYS.len());
             for _ in 0..n {
                 let mut depth = stream.read_f32_le().await.expect("Failed to receive depth");
-                // depth *= (1.0 + distr.sample(rng.deref_mut()));
+                depth *= 1.0 + distr.sample(rng.deref_mut());
                 depths.push(depth);
             }
 

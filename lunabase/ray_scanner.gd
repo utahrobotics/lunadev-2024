@@ -31,5 +31,7 @@ func scan() -> Array[float]:
 		if raycast.is_colliding():
 			var point := raycast.get_collision_point()
 			out.append(raycast.get_collision_point().distance_to(global_position))
+		else:
+			out.append(0.0)
 			#out.append(global_transform.inverse() * point)
 	return out
