@@ -91,7 +91,13 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(
     robot_element_ref: RobotElementRef,
 ) -> (DepthMap<N, D>, DepthMapSource<N>) {
     let (requests_sender, requests) = async_channel(queue_size);
-    let rays: Arc<[_]> = rays.into_iter().map(|v| [v.x, v.y, v.z, N::zero()]).collect();
+    let rays: Arc<[_]> = rays
+        .into_iter()
+        .map(|v| [v.x, v.y, v.z, N::zero()])
+        .collect();
+    if rays.len() > u32::MAX as usize {
+        panic!("Too many rays (maximum is u32::MAX)");
+    }
 
     (
         DepthMap {
@@ -132,7 +138,6 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
 
     async fn run(mut self, context: unros::runtime::RuntimeContext) -> Self::Result {
         setup_logging!(context);
-        // info!("{}", std::mem::size_of::<Transform2>());
         let pixel_count = self.rays.len();
         let height_within_compute: Compute<
             (
@@ -174,8 +179,19 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
             }
             let isometry = self.robot_element_ref.get_isometry_from_base();
             let transform = Transform {
-                origin: [isometry.translation.x, isometry.translation.y, isometry.translation.z, 0.0],
-                matrix: isometry.rotation.to_rotation_matrix().into_inner().data.0.map(|v| [v[0], v[1], v[2], 0.0]),
+                origin: [
+                    isometry.translation.x,
+                    isometry.translation.y,
+                    isometry.translation.z,
+                    0.0,
+                ],
+                matrix: isometry
+                    .rotation
+                    .to_rotation_matrix()
+                    .into_inner()
+                    .data
+                    .0
+                    .map(|v| [v[0], v[1], v[2], 0.0]),
             };
 
             match request {
@@ -187,11 +203,20 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             height,
                             isometry,
                         } => {
-                            let inv_matrix = isometry.rotation.to_rotation_matrix().inverse().into_inner();
+                            let inv_matrix = isometry
+                                .rotation
+                                .to_rotation_matrix()
+                                .inverse()
+                                .into_inner();
                             cylinder_buf.push(Cylinder {
                                 radius,
                                 height,
-                                origin: [isometry.translation.x, isometry.translation.y, isometry.translation.z, 0.0],
+                                origin: [
+                                    isometry.translation.x,
+                                    isometry.translation.y,
+                                    isometry.translation.z,
+                                    0.0,
+                                ],
                                 inv_matrix: inv_matrix.data.0.map(|v| [v[0], v[1], v[2], 0.0]),
                             });
                         }
@@ -205,13 +230,14 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             &transform,
                         )
                         .await;
-                    let _ = sender.send(HeightOnly::from_iter(
+                    let _ = sender.send(
                         heights
                             .into_iter()
                             .copied()
                             .filter(|n| *n != f32::MAX)
-                            .map(|n| if n == f32::MIN { None } else { Some(n) }),
-                    ));
+                            .map(|n| if n == f32::MIN { None } else { Some(n) })
+                            .collect(),
+                    );
                 }
 
                 Request::HeightVarianceWithin { shape, sender } => {
@@ -222,11 +248,20 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             height,
                             isometry,
                         } => {
-                            let inv_matrix = isometry.rotation.to_rotation_matrix().inverse().into_inner();
+                            let inv_matrix = isometry
+                                .rotation
+                                .to_rotation_matrix()
+                                .inverse()
+                                .into_inner();
                             cylinder_buf.push(Cylinder {
                                 radius,
                                 height,
-                                origin: [isometry.translation.x, isometry.translation.y, isometry.translation.z, 0.0],
+                                origin: [
+                                    isometry.translation.x,
+                                    isometry.translation.y,
+                                    isometry.translation.z,
+                                    0.0,
+                                ],
                                 inv_matrix: inv_matrix.data.0.map(|v| [v[0], v[1], v[2], 0.0]),
                             });
                         }
@@ -240,13 +275,14 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             &transform,
                         )
                         .await;
-                    let _ = sender.send(HeightAndVariance::from_iter(
+                    let _ = sender.send(
                         heights
                             .into_iter()
                             .copied()
                             .filter(|n| *n != f32::MAX)
-                            .map(|n| if n == f32::MIN { None } else { Some(n) }),
-                    ));
+                            .map(|n| if n == f32::MIN { None } else { Some(n) })
+                            .collect(),
+                    );
                 }
             }
         }

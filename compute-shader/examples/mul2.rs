@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
                             rand.gen_range(-10.0..10.0),
                             rand.gen_range(-10.0..10.0),
                             rand.gen_range(-10.0..10.0),
-                            0.0
+                            0.0,
                         ]
                     })
                     .collect()

@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3 uid="uid://bd2p5x2lp67bn"]
+[gd_scene load_steps=19 format=3 uid="uid://bd2p5x2lp67bn"]
 
 [ext_resource type="PackedScene" uid="uid://s8kxwa7b8f1t" path="res://ray_scanner.tscn" id="1_qti8w"]
 [ext_resource type="PackedScene" uid="uid://c5hn62wsy0afm" path="res://waypoint.tscn" id="2_mr8o8"]
@@ -214,11 +214,6 @@ top_radius = 0.01
 bottom_radius = 0.03
 height = 0.1
 
-[sub_resource type="CylinderMesh" id="CylinderMesh_t75po"]
-top_radius = 0.25
-bottom_radius = 0.25
-height = 0.5
-
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7fexe"]
 albedo_color = Color(0.027451, 0.0235294, 0.0627451, 1)
 
@@ -293,10 +288,6 @@ transform = Transform3D(1, 0, 0, 0, 1.31134e-07, 1, 0, -1, 1.31134e-07, 0, 0, -0
 mesh = SubResource("CylinderMesh_hn2h0")
 
 [node name="Path" type="Node" parent="SubViewportContainer/SubViewport/Node3D/CharacterBody3D/Node"]
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="SubViewportContainer/SubViewport/Node3D/CharacterBody3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.5)
-mesh = SubResource("CylinderMesh_t75po")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="SubViewportContainer/SubViewport/Node3D"]
 layers = 2

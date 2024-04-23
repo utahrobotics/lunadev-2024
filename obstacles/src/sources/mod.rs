@@ -19,7 +19,7 @@ pub struct HeightAndVariance<N: Float> {
     pub unknown: N,
 }
 
-impl<N: Float> HeightOnly<N> {
+impl<N: Float> FromIterator<Option<N>> for HeightOnly<N> {
     fn from_iter<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = Option<N>>,
@@ -35,9 +35,7 @@ impl<N: Float> HeightOnly<N> {
                 }
                 x
             })
-            .map(|x| {
-                x
-            })
+            .map(|x| x)
             .sum();
         if count - unknown_count == 0 {
             return Self {
@@ -54,7 +52,7 @@ impl<N: Float> HeightOnly<N> {
     }
 }
 
-impl<N: Float> HeightAndVariance<N> {
+impl<N: Float> FromIterator<Option<N>> for HeightAndVariance<N> {
     fn from_iter<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = Option<N>>,
@@ -80,7 +78,7 @@ impl<N: Float> HeightAndVariance<N> {
             return Self {
                 height: N::zero(),
                 unknown: N::one(),
-                variance: N::zero()
+                variance: N::zero(),
             };
         }
         height /= nconvert(count - unknown_count);

@@ -1,9 +1,9 @@
 use compute_shader::buffers::{DynamicSize, StaticSize};
 use compute_shader::Compute;
+use nalgebra::{Isometry3, Point3, Translation3, UnitQuaternion, UnitVector3, Vector3};
 use rand::{thread_rng, Rng};
 use std::{f32::consts::PI, sync::Arc};
 use wgpu::include_wgsl;
-use nalgebra::{Translation3, UnitQuaternion, Point3, Isometry3, UnitVector3, Vector3};
 
 #[repr(C, align(16))]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
                         rand.gen_range(-10.0..10.0),
                         rand.gen_range(-10.0..10.0),
                         rand.gen_range(-10.0..10.0),
-                        0.0
+                        0.0,
                     ]
                 })
                 .collect();
@@ -58,18 +58,26 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let transform = Transform {
-            origin: [isometry.translation.vector.x, isometry.translation.vector.y, isometry.translation.vector.z, 0.0],
-            matrix: isometry.rotation.to_rotation_matrix().into_inner().data.0.map(|v| [v[0], v[1], v[2], 0.0]),
+            origin: [
+                isometry.translation.vector.x,
+                isometry.translation.vector.y,
+                isometry.translation.vector.z,
+                0.0,
+            ],
+            matrix: isometry
+                .rotation
+                .to_rotation_matrix()
+                .into_inner()
+                .data
+                .0
+                .map(|v| [v[0], v[1], v[2], 0.0]),
         };
-        
+
         let output = compute.call(&input, &transform).await;
         for (input, output) in input.iter().zip(output.iter()) {
             let input = Point3::new(input[0], input[1], input[2]);
             let output = Point3::new(output[0], output[1], output[2]);
-            assert_eq!(
-                isometry * input,
-                output
-            );
+            assert_eq!(isometry * input, output);
         }
     }
 

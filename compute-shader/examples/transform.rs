@@ -1,10 +1,10 @@
 use compute_shader::buffers::{DynamicSize, StaticSize};
 use compute_shader::Compute;
+use nalgebra::{Isometry3, Translation3, UnitQuaternion, UnitVector3, Vector3};
 use rand::{thread_rng, Rng};
+use std::ops::Deref;
 use std::{f32::consts::PI, sync::Arc};
 use wgpu::include_wgsl;
-use nalgebra::{Translation3, UnitQuaternion, Vector3, Isometry3, UnitVector3};
-use std::ops::Deref;
 
 #[repr(C, align(16))]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
@@ -48,10 +48,21 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let transform = Transform {
-            origin: [isometry.translation.vector.x, isometry.translation.vector.y, isometry.translation.vector.z, 0.0],
-            matrix: isometry.rotation.to_rotation_matrix().into_inner().data.0.map(|v| [v[0], v[1], v[2], 0.0]),
+            origin: [
+                isometry.translation.vector.x,
+                isometry.translation.vector.y,
+                isometry.translation.vector.z,
+                0.0,
+            ],
+            matrix: isometry
+                .rotation
+                .to_rotation_matrix()
+                .into_inner()
+                .data
+                .0
+                .map(|v| [v[0], v[1], v[2], 0.0]),
         };
-        
+
         let output = compute.call(&transform).await;
         assert_eq!(output.deref(), &transform);
     }
