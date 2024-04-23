@@ -1,4 +1,4 @@
-use nalgebra::{convert as nconvert, Point3, Vector2, Vector3};
+use nalgebra::{convert as nconvert, Point3, Translation3, Vector2, Vector3};
 use obstacles::{ObstacleHub, Shape};
 use unros::{float::Float, runtime::RuntimeContext, setup_logging, tokio};
 
@@ -27,13 +27,15 @@ impl<'a, N: Float> AStarModule<Node<N>, usize> for DirectPathfinderSafefinder<'a
                 nconvert::<_, N>(position.y) * self.resolution,
             );
             self.shape.set_origin(nextf);
-            self
-                .obstacle_hub
+            self.obstacle_hub
                 .get_height_only_within(self.shape, |result| {
-                    out(Node {
-                        position,
-                        height: result.height,
-                    }, 1);
+                    out(
+                        Node {
+                            position,
+                            height: result.height,
+                        },
+                        1,
+                    );
                     Some(())
                 })
                 .await;
@@ -83,12 +85,12 @@ impl<'a, N: Float> AStarModule<Node<N>, usize> for DirectPathfinderModule<'a, N>
                     self.obstacle_hub
                         .get_height_only_within(&shape, |result| {
                             if result.height.abs() > self.max_height_diff {
+                                None
+                            } else {
                                 Some(Node {
                                     position: $next,
                                     height: result.height,
                                 })
-                            } else {
-                                None
                             }
                         })
                         .await
@@ -102,14 +104,17 @@ impl<'a, N: Float> AStarModule<Node<N>, usize> for DirectPathfinderModule<'a, N>
             successor_func!(current.position + Vector2::new(-1, 0)),
             async {
                 let end_diff = self.end_node.position - current.position;
-                let end_diff: Vector2<N> = nconvert(end_diff);
-                if end_diff.magnitude() < N::one() {
+                if (end_diff.x == 0 && end_diff.y.abs() <= 1) || (end_diff.y == 0 && end_diff.x.abs() <= 1) {
                     successor_func!(self.end_node.position).await
                 } else {
                     None
                 }
             }
         );
+        // for p in [a, b, c, d, e].iter().copied() {
+        //     println!("{p:?}");
+        //     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // }
         [a, b, c, d, e]
             .into_iter()
             .filter_map(|x| x)
@@ -121,13 +126,12 @@ impl<'a, N: Float> AStarModule<Node<N>, usize> for DirectPathfinderModule<'a, N>
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct DirectPathfinder;
 
 impl<N: Float> PathfindingEngine<N> for DirectPathfinder {
     async fn pathfind(
         &mut self,
-        start: Point3<N>,
         end: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
@@ -136,12 +140,11 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder {
         context: &RuntimeContext,
     ) -> Option<Vec<Point3<N>>> {
         setup_logging!(context);
-        let mut start = start.coords;
         let mut pre_path = vec![];
-        shape.set_origin(start);
-        let start_node = Node {
+        shape.set_origin(Translation3::default());
+        let mut start_node = Node {
             position: Vector2::<isize>::new(0, 0),
-            height: start.y,
+            height: N::zero(),
         };
 
         if obstacle_hub
@@ -167,16 +170,10 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder {
             )
             .await
             {
-                let start_node = path.pop().unwrap();
-                start = Vector3::new(
-                    nconvert::<_, N>(start_node.position.x) * resolution,
-                    start_node.height,
-                    nconvert::<_, N>(start_node.position.y) * resolution,
-                );
+                start_node = path.pop().unwrap();
                 pre_path = path;
             }
         }
-        shape.set_origin(start);
         let end_node = Node {
             position: Vector2::new(
                 (end.x / resolution).round().to_isize(),
@@ -196,7 +193,7 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder {
         let result = astar(&start_node, &mut successors, |current| {
             let diff = current.position - end_node.position;
             let diff: Vector2<N> = nconvert(diff);
-            diff.magnitude().round().to_usize()
+            diff.magnitude().to_usize()
         })
         .await;
 
@@ -247,7 +244,7 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Node<N: Float> {
     position: Vector2<isize>,
     height: N,

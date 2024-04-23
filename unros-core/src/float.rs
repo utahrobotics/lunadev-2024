@@ -36,6 +36,7 @@ pub trait Float:
     fn to_isize(self) -> isize;
     fn to_usize(self) -> usize;
 
+    fn is_nan(self) -> bool;
     fn to_not_nan(self) -> Option<NotNan<Self>>;
 }
 
@@ -56,6 +57,9 @@ impl Float for f32 {
     }
     fn to_usize(self) -> usize {
         self as usize
+    }
+    fn is_nan(self) -> bool {
+        self.is_nan()
     }
 
     fn to_not_nan(self) -> Option<NotNan<Self>> {
@@ -88,6 +92,9 @@ impl Float for f64 {
     }
     fn to_usize(self) -> usize {
         self as usize
+    }
+    fn is_nan(self) -> bool {
+        self.is_nan()
     }
 
     fn to_not_nan(self) -> Option<NotNan<Self>> {

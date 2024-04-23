@@ -7,18 +7,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nalgebra::{convert as nconvert, Point3, UnitQuaternion, Vector3};
+use nalgebra::{convert as nconvert, Isometry3, Point3, UnitQuaternion, Vector3};
 use obstacles::{ObstacleHub, Shape};
 use rig::RobotBaseRef;
 use unros::{
-    float::Float, node::AsyncNode, pubsub::{Publisher, PublisherRef}, runtime::RuntimeContext, service::{new_service, Service, ServiceHandle}, setup_logging, tokio, DontDrop, ShouldNotDrop
+    float::Float,
+    node::AsyncNode,
+    pubsub::{Publisher, PublisherRef},
+    runtime::RuntimeContext,
+    service::{new_service, Service, ServiceHandle},
+    setup_logging, tokio, DontDrop, ShouldNotDrop,
 };
-
 
 use self::direct::DirectPathfinder;
 
 mod alg;
-mod direct;
+pub mod direct;
 
 #[derive(Debug)]
 pub enum NavigationError {
@@ -67,7 +71,6 @@ pub type NavigationServiceHandle<N> =
 pub trait PathfindingEngine<N: Float>: Send + 'static {
     fn pathfind(
         &mut self,
-        start: Point3<N>,
         end: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
@@ -137,7 +140,7 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
         let mut start_time = Instant::now();
 
         loop {
-            let Some(mut req) = self.service.blocking_wait_for_request() else {
+            let Some(mut req) = self.service.wait_for_request().await else {
                 break;
             };
 
@@ -153,14 +156,14 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
 
             'main: loop {
                 start_time += start_time.elapsed();
-                let mut start: Vector3<N> =
-                    nalgebra::convert(self.robot_base.get_isometry().translation.vector);
+
+                let mut isometry: Isometry3<N> = nconvert(self.robot_base.get_isometry());
+                let mut end_local = isometry.inverse_transform_point(&end);
 
                 if let Some(path) = self
                     .engine
                     .pathfind(
-                        start.into(),
-                        end,
+                        end_local,
                         &self.obstacle_hub,
                         self.resolution,
                         self.shape.clone(),
@@ -169,23 +172,21 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
                     )
                     .await
                 {
-                    let path: Arc<[Point3<N>]> = Arc::from(path.into_boxed_slice());
+                    let path: Arc<[Point3<N>]> = path.into_iter().map(|p| isometry * p).collect();
                     self.path_pub.set(path.clone());
 
                     'repathfind: loop {
-                        if context.is_runtime_exiting() {
-                            return;
-                        }
-                        start =
-                            nalgebra::convert(self.robot_base.get_isometry().translation.vector);
+                        isometry = nconvert(self.robot_base.get_isometry());
+                        end_local = isometry.inverse_transform_point(&end);
 
-                        if (end.coords - start).magnitude() <= self.completion_distance {
+                        if end_local.coords.magnitude() <= self.completion_distance {
+                            self.path_pub.set(Arc::new([]));
                             pending_task.finish(Ok(()));
                             break 'main;
                         }
                         for window in path.windows(2) {
                             let [from, to] = window.try_into().unwrap();
-                            let relative = start - from.coords;
+                            let relative = isometry.translation.vector - from.coords;
                             let travel = to.coords - from.coords;
 
                             let cross = travel.cross(&relative);

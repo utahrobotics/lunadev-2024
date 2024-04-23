@@ -132,8 +132,8 @@ where
 
                     travel.unscale_mut(distance);
                     let cross = FloatCore::signum(forward.x * travel.y - forward.y * travel.x);
-                    assert!(!travel.x.is_nan(), "{position:?} {next:?} {path:?}");
-                    assert!(!travel.y.is_nan(), "{position:?} {next:?} {path:?}");
+                    assert!(!Float::is_nan(travel.x), "{position:?} {next:?} {path:?}");
+                    assert!(!Float::is_nan(travel.y), "{position:?} {next:?} {path:?}");
                     let mut angle = forward.angle(&travel);
                     let mut reversing = N::one();
 

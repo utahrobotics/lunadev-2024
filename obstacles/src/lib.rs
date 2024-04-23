@@ -46,6 +46,12 @@ impl<N: Float> Default for ObstacleHub<N> {
     }
 }
 
+impl<N: Float> Clone for ObstacleHub<N> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
 pub struct AddSourceMutError<T>(pub T);
 
 impl<T> std::fmt::Debug for AddSourceMutError<T> {

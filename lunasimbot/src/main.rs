@@ -6,15 +6,18 @@ use localization::{
     frames::{IMUFrame, OrientationFrame, PositionFrame},
     Localizer,
 };
-use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
-use navigator::{pathfinding::Pathfinder, DifferentialDriver, DriveMode};
-use obstacles::{sources::depth::new_depth_map, ObstacleHub};
+use nalgebra::{Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
+use navigator::{
+    pathfinding::{direct::DirectPathfinder, Pathfinder},
+    DifferentialDriver, DriveMode,
+};
+use obstacles::{sources::depth::new_depth_map, ObstacleHub, Shape};
 // use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rand_distr::{Distribution, Normal};
 use rig::Robot;
 use unros::{
     anyhow, log,
-    node::{AsyncNode, SyncNode},
+    node::AsyncNode,
     pubsub::{subs::Subscription, Publisher, Subscriber},
     rng::quick_rng,
     runtime::MainRuntimeContext,
@@ -47,51 +50,42 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     depth_map.spawn(context.make_context("depth_map"));
     obstacle_hub.add_source_mut(depth_source).unwrap();
 
+    let pathfinder: Pathfinder = Pathfinder::new_with_engine(
+        Shape::Cylinder {
+            radius: 0.5,
+            height: 1.0,
+            isometry: Default::default(),
+        },
+        0.1,
+        DirectPathfinder,
+        obstacle_hub.clone(),
+        robot_base.get_ref(),
+    );
+
+
     // let mut costmap_display =
     //     unros::logging::dump::VideoDataDump::new_display(400, 400, 24, &context)?;
-    // let debug_element_ref = debug_element.get_ref();
-
-    // rayon::spawn(move || {
+    // tokio::spawn(async move {
     //     loop {
-    //         std::thread::sleep(std::time::Duration::from_millis(100));
-    //         let Some(costmap) = costmap_sub.try_recv() else {
-    //             if costmap_sub.get_pub_count() == 0 {
-    //                 break;
-    //             } else {
-    //                 continue;
-    //             }
-    //         };
-    //         let position = debug_element_ref.get_global_isometry().translation.vector;
-    //         let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.5, 0.1);
-    //         // let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
-    //         costmap_display.write_frame(Arc::new(img.into())).unwrap();
+    //         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    //         obstacle_hub
+    //             .get_height_and_variance_within::<()>(
+    //                 &Shape::Cylinder {
+    //                     radius: 0.25,
+    //                     height: 0.5,
+    //                     isometry: Isometry3::from_parts(
+    //                         Point3::new(0.0, 0.0, -0.5).into(),
+    //                         UnitQuaternion::default(),
+    //                     ),
+    //                 },
+    //                 |heights| {
+    //                     log::info!("{:?}", heights);
+    //                     None
+    //                 },
+    //             )
+    //             .await;
     //     }
     // });
-
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            obstacle_hub
-                .get_height_and_variance_within(
-                    obstacles::Shape::Cylinder {
-                        radius: 0.25,
-                        height: 0.5,
-                        isometry: Isometry3::from_parts(
-                            Point3::new(0.0, 0.0, -0.5).into(),
-                            UnitQuaternion::default(),
-                        ),
-                    },
-                    |heights| {
-                        log::info!("{:?}", heights);
-                        true
-                    },
-                )
-                .await;
-        }
-    });
-
-    let pathfinder: Pathfinder =
-        Pathfinder::new_with_engine(0.5, Default::default(), robot_base.get_ref());
     // costmap
     //     .get_costmap_pub()
     //     .accept_subscription(pathfinder.create_costmap_sub());
