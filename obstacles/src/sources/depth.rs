@@ -36,8 +36,7 @@ enum Request<N: Float> {
 }
 
 pub struct DepthMap<N: Float, D> {
-    rays: Arc<[[N; 3]]>,
-    map_width: usize,
+    rays: Arc<[[N; 4]]>,
 
     pub max_cylinders: usize,
 
@@ -89,17 +88,14 @@ impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
 pub fn new_depth_map<N: Float, D: Send + 'static>(
     queue_size: usize,
     rays: impl IntoIterator<Item = UnitVector3<N>>,
-    map_width: usize,
     robot_element_ref: RobotElementRef,
 ) -> (DepthMap<N, D>, DepthMapSource<N>) {
     let (requests_sender, requests) = async_channel(queue_size);
-    let rays: Arc<[_]> = rays.into_iter().map(|v| v.into_inner().into()).collect();
-    assert_eq!(rays.len() % map_width, 0);
+    let rays: Arc<[_]> = rays.into_iter().map(|v| [v.x, v.y, v.z, N::zero()]).collect();
 
     (
         DepthMap {
             rays,
-            map_width,
             max_cylinders: 8,
             depth_sub: Subscriber::new(1),
             requests,
@@ -112,28 +108,38 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 struct Cylinder<N: Float> {
+    origin: [N; 4],
+    inv_matrix: [[N; 4]; 3],
     height: N,
     radius: N,
-    origin: [N; 3],
-    inv_matrix: [[N; 3]; 3],
 }
 unsafe impl<N: Float + bytemuck::Pod + bytemuck::NoUninit> bytemuck::Pod for Cylinder<N> {}
-
 unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroable for Cylinder<N> {}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 struct Transform<N: Float> {
-    origin: [N; 3],
-    matrix: [[N; 3]; 3],
+    origin: [N; 4],
+    matrix: [[N; 4]; 3],
 }
 unsafe impl<N: Float + bytemuck::Pod + bytemuck::NoUninit> bytemuck::Pod for Transform<N> {}
 unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroable
     for Transform<N>
 {
 }
-// struct Transform2 {
-//     matrix: [[f32; 3]; 3],
-//     origin: [f32; 3],
+#[repr(C, align(16))]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Transform2 {
+    origin: [f32; 4],
+    matrix: [[f32; 4]; 3],
+}
+// #[repr(C, align(16))]
+// #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+// struct Cylinder2 {
+//     origin: [f32; 4],
+//     inv_matrix: [[f32; 4]; 3],
+//     height: f32,
+//     radius: f32,
 // }
 
 impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
@@ -143,10 +149,9 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
         setup_logging!(context);
         // info!("{}", std::mem::size_of::<Transform2>());
         let pixel_count = self.rays.len();
-        let map_height = pixel_count / self.map_width;
         let height_within_compute: Compute<
             (
-                Option<&[[f32; 3]]>,
+                Option<&[[f32; 4]]>,
                 Option<&[f32]>,
                 &[Cylinder<f32>],
                 &u32,
@@ -163,7 +168,7 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                 StaticSize::default(),
             ),
             DynamicSize::new(pixel_count),
-            (self.map_width as u32, map_height as u32, 1),
+            (pixel_count as u32, 1, 1),
         )
         .await?;
         let Some(mut depth) = self.depth_sub.recv_or_closed().await else {
@@ -184,8 +189,8 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
             }
             let isometry = self.robot_element_ref.get_isometry_from_base();
             let transform = Transform {
-                origin: isometry.translation.vector.into(),
-                matrix: isometry.rotation.to_rotation_matrix().into_inner().data.0,
+                origin: [isometry.translation.x, isometry.translation.y, isometry.translation.z, 0.0],
+                matrix: isometry.rotation.to_rotation_matrix().into_inner().data.0.map(|v| [v[0], v[1], v[2], 0.0]),
             };
 
             match request {
@@ -197,13 +202,12 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             height,
                             isometry,
                         } => {
-                            let matrix = isometry.rotation.to_rotation_matrix();
-                            let inv_matrix = matrix.inverse().into_inner();
+                            let inv_matrix = isometry.rotation.to_rotation_matrix().inverse().into_inner();
                             cylinder_buf.push(Cylinder {
                                 radius,
                                 height,
-                                origin: isometry.translation.vector.into(),
-                                inv_matrix: inv_matrix.data.0,
+                                origin: [isometry.translation.x, isometry.translation.y, isometry.translation.z, 0.0],
+                                inv_matrix: inv_matrix.data.0.map(|v| [v[0], v[1], v[2], 0.0]),
                             });
                         }
                     }
@@ -233,13 +237,12 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             height,
                             isometry,
                         } => {
-                            let matrix = isometry.rotation.to_rotation_matrix();
-                            let inv_matrix = matrix.inverse().into_inner();
+                            let inv_matrix = isometry.rotation.to_rotation_matrix().inverse().into_inner();
                             cylinder_buf.push(Cylinder {
                                 radius,
                                 height,
-                                origin: isometry.translation.vector.into(),
-                                inv_matrix: inv_matrix.data.0,
+                                origin: [isometry.translation.x, isometry.translation.y, isometry.translation.z, 0.0],
+                                inv_matrix: inv_matrix.data.0.map(|v| [v[0], v[1], v[2], 0.0]),
                             });
                         }
                     }

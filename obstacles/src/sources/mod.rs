@@ -29,17 +29,23 @@ impl<N: Float> HeightOnly<N> {
         let mut height = iter
             .into_iter()
             .filter_map(|x| {
+                count += 1;
                 if x.is_none() {
                     unknown_count += 1;
                 }
                 x
             })
             .map(|x| {
-                count += 1;
                 x
             })
             .sum();
-        height /= nconvert(count);
+        if count - unknown_count == 0 {
+            return Self {
+                height: N::zero(),
+                unknown: N::one(),
+            };
+        }
+        height /= nconvert(count - unknown_count);
 
         Self {
             height,
@@ -59,18 +65,25 @@ impl<N: Float> HeightAndVariance<N> {
         let mut height = iter
             .into_iter()
             .filter_map(|x| {
+                count += 1;
                 if x.is_none() {
                     unknown_count += 1;
                 }
                 x
             })
             .map(|x| {
-                count += 1;
                 heights.push(x);
                 x
             })
             .sum();
-        height /= nconvert(count);
+        if count - unknown_count == 0 {
+            return Self {
+                height: N::zero(),
+                unknown: N::one(),
+                variance: N::zero()
+            };
+        }
+        height /= nconvert(count - unknown_count);
 
         Self {
             height,

@@ -27,13 +27,9 @@ func _ready() -> void:
 
 func scan() -> Array[float]:
 	var out: Array[float] = []
-	#var first := true
 	for raycast in raycasts:
 		if raycast.is_colliding():
 			var point := raycast.get_collision_point()
-			#if first:
-				#first = false
-				#print(point)
-			#out.append(raycast.get_collision_point())
-			out.append((global_transform.inverse() * point).length())
+			out.append(raycast.get_collision_point().distance_to(global_position))
+			#out.append(global_transform.inverse() * point)
 	return out

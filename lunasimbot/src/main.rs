@@ -41,7 +41,6 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let (depth_map, depth_source) = new_depth_map(
         4,
         rays::RAYS.iter().copied().map(UnitVector3::new_unchecked),
-        32,
         camera_ref,
     );
     depth_signal.accept_subscription(depth_map.create_depth_subscription());
@@ -83,7 +82,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                         ),
                     },
                     |heights| {
-                        log::info!("Heights: {:?}", heights);
+                        // log::info!("{:?}", heights);
                         true
                     },
                 )
@@ -260,9 +259,9 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             let distr = Normal::new(0.0, 0.05).unwrap();
             let mut rng = quick_rng();
             for _ in 0..n {
-                let depth = stream.read_f32_le().await.expect("Failed to receive depth");
-
-                depths.push(depth * (1.0 + distr.sample(rng.deref_mut())));
+                let mut depth = stream.read_f32_le().await.expect("Failed to receive depth");
+                // depth *= (1.0 + distr.sample(rng.deref_mut()));
+                depths.push(depth);
             }
 
             let capacity = depths.capacity();
