@@ -11,19 +11,22 @@ var raycasts: Array[RayCast3D] = []
 
 func _ready() -> void:
 	#await get_viewport().ready
+	print("[")
 	for y in range(height):
 		for x in range(width):
 			var raycast := RayCast3D.new()
 			#print(get_viewport().name)
 			var end := project_position(Vector2(x as float / width, y as float / height) * Vector2(get_viewport().size), distance)
 			raycast.target_position = to_local(end)
+			print("\tVector3::new", raycast.target_position.normalized(), ",")
 			raycast.debug_shape_thickness = 2
 			add_child(raycast)
 			raycasts.append(raycast)
+	print("]")
 
 
-func scan() -> Array[Vector3]:
-	var out: Array[Vector3] = []
+func scan() -> Array[float]:
+	var out: Array[float] = []
 	#var first := true
 	for raycast in raycasts:
 		if raycast.is_colliding():
@@ -32,5 +35,5 @@ func scan() -> Array[Vector3]:
 				#first = false
 				#print(point)
 			#out.append(raycast.get_collision_point())
-			out.append(global_transform.inverse() * point)
+			out.append((global_transform.inverse() * point).length())
 	return out

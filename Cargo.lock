@@ -798,6 +798,7 @@ dependencies = [
  "bytemuck",
  "crossbeam",
  "env_logger 0.11.3",
+ "rand",
  "rayon",
  "tokio",
  "wgpu",
@@ -2323,12 +2324,12 @@ dependencies = [
 name = "lunasimbot"
 version = "0.1.0"
 dependencies = [
- "costmap",
  "fxhash",
  "interprocess",
  "localization",
  "nalgebra",
  "navigator",
+ "obstacles",
  "rand_distr",
  "rig",
  "toml",

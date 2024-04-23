@@ -6,11 +6,13 @@ use crate::Shape;
 
 pub mod depth;
 
+#[derive(Debug)]
 pub struct HeightOnly<N: Float> {
     pub height: N,
     pub unknown: N,
 }
 
+#[derive(Debug)]
 pub struct HeightAndVariance<N: Float> {
     pub height: N,
     pub variance: N,

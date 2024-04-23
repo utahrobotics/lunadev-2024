@@ -1,14 +1,14 @@
-use std::{ops::DerefMut, sync::Arc};
+use std::ops::DerefMut;
 
-use costmap::{CostmapGenerator, Points};
 use fxhash::FxBuildHasher;
 use localization::{
     engines::window::{DefaultWindowConfig, WindowLocalizer},
     frames::{IMUFrame, OrientationFrame, PositionFrame},
     Localizer,
 };
-use nalgebra::{Point3, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
 use navigator::{pathfinding::Pathfinder, DifferentialDriver, DriveMode};
+use obstacles::{sources::depth::new_depth_map, ObstacleHub};
 // use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rand_distr::{Distribution, Normal};
 use rig::Robot;
@@ -16,7 +16,6 @@ use unros::{
     anyhow, log,
     node::{AsyncNode, SyncNode},
     pubsub::{subs::Subscription, Publisher, Subscriber},
-    rayon,
     rng::quick_rng,
     runtime::MainRuntimeContext,
     tokio::{
@@ -27,6 +26,7 @@ use unros::{
 };
 
 type Float = f32;
+mod rays;
 
 #[unros::main]
 async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
@@ -36,45 +36,66 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let camera_ref = camera.get_ref();
     let debug_element = elements.remove("debug").unwrap();
 
-    let costmap = CostmapGenerator::new(10, robot_base.get_ref());
-    let points_signal = Publisher::<Vec<Point3<f32>>>::default();
+    let mut obstacle_hub = ObstacleHub::default();
+    let depth_signal = Publisher::<Vec<f32>>::default();
+    let (depth_map, depth_source) = new_depth_map(
+        4,
+        rays::RAYS.iter().copied().map(UnitVector3::new_unchecked),
+        32,
+        camera_ref,
+    );
+    depth_signal.accept_subscription(depth_map.create_depth_subscription());
+    depth_map.spawn(context.make_context("depth_map"));
+    obstacle_hub.add_source_mut(depth_source).unwrap();
 
-    points_signal.accept_subscription(costmap.create_points_sub(0.05).map(move |points| Points {
-        points,
-        robot_element: camera_ref.clone(),
-    }));
+    // let mut costmap_display =
+    //     unros::logging::dump::VideoDataDump::new_display(400, 400, 24, &context)?;
+    // let debug_element_ref = debug_element.get_ref();
 
-    let costmap_sub = Subscriber::new(1);
-    costmap
-        .get_costmap_pub()
-        .accept_subscription(costmap_sub.create_subscription());
+    // rayon::spawn(move || {
+    //     loop {
+    //         std::thread::sleep(std::time::Duration::from_millis(100));
+    //         let Some(costmap) = costmap_sub.try_recv() else {
+    //             if costmap_sub.get_pub_count() == 0 {
+    //                 break;
+    //             } else {
+    //                 continue;
+    //             }
+    //         };
+    //         let position = debug_element_ref.get_global_isometry().translation.vector;
+    //         let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.5, 0.1);
+    //         // let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
+    //         costmap_display.write_frame(Arc::new(img.into())).unwrap();
+    //     }
+    // });
 
-    let mut costmap_display =
-        unros::logging::dump::VideoDataDump::new_display(400, 400, 24, &context)?;
-    let debug_element_ref = debug_element.get_ref();
-
-    rayon::spawn(move || {
+    tokio::spawn(async move {
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            let Some(costmap) = costmap_sub.try_recv() else {
-                if costmap_sub.get_pub_count() == 0 {
-                    break;
-                } else {
-                    continue;
-                }
-            };
-            let position = debug_element_ref.get_global_isometry().translation.vector;
-            let img = costmap.get_obstacle_map(position.into(), 0.015, 400, 400, 0.5, 0.1);
-            // let img = costmap.get_cost_map(position.into(), 0.015, 400, 400);
-            costmap_display.write_frame(Arc::new(img.into())).unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            obstacle_hub
+                .get_height_and_variance_within(
+                    obstacles::Shape::Cylinder {
+                        radius: 0.5,
+                        height: 1.0,
+                        isometry: Isometry3::from_parts(
+                            Point3::new(0.0, 0.0, -1.0).into(),
+                            UnitQuaternion::default(),
+                        ),
+                    },
+                    |heights| {
+                        log::info!("Heights: {:?}", heights);
+                        true
+                    },
+                )
+                .await;
         }
     });
 
     let pathfinder: Pathfinder =
         Pathfinder::new_with_engine(0.5, Default::default(), robot_base.get_ref());
-    costmap
-        .get_costmap_pub()
-        .accept_subscription(pathfinder.create_costmap_sub());
+    // costmap
+    //     .get_costmap_pub()
+    //     .accept_subscription(pathfinder.create_costmap_sub());
     let path_sub = Subscriber::new(1);
     pathfinder
         .get_path_pub()
@@ -123,7 +144,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             .await
             .expect("Connection should have succeeded");
         let mut stream = BufStream::new(stream);
-        let mut points = vec![];
+        let mut depths = vec![];
         let mut last_left_steering = 0.0;
         let mut last_right_steering = 0.0;
 
@@ -235,24 +256,18 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             };
 
             camera_joint.set_angle(x_rot);
-            points.reserve(n.saturating_sub(points.capacity()));
+            depths.reserve(n.saturating_sub(depths.capacity()));
             let distr = Normal::new(0.0, 0.05).unwrap();
             let mut rng = quick_rng();
             for _ in 0..n {
-                let x = stream.read_f32_le().await.expect("Failed to receive point");
-                let y = stream.read_f32_le().await.expect("Failed to receive point");
-                let z = stream.read_f32_le().await.expect("Failed to receive point");
+                let depth = stream.read_f32_le().await.expect("Failed to receive depth");
 
-                let mut vec = Vector3::new(x, y, z);
-
-                vec.scale_mut(1.0 + distr.sample(rng.deref_mut()));
-
-                points.push(vec.into());
+                depths.push(depth * (1.0 + distr.sample(rng.deref_mut())));
             }
 
-            let capacity = points.capacity();
-            points_signal.set(points);
-            points = Vec::with_capacity(capacity);
+            let capacity = depths.capacity();
+            depth_signal.set(depths);
+            depths = Vec::with_capacity(capacity);
 
             if stream
                 .read_u8()
@@ -364,7 +379,6 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     driver.spawn(context.make_context("driver"));
     pathfinder.spawn(context.make_context("pathfinder"));
     localizer.spawn(context.make_context("localizer"));
-    costmap.spawn(context.make_context("costmap"));
 
     context.wait_for_exit().await;
     Ok(())

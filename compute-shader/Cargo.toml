@@ -13,3 +13,4 @@ rayon = { workspace = true }
 
 [dev-dependencies]
 env_logger = "0"
+rand = { workspace = true }

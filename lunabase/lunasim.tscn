@@ -133,12 +133,10 @@ func _physics_process(delta: float) -> void:
 			conn.put_float(ang_vel.y)
 			conn.put_float(ang_vel.z)
 			conn.put_float(scanner.rotation.x)
-			var points := scanner.scan()
-			conn.put_u32(points.size())
-			for point in points:
-				conn.put_float(point.x)
-				conn.put_float(point.y)
-				conn.put_float(point.z)
+			var depths := scanner.scan()
+			conn.put_u32(depths.size())
+			for depth in depths:
+				conn.put_float(depth)
 			if send_waypoint:
 				conn.put_8(255)
 				conn.put_float(waypoint.x)

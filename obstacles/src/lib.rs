@@ -3,10 +3,7 @@ use std::sync::Arc;
 use futures::{stream::FuturesUnordered, StreamExt};
 use nalgebra::Isometry3;
 use sources::{HeightAndVariance, HeightOnly, ObstacleSource};
-use unros::{
-    float::Float,
-    tokio::sync::RwLock,
-};
+use unros::{float::Float, tokio::sync::RwLock};
 
 pub mod sources;
 
@@ -29,17 +26,46 @@ pub struct ObstacleHub<N: Float> {
     inner: Arc<ObstacleHubInner<N>>,
 }
 
-impl<N: Float> ObstacleHub<N> {
-    pub fn new() -> Self {
+impl<N: Float> Default for ObstacleHub<N> {
+    fn default() -> Self {
         Self {
             inner: Arc::new(ObstacleHubInner {
                 sources: RwLock::new(Vec::new()),
             }),
         }
     }
+}
 
+pub struct AddSourceMutError<T>(pub T);
+
+impl<T> std::fmt::Debug for AddSourceMutError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("AddSourceMutError").finish()
+    }
+}
+
+impl<T> std::fmt::Display for AddSourceMutError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "could not add source as ObstacleHub is shared")
+    }
+}
+
+impl<N: Float> ObstacleHub<N> {
     pub async fn add_source(&self, source: impl ObstacleSource<N> + 'static) {
         self.inner.sources.write().await.push(Box::new(source));
+    }
+
+    pub fn add_source_mut<T: ObstacleSource<N> + 'static>(
+        &mut self,
+        source: T,
+    ) -> Result<(), AddSourceMutError<T>> {
+        match Arc::get_mut(&mut self.inner) {
+            Some(inner) => {
+                inner.sources.get_mut().push(Box::new(source));
+                Ok(())
+            }
+            None => Err(AddSourceMutError(source)),
+        }
     }
 
     pub async fn get_height_only_within(

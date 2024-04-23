@@ -6,7 +6,7 @@ use compute_shader::{
     wgpu::include_wgsl,
     Compute,
 };
-use nalgebra::{Matrix4, UnitVector3};
+use nalgebra::UnitVector3;
 use rig::RobotElementRef;
 use unros::{
     anyhow,
@@ -114,20 +114,34 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(
 struct Cylinder<N: Float> {
     height: N,
     radius: N,
-    matrix: [[N; 4]; 4],
-    inv_matrix: [[N; 4]; 4],
+    origin: [N; 3],
+    inv_matrix: [[N; 3]; 3],
 }
 unsafe impl<N: Float + bytemuck::Pod + bytemuck::NoUninit> bytemuck::Pod for Cylinder<N> {}
+
 unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroable for Cylinder<N> {}
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+struct Transform<N: Float> {
+    origin: [N; 3],
+    matrix: [[N; 3]; 3],
+}
+unsafe impl<N: Float + bytemuck::Pod + bytemuck::NoUninit> bytemuck::Pod for Transform<N> {}
+unsafe impl<N: Float + bytemuck::Zeroable + bytemuck::NoUninit> bytemuck::Zeroable
+    for Transform<N>
+{
+}
+// struct Transform2 {
+//     matrix: [[f32; 3]; 3],
+//     origin: [f32; 3],
+// }
 
 impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
     type Result = anyhow::Result<()>;
 
     async fn run(mut self, context: unros::runtime::RuntimeContext) -> Self::Result {
         setup_logging!(context);
-        let Some(mut depth) = self.depth_sub.recv_or_closed().await else {
-            return Ok(());
-        };
+        // info!("{}", std::mem::size_of::<Transform2>());
         let pixel_count = self.rays.len();
         let map_height = pixel_count / self.map_width;
         let height_within_compute: Compute<
@@ -136,7 +150,7 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                 Option<&[f32]>,
                 &[Cylinder<f32>],
                 &u32,
-                &[[f32; 4]; 4],
+                &Transform<f32>,
             ),
             [f32],
         > = Compute::new(
@@ -152,6 +166,9 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
             (self.map_width as u32, map_height as u32, 1),
         )
         .await?;
+        let Some(mut depth) = self.depth_sub.recv_or_closed().await else {
+            return Ok(());
+        };
         let mut height_within_compute_rays = Some(self.rays);
         let mut height_within_compute_depth = Some(depth.deref());
 
@@ -165,12 +182,11 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                 depth = new_depth;
                 height_within_compute_depth = Some(depth.deref());
             }
-            let transform = self
-                .robot_element_ref
-                .get_isometry_from_base()
-                .to_homogeneous()
-                .data
-                .0;
+            let isometry = self.robot_element_ref.get_isometry_from_base();
+            let transform = Transform {
+                origin: isometry.translation.vector.into(),
+                matrix: isometry.rotation.to_rotation_matrix().into_inner().data.0,
+            };
 
             match request {
                 Request::HeightOnlyWithin { shape, sender } => {
@@ -181,12 +197,12 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             height,
                             isometry,
                         } => {
-                            let matrix = isometry.to_homogeneous();
-                            let inv_matrix = matrix.try_inverse().unwrap();
+                            let matrix = isometry.rotation.to_rotation_matrix();
+                            let inv_matrix = matrix.inverse().into_inner();
                             cylinder_buf.push(Cylinder {
                                 radius,
                                 height,
-                                matrix: matrix.data.0,
+                                origin: isometry.translation.vector.into(),
                                 inv_matrix: inv_matrix.data.0,
                             });
                         }
@@ -200,15 +216,13 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             &transform,
                         )
                         .await;
-                    let _ = sender.send(HeightOnly::from_iter(heights.into_iter().copied().filter(|n| *n != f32::MAX).map(
-                        |n| {
-                            if n == f32::MIN {
-                                None
-                            } else {
-                                Some(n)
-                            }
-                        },
-                    )));
+                    let _ = sender.send(HeightOnly::from_iter(
+                        heights
+                            .into_iter()
+                            .copied()
+                            .filter(|n| *n != f32::MAX)
+                            .map(|n| if n == f32::MIN { None } else { Some(n) }),
+                    ));
                 }
 
                 Request::HeightVarianceWithin { shape, sender } => {
@@ -219,12 +233,12 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                             height,
                             isometry,
                         } => {
-                            let matrix = isometry.to_homogeneous();
-                            let inv_matrix = matrix.try_inverse().unwrap();
+                            let matrix = isometry.rotation.to_rotation_matrix();
+                            let inv_matrix = matrix.inverse().into_inner();
                             cylinder_buf.push(Cylinder {
                                 radius,
                                 height,
-                                matrix: matrix.data.0,
+                                origin: isometry.translation.vector.into(),
                                 inv_matrix: inv_matrix.data.0,
                             });
                         }
@@ -239,13 +253,11 @@ impl<D: Deref<Target = [f32]> + Send + 'static> AsyncNode for DepthMap<f32, D> {
                         )
                         .await;
                     let _ = sender.send(HeightAndVariance::from_iter(
-                        heights.into_iter().copied().filter(|n| *n != f32::MAX).map(|n| {
-                            if n == f32::MIN {
-                                None
-                            } else {
-                                Some(n)
-                            }
-                        }),
+                        heights
+                            .into_iter()
+                            .copied()
+                            .filter(|n| *n != f32::MAX)
+                            .map(|n| if n == f32::MIN { None } else { Some(n) }),
                     ));
                 }
             }
