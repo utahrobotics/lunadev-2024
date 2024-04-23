@@ -18,7 +18,6 @@ pub enum Shape<N: Float> {
     // Composite(Vec<Self>),
 }
 
-
 impl<N: Float> Shape<N> {
     pub fn set_origin(&mut self, origin: impl Into<Translation3<N>>) {
         match self {

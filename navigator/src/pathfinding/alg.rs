@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
-    future::Future,
     hash::{BuildHasherDefault, Hash},
     ops::Add,
 };
@@ -58,20 +57,21 @@ impl<K: Ord> Ord for SmallestCostHolder<K> {
     }
 }
 
-pub async fn astar<N, C, FN, IN, FH, FS, Fut>(
+pub trait AStarModule<N, C> {
+    async fn successors(&mut self, node: N, out: impl FnMut(N, C));
+    async fn success(&mut self, node: &N) -> bool;
+}
+
+pub async fn astar<N, C, FN, FH>(
     start: &N,
-    mut successors: FN,
+    module: &mut FN,
     mut heuristic: FH,
-    mut success: FS,
 ) -> Option<(Vec<N>, C)>
 where
     N: Eq + Hash + Clone,
     C: Default + Ord + Add<Output = C> + Copy,
-    FN: FnMut(&N) -> Fut,
-    Fut: Future<Output = IN>,
-    IN: IntoIterator<Item = (N, C)>,
+    FN: AStarModule<N, C>,
     FH: FnMut(&N) -> C,
-    FS: FnMut(&N) -> bool,
 {
     let mut to_see = BinaryHeap::new();
     to_see.push(SmallestCostHolder {
@@ -82,47 +82,46 @@ where
     let mut parents: FxIndexMap<N, (usize, C)> = FxIndexMap::default();
     parents.insert(start.clone(), (usize::max_value(), C::default()));
     while let Some(SmallestCostHolder { cost, index, .. }) = to_see.pop() {
-        let successors = {
-            let (node, &(_, c)) = parents.get_index(index).unwrap(); // Cannot fail
-            if success(node) {
-                let path = reverse_path(&parents, |&(p, _)| p, index);
-                return Some((path, cost));
-            }
-            // We may have inserted a node several time into the binary heap if we found
-            // a better way to access it. Ensure that we are currently dealing with the
-            // best path and discard the others.
-            if cost > c {
-                continue;
-            }
-            successors(node).await
-        };
-        for (successor, move_cost) in successors {
-            let new_cost = cost + move_cost;
-            let h; // heuristic(&successor)
-            let n; // index for successor
-            match parents.entry(successor) {
-                Entry::Vacant(e) => {
-                    h = heuristic(e.key());
-                    n = e.index();
-                    e.insert((index, new_cost));
-                }
-                Entry::Occupied(mut e) => {
-                    if e.get().1 > new_cost {
+        let (node, &(_, c)) = parents.get_index(index).unwrap(); // Cannot fail
+        if module.success(node).await {
+            let path = reverse_path(&parents, |&(p, _)| p, index);
+            return Some((path, cost));
+        }
+        // We may have inserted a node several time into the binary heap if we found
+        // a better way to access it. Ensure that we are currently dealing with the
+        // best path and discard the others.
+        if cost > c {
+            continue;
+        }
+        module
+            .successors(node.clone(), |successor, move_cost| {
+                let new_cost = cost + move_cost;
+                let h; // heuristic(&successor)
+                let n; // index for successor
+                match parents.entry(successor) {
+                    Entry::Vacant(e) => {
                         h = heuristic(e.key());
                         n = e.index();
                         e.insert((index, new_cost));
-                    } else {
-                        continue;
+                    }
+                    Entry::Occupied(mut e) => {
+                        if e.get().1 > new_cost {
+                            h = heuristic(e.key());
+                            n = e.index();
+                            e.insert((index, new_cost));
+                        } else {
+                            return;
+                        }
                     }
                 }
-            }
 
-            to_see.push(SmallestCostHolder {
-                estimated_cost: new_cost + h,
-                cost: new_cost,
-                index: n,
-            });
-        }
+                to_see.push(SmallestCostHolder {
+                    estimated_cost: new_cost + h,
+                    cost: new_cost,
+                    index: n,
+                });
+            })
+            .await;
     }
     None
 }

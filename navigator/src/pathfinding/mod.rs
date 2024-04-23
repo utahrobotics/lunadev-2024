@@ -1,6 +1,5 @@
 use std::{
     future::Future,
-    marker::PhantomData,
     sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
@@ -8,26 +7,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nalgebra::{convert as nconvert, Point3, RealField, UnitQuaternion, Vector2, Vector3};
+use nalgebra::{convert as nconvert, Point3, UnitQuaternion, Vector3};
 use obstacles::{ObstacleHub, Shape};
-use ordered_float::{FloatCore, NotNan};
 use rig::RobotBaseRef;
-use simba::scalar::SupersetOf;
-use spin_sleep::SpinSleeper;
 use unros::{
-    float::Float,
-    node::AsyncNode,
-    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
-    runtime::RuntimeContext,
-    service::{new_service, Service, ServiceHandle},
-    setup_logging,
-    tokio::{self, sync::oneshot},
-    DontDrop, ShouldNotDrop,
+    float::Float, node::AsyncNode, pubsub::{Publisher, PublisherRef}, runtime::RuntimeContext, service::{new_service, Service, ServiceHandle}, setup_logging, tokio, DontDrop, ShouldNotDrop
 };
 
-use crate::pathfinding::alg::astar;
+
+use self::direct::DirectPathfinder;
 
 mod alg;
+mod direct;
 
 #[derive(Debug)]
 pub enum NavigationError {
@@ -87,7 +78,7 @@ pub trait PathfindingEngine<N: Float>: Send + 'static {
 }
 
 #[derive(ShouldNotDrop)]
-pub struct Pathfinder<N: Float = f32, E: PathfindingEngine<N> = DirectPathfinder<N>> {
+pub struct Pathfinder<N: Float = f32, E: PathfindingEngine<N> = DirectPathfinder> {
     engine: E,
     obstacle_hub: ObstacleHub<N>,
     dont_drop: DontDrop<Self>,
@@ -144,7 +135,6 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
         drop(self.service_handle);
         self.dont_drop.ignore_drop = true;
         let mut start_time = Instant::now();
-        let sleeper = SpinSleeper::default();
 
         loop {
             let Some(mut req) = self.service.blocking_wait_for_request() else {
@@ -217,213 +207,18 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
                                 self.max_height_diff,
                                 &self.obstacle_hub,
                                 self.resolution,
-                            ).await {
+                            )
+                            .await
+                            {
                                 break 'repathfind;
                             }
                         }
-                        sleeper.sleep(self.refresh_rate);
+                        tokio::time::sleep(self.refresh_rate).await;
                     }
                 };
                 // pending_task.finish(Err(NavigationError::NoPath));
             }
         }
-    }
-}
-
-#[derive(Default)]
-pub struct DirectPathfinder<N> {
-    phantom: PhantomData<N>,
-}
-
-impl<N: Float + FloatCore> PathfindingEngine<N> for DirectPathfinder<N> {
-    async fn pathfind(
-        &mut self,
-        start: Point3<N>,
-        end: Point3<N>,
-        obstacle_hub: &ObstacleHub<N>,
-        resolution: N,
-        shape: Shape<N>,
-        max_height_diff: N,
-        context: &RuntimeContext,
-    ) -> Option<Vec<Point3<N>>> {
-        setup_logging!(context);
-        let mut start = start.coords;
-        let mut pre_path = vec![];
-
-        if !costmap.is_global_point_safe(start.into(), agent_radius, max_height_diff) {
-            if let Some(mut path) = astar(
-                &CVec3 {
-                    inner: start,
-                    resolution,
-                },
-                |current| async {
-                    let current = *current;
-                    [
-                        Vector3::new(-resolution, N::zero(), N::zero()),
-                        Vector3::new(resolution, N::zero(), N::zero()),
-                        Vector3::new(N::zero(), N::zero(), -resolution),
-                        Vector3::new(N::zero(), N::zero(), resolution),
-                    ]
-                    .into_iter()
-                    .filter_map(move |mut next| {
-                        next += current.inner;
-                        if costmap.is_global_point_safe(next.into(), agent_radius, max_height_diff)
-                        {
-                            Some((
-                                CVec3 {
-                                    inner: next,
-                                    resolution,
-                                },
-                                NotNan::new(N::zero()).unwrap(),
-                            ))
-                        } else {
-                            None
-                        }
-                    })
-                },
-                |current| {
-                    costmap.is_global_point_safe(
-                        current.inner.into(),
-                        agent_radius,
-                        max_height_diff,
-                    )
-                },
-            )
-            .await
-            {
-                start = path.pop().unwrap().inner;
-                pre_path = path;
-            }
-        }
-
-        let start_time = Instant::now();
-        let mut too_long = false;
-        let mut out_of_bounds = false;
-
-        let result = astar(
-            &CVec3 {
-                inner: start,
-                resolution,
-            },
-            |current| async {
-                if !too_long && start_time.elapsed().as_secs() >= 2 {
-                    too_long = true;
-                }
-                let current = *current;
-                [
-                    Vector3::new(-resolution, N::zero(), N::zero()),
-                    Vector3::new(resolution, N::zero(), N::zero()),
-                    Vector3::new(N::zero(), N::zero(), -resolution),
-                    Vector3::new(N::zero(), N::zero(), resolution),
-                    // Vector3::new(-resolution, N::zero(), resolution) * nalgebra::convert::<_, N>(FRAC_1_SQRT_2),
-                    // Vector3::new(resolution, N::zero(), resolution) * nalgebra::convert::<_, N>(FRAC_1_SQRT_2),
-                    // Vector3::new(resolution, N::zero(), -resolution) * nalgebra::convert::<_, N>(FRAC_1_SQRT_2),
-                    // Vector3::new(-resolution, N::zero(), -resolution) * nalgebra::convert::<_, N>(FRAC_1_SQRT_2),
-                ]
-                .into_iter()
-                .filter(move |_| !too_long)
-                .filter_map(move |mut next| {
-                    next += current.inner;
-                    // println!("{next:?} {}", (next - end.coords).magnitude());
-                    // std::thread::sleep(std::time::Duration::from_millis(100));
-                    if costmap.is_global_point_safe(next.into(), agent_radius, max_height_diff) {
-                        Some((
-                            CVec3 {
-                                inner: next,
-                                resolution,
-                            },
-                            1usize,
-                        ))
-                    } else {
-                        None
-                    }
-                })
-                .chain(std::iter::once(()).filter_map(move |()| {
-                    let mut diff = current.inner - end.coords;
-                    diff.y = N::zero();
-                    let distance = diff.magnitude();
-                    if distance <= resolution {
-                        Some((
-                            CVec3 {
-                                inner: end.coords,
-                                resolution,
-                            },
-                            (distance / resolution).round().to_subset_unchecked(),
-                        ))
-                    } else {
-                        None
-                    }
-                }))
-            },
-            |current| {
-                let mut diff = current.inner - end.coords;
-                diff.y = N::zero();
-                let cost: usize = (diff.magnitude() / resolution)
-                    .round()
-                    .to_subset_unchecked();
-                cost / 2
-            },
-            |current| {
-                if current
-                    == &(CVec3 {
-                        inner: end.coords,
-                        resolution,
-                    })
-                {
-                    true
-                } else if !costmap.is_global_point_in_bounds(current.inner.into()) {
-                    out_of_bounds = true;
-                    true
-                } else {
-                    false
-                }
-            },
-        )
-        .await;
-
-        if too_long {
-            error!("Pathfinding took too long");
-        }
-
-        let (mut post_path, _distance) = result?;
-
-        if post_path.len() == 1 {
-            post_path.push(CVec3 {
-                inner: end.coords,
-                resolution,
-            });
-        }
-
-        let mut path = pre_path;
-        path.append(&mut post_path);
-
-        let mut new_path: Vec<Point3<N>> = Vec::with_capacity(path.len());
-        let mut path = path.into_iter().map(|x| x.inner.into());
-
-        let mut start = path.next().unwrap();
-        new_path.push(start);
-        let mut last = path.next().unwrap();
-
-        for next in path {
-            if traverse_to(
-                start.coords,
-                next.coords,
-                shape.clone(),
-                max_height_diff,
-                &obstacle_hub,
-                resolution,
-            ).await {
-                last = next;
-            } else {
-                new_path.push(last);
-                start = last;
-                last = next;
-            }
-        }
-
-        new_path.push(end);
-
-        Some(new_path)
     }
 }
 
@@ -435,8 +230,7 @@ async fn traverse_to<N: Float>(
     max_height_diff: N,
     obstacle_hub: &ObstacleHub<N>,
     resolution: N,
-) -> bool
-{
+) -> bool {
     let mut travel = to - from;
     let distance = travel.magnitude();
     travel.unscale_mut(distance);
@@ -447,37 +241,20 @@ async fn traverse_to<N: Float>(
         let intermediate: Vector3<N> = from + travel * nalgebra::convert::<_, N>(i);
         shape.set_origin(intermediate);
 
-        if obstacle_hub.get_height_only_within(&shape, |height| {
-            if height.height.abs() > max_height_diff {
-                Some(())
-            } else {
-                None
-            }
-        }).await.is_some() {
+        if obstacle_hub
+            .get_height_only_within(&shape, |height| {
+                if height.height.abs() > max_height_diff {
+                    Some(())
+                } else {
+                    None
+                }
+            })
+            .await
+            .is_some()
+        {
             return false;
         }
     }
 
     true
 }
-
-#[derive(Clone, Copy, Debug)]
-struct CVec3<N: Float> {
-    inner: Vector3<N>,
-    resolution: N,
-}
-
-impl<T: Float> PartialEq for CVec3<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner.x.abs_diff_eq(&other.inner.x, other.inner.x)
-    }
-}
-
-impl<T: Float> std::hash::Hash for CVec3<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_i64((self.inner.x / self.resolution).to_subset_unchecked());
-        state.write_i64((self.inner.z / self.resolution).to_subset_unchecked());
-    }
-}
-
-impl<T: Float> Eq for CVec3<T> {}

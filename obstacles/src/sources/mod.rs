@@ -101,6 +101,8 @@ impl<N: Float> FromIterator<Option<N>> for HeightAndVariance<N> {
 #[async_trait]
 pub trait ObstacleSource<N: Float>: Send + Sync {
     async fn get_height_only_within(&self, shape: &Shape<N>) -> Option<HeightOnly<N>>;
-    async fn get_height_and_variance_within(&self, shape: &Shape<N>)
-        -> Option<HeightAndVariance<N>>;
+    async fn get_height_and_variance_within(
+        &self,
+        shape: &Shape<N>,
+    ) -> Option<HeightAndVariance<N>>;
 }

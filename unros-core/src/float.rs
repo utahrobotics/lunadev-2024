@@ -33,6 +33,9 @@ pub trait Float:
     fn is_f32() -> bool;
     fn is_f64() -> bool;
 
+    fn to_isize(self) -> isize;
+    fn to_usize(self) -> usize;
+
     fn to_not_nan(self) -> Option<NotNan<Self>>;
 }
 
@@ -48,6 +51,13 @@ impl Float for f32 {
         self as f64
     }
 
+    fn to_isize(self) -> isize {
+        self as isize
+    }
+    fn to_usize(self) -> usize {
+        self as usize
+    }
+
     fn to_not_nan(self) -> Option<NotNan<Self>> {
         NotNan::new(self).ok()
     }
@@ -60,6 +70,7 @@ impl Float for f32 {
         false
     }
 }
+
 impl Float for f64 {
     const MAX: Self = f64::MAX;
     const MIN: Self = f64::MIN;
@@ -72,10 +83,17 @@ impl Float for f64 {
         self
     }
 
+    fn to_isize(self) -> isize {
+        self as isize
+    }
+    fn to_usize(self) -> usize {
+        self as usize
+    }
+
     fn to_not_nan(self) -> Option<NotNan<Self>> {
         NotNan::new(self).ok()
     }
-    
+
     fn is_f32() -> bool {
         false
     }
