@@ -5,7 +5,7 @@ signal log_received(String)
 signal portal_disconnected
 signal portal_connected
 
-var server_addr := "192.168.0.100"
+var server_addr := "192.168.0.102"
 var ws: WebSocketPeer
 var logs: Array[String] = []
 var connecting := false

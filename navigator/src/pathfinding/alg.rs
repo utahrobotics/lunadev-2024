@@ -1,8 +1,13 @@
-use std::{cmp::Ordering, collections::BinaryHeap, future::Future, hash::{BuildHasherDefault, Hash}, ops::Add};
+use std::{
+    cmp::Ordering,
+    collections::BinaryHeap,
+    future::Future,
+    hash::{BuildHasherDefault, Hash},
+    ops::Add,
+};
 
 use fxhash::FxHasher;
 use indexmap::{map::Entry, IndexMap};
-
 
 type FxIndexMap<K, V> = IndexMap<K, V, BuildHasherDefault<FxHasher>>;
 

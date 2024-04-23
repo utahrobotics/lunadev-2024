@@ -1,19 +1,31 @@
 use std::{
-    future::Future, marker::PhantomData, sync::{
+    future::Future,
+    marker::PhantomData,
+    sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
-    }, time::{Duration, Instant}
+    },
+    time::{Duration, Instant},
 };
 
 use nalgebra::{convert as nconvert, Point3, RealField, UnitQuaternion, Vector2, Vector3};
-use obstacles::ObstacleHub;
+use obstacles::{ObstacleHub, Shape};
 use ordered_float::{FloatCore, NotNan};
 use rig::RobotBaseRef;
 use simba::scalar::SupersetOf;
 use spin_sleep::SpinSleeper;
 use unros::{
-    float::Float, node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, runtime::RuntimeContext, service::{new_service, Service, ServiceHandle}, setup_logging, tokio::{self, sync::oneshot}, DontDrop, ShouldNotDrop
+    float::Float,
+    node::AsyncNode,
+    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
+    runtime::RuntimeContext,
+    service::{new_service, Service, ServiceHandle},
+    setup_logging,
+    tokio::{self, sync::oneshot},
+    DontDrop, ShouldNotDrop,
 };
+
+use crate::pathfinding::alg::astar;
 
 mod alg;
 
@@ -68,17 +80,14 @@ pub trait PathfindingEngine<N: Float>: Send + 'static {
         end: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
-        agent_radius: N,
+        shape: Shape<N>,
         max_height_diff: N,
         context: &RuntimeContext,
-    ) -> impl Future<Output=Option<Vec<Point3<N>>>>;
+    ) -> impl Future<Output = Option<Vec<Point3<N>>>> + Send;
 }
 
 #[derive(ShouldNotDrop)]
-pub struct Pathfinder<
-    N: Float = f32,
-    E: PathfindingEngine<N> = DirectPathfinder<N>,
-> {
+pub struct Pathfinder<N: Float = f32, E: PathfindingEngine<N> = DirectPathfinder<N>> {
     engine: E,
     obstacle_hub: ObstacleHub<N>,
     dont_drop: DontDrop<Self>,
@@ -88,13 +97,19 @@ pub struct Pathfinder<
     path_pub: Publisher<Arc<[Point3<N>]>>,
     completion_distance: N,
     pub resolution: N,
-    pub agent_radius: N,
+    pub shape: Shape<N>,
     pub max_height_diff: N,
     pub refresh_rate: Duration,
 }
 
 impl<N: Float, E: PathfindingEngine<N>> Pathfinder<N, E> {
-    pub fn new_with_engine(agent_radius: N, engine: E, obstacle_hub: ObstacleHub<N>, robot_base: RobotBaseRef) -> Self {
+    pub fn new_with_engine(
+        shape: Shape<N>,
+        resolution: N,
+        engine: E,
+        obstacle_hub: ObstacleHub<N>,
+        robot_base: RobotBaseRef,
+    ) -> Self {
         let (service, service_handle) = new_service();
         Self {
             engine,
@@ -105,8 +120,8 @@ impl<N: Float, E: PathfindingEngine<N>> Pathfinder<N, E> {
             robot_base,
             path_pub: Publisher::default(),
             completion_distance: nalgebra::convert(0.15),
-            resolution: agent_radius,
-            agent_radius,
+            resolution,
+            shape,
             max_height_diff: nalgebra::convert(0.1),
             refresh_rate: Duration::from_millis(100),
         }
@@ -121,11 +136,7 @@ impl<N: Float, E: PathfindingEngine<N>> Pathfinder<N, E> {
     }
 }
 
-impl<
-        N: Float,
-        E: PathfindingEngine<N>,
-    > AsyncNode for Pathfinder<N, E>
-{
+impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
     type Result = ();
 
     async fn run(mut self, context: RuntimeContext) -> Self::Result {
@@ -155,15 +166,19 @@ impl<
                 let mut start: Vector3<N> =
                     nalgebra::convert(self.robot_base.get_isometry().translation.vector);
 
-                if let Some(path) = self.engine.pathfind(
-                    start.into(),
-                    end,
-                    &self.obstacle_hub,
-                    self.resolution,
-                    self.agent_radius,
-                    self.max_height_diff,
-                    &context,
-                ).await {
+                if let Some(path) = self
+                    .engine
+                    .pathfind(
+                        start.into(),
+                        end,
+                        &self.obstacle_hub,
+                        self.resolution,
+                        self.shape.clone(),
+                        self.max_height_diff,
+                        &context,
+                    )
+                    .await
+                {
                     let path: Arc<[Point3<N>]> = Arc::from(path.into_boxed_slice());
                     self.path_pub.set(path.clone());
 
@@ -178,7 +193,8 @@ impl<
                             pending_task.finish(Ok(()));
                             break 'main;
                         }
-                        for [from, to] in path.array_windows::<2>() {
+                        for window in path.windows(2) {
+                            let [from, to] = window.try_into().unwrap();
                             let relative = start - from.coords;
                             let travel = to.coords - from.coords;
 
@@ -197,11 +213,11 @@ impl<
                             if !traverse_to(
                                 from.coords,
                                 to.coords,
-                                self.agent_radius,
+                                self.shape.clone(),
                                 self.max_height_diff,
                                 &self.obstacle_hub,
                                 self.resolution,
-                            ) {
+                            ).await {
                                 break 'repathfind;
                             }
                         }
@@ -219,15 +235,14 @@ pub struct DirectPathfinder<N> {
     phantom: PhantomData<N>,
 }
 
-impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
-{
-    fn pathfind(
+impl<N: Float + FloatCore> PathfindingEngine<N> for DirectPathfinder<N> {
+    async fn pathfind(
         &mut self,
         start: Point3<N>,
         end: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
-        agent_radius: N,
+        shape: Shape<N>,
         max_height_diff: N,
         context: &RuntimeContext,
     ) -> Option<Vec<Point3<N>>> {
@@ -241,7 +256,7 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
                     inner: start,
                     resolution,
                 },
-                |current| {
+                |current| async {
                     let current = *current;
                     [
                         Vector3::new(-resolution, N::zero(), N::zero()),
@@ -254,10 +269,13 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
                         next += current.inner;
                         if costmap.is_global_point_safe(next.into(), agent_radius, max_height_diff)
                         {
-                            Some(CVec3 {
-                                inner: next,
-                                resolution,
-                            })
+                            Some((
+                                CVec3 {
+                                    inner: next,
+                                    resolution,
+                                },
+                                NotNan::new(N::zero()).unwrap(),
+                            ))
                         } else {
                             None
                         }
@@ -270,7 +288,9 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
                         max_height_diff,
                     )
                 },
-            ) {
+            )
+            .await
+            {
                 start = path.pop().unwrap().inner;
                 pre_path = path;
             }
@@ -285,7 +305,7 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
                 inner: start,
                 resolution,
             },
-            |current| {
+            |current| async {
                 if !too_long && start_time.elapsed().as_secs() >= 2 {
                     too_long = true;
                 }
@@ -358,7 +378,8 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
                     false
                 }
             },
-        );
+        )
+        .await;
 
         if too_long {
             error!("Pathfinding took too long");
@@ -387,11 +408,11 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
             if traverse_to(
                 start.coords,
                 next.coords,
-                agent_radius,
+                shape.clone(),
                 max_height_diff,
-                &costmap,
+                &obstacle_hub,
                 resolution,
-            ) {
+            ).await {
                 last = next;
             } else {
                 new_path.push(last);
@@ -407,26 +428,15 @@ impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
 }
 
 #[inline]
-fn traverse_to<N>(
+async fn traverse_to<N: Float>(
     from: Vector3<N>,
     to: Vector3<N>,
-    agent_radius: N,
+    mut shape: Shape<N>,
     max_height_diff: N,
     obstacle_hub: &ObstacleHub<N>,
     resolution: N,
 ) -> bool
-where
-    N: RealField
-        + SupersetOf<usize>
-        + SupersetOf<f32>
-        + SupersetOf<i64>
-        + SupersetOf<isize>
-        + SupersetOf<u8>
-        + Copy,
 {
-    if !costmap.is_global_point_in_bounds(to.into()) {
-        return true;
-    }
     let mut travel = to - from;
     let distance = travel.magnitude();
     travel.unscale_mut(distance);
@@ -435,8 +445,15 @@ where
 
     for i in 1..count {
         let intermediate: Vector3<N> = from + travel * nalgebra::convert::<_, N>(i);
+        shape.set_origin(intermediate);
 
-        if !costmap.is_global_point_safe(intermediate.into(), agent_radius, max_height_diff) {
+        if obstacle_hub.get_height_only_within(&shape, |height| {
+            if height.height.abs() > max_height_diff {
+                Some(())
+            } else {
+                None
+            }
+        }).await.is_some() {
             return false;
         }
     }
@@ -445,27 +462,22 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
-struct CVec3<T: RealField> {
-    inner: Vector3<T>,
-    resolution: T,
+struct CVec3<N: Float> {
+    inner: Vector3<N>,
+    resolution: N,
 }
 
-impl<T: RealField + SupersetOf<i64> + Copy> PartialEq for CVec3<T> {
+impl<T: Float> PartialEq for CVec3<T> {
     fn eq(&self, other: &Self) -> bool {
-        let self_x: i64 = (self.inner.x / self.resolution).to_subset_unchecked();
-        let self_z: i64 = (self.inner.z / self.resolution).to_subset_unchecked();
-        let other_x: i64 = (other.inner.x / self.resolution).to_subset_unchecked();
-        let other_z: i64 = (other.inner.z / self.resolution).to_subset_unchecked();
-
-        self_x == other_x && self_z == other_z
+        self.inner.x.abs_diff_eq(&other.inner.x, other.inner.x)
     }
 }
 
-impl<T: RealField + SupersetOf<i64> + Copy> std::hash::Hash for CVec3<T> {
+impl<T: Float> std::hash::Hash for CVec3<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_i64((self.inner.x / self.resolution).to_subset_unchecked());
         state.write_i64((self.inner.z / self.resolution).to_subset_unchecked());
     }
 }
 
-impl<T: RealField + SupersetOf<i64> + Copy> Eq for CVec3<T> {}
+impl<T: Float> Eq for CVec3<T> {}

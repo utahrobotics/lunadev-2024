@@ -57,10 +57,10 @@ pub struct DepthMapSource<N: Float> {
 
 #[async_trait]
 impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
-    async fn get_height_only_within(&self, shape: Shape<N>) -> Option<HeightOnly<N>> {
+    async fn get_height_only_within(&self, shape: &Shape<N>) -> Option<HeightOnly<N>> {
         let (sender, receiver) = oneshot::channel();
         self.requests_sender
-            .send(Request::HeightOnlyWithin { shape, sender })
+            .send(Request::HeightOnlyWithin { shape: shape.clone(), sender })
             .await
             .ok()?;
         Some(receiver.await.unwrap_or_else(|_| HeightOnly {
@@ -70,11 +70,11 @@ impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
     }
     async fn get_height_and_variance_within(
         &self,
-        shape: Shape<N>,
+        shape: &Shape<N>,
     ) -> Option<HeightAndVariance<N>> {
         let (sender, receiver) = oneshot::channel();
         self.requests_sender
-            .send(Request::HeightVarianceWithin { shape, sender })
+            .send(Request::HeightVarianceWithin { shape: shape.clone(), sender })
             .await
             .ok()?;
         Some(receiver.await.unwrap_or_else(|_| HeightAndVariance {

@@ -1,15 +1,15 @@
 use core::{fmt::Debug, ops::Deref};
 
-use ordered_float::NotNan;
+use ordered_float::{FloatCore, NotNan};
 use unros::float::Float;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub struct Steering<N: Float=f32> {
+pub struct Steering<N: Float + FloatCore = f32> {
     pub left: NotNan<N>,
     pub right: NotNan<N>,
 }
 
-impl<N: Float> Debug for Steering<N> {
+impl<N: Float + FloatCore> Debug for Steering<N> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Steering")
             .field("left", self.left.deref())
@@ -18,7 +18,7 @@ impl<N: Float> Debug for Steering<N> {
     }
 }
 
-impl<N: Float> Steering<N> {
+impl<N: Float + FloatCore> Steering<N> {
     /// Shorthand to make this struct if you know the given values are not `NaN`.
     ///
     /// # Panics
@@ -36,9 +36,11 @@ impl<N: Float> Steering<N> {
         let mut right = drive;
 
         if steering.into_inner() > N::zero() {
-            right *= (nalgebra::convert::<_, N>(0.5) - steering.into_inner()) * nalgebra::convert(2.0);
+            right *=
+                (nalgebra::convert::<_, N>(0.5) - steering.into_inner()) * nalgebra::convert(2.0);
         } else {
-            left *= (nalgebra::convert::<_, N>(0.5) + steering.into_inner()) * nalgebra::convert(2.0);
+            left *=
+                (nalgebra::convert::<_, N>(0.5) + steering.into_inner()) * nalgebra::convert(2.0);
         }
 
         Self { left, right }

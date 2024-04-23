@@ -1,7 +1,7 @@
 use std::iter::Sum;
 
 use nalgebra::RealField;
-use ordered_float::FloatCore;
+use ordered_float::NotNan;
 use simba::scalar::{SubsetOf, SupersetOf};
 
 pub trait Float:
@@ -22,7 +22,6 @@ pub trait Float:
     + SupersetOf<i32>
     + SupersetOf<i16>
     + SupersetOf<i8>
-    + FloatCore
     + Sum
 {
     const MAX: Self;
@@ -30,10 +29,11 @@ pub trait Float:
 
     fn to_f32(self) -> f32;
     fn to_f64(self) -> f64;
-    fn sign(self) -> Self;
 
     fn is_f32() -> bool;
     fn is_f64() -> bool;
+
+    fn to_not_nan(self) -> Option<NotNan<Self>>;
 }
 
 impl Float for f32 {
@@ -48,8 +48,8 @@ impl Float for f32 {
         self as f64
     }
 
-    fn sign(self) -> Self {
-        self.signum()
+    fn to_not_nan(self) -> Option<NotNan<Self>> {
+        NotNan::new(self).ok()
     }
 
     fn is_f32() -> bool {
@@ -72,10 +72,10 @@ impl Float for f64 {
         self
     }
 
-    fn sign(self) -> Self {
-        self.signum()
+    fn to_not_nan(self) -> Option<NotNan<Self>> {
+        NotNan::new(self).ok()
     }
-
+    
     fn is_f32() -> bool {
         false
     }
