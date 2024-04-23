@@ -10,10 +10,10 @@ edition = "2021"
 unros = { path = "../unros" }
 rig = { path = "../rig" }
 nalgebra = { workspace = true }
-ordered-float = { workspace = true }
-costmap = { path = "../costmap" }
-spin_sleep = { workspace = true }
-pathfinding = "4"
 fxhash = { workspace = true }
+ordered-float = { workspace = true }
+obstacles = { path = "../obstacles" }
+spin_sleep = { workspace = true }
+# pathfinding = "4"
 indexmap = "2.2.3"
 simba = { workspace = true }

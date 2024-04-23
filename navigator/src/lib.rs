@@ -3,16 +3,11 @@
 use std::{ops::Deref, sync::Arc, time::Duration};
 
 use drive::Steering;
-use nalgebra::{Point3, UnitVector2, Vector2};
+use nalgebra::{Point3, UnitVector2, Vector2, Vector3};
 use ordered_float::NotNan;
 use rig::{RigSpace, RobotBaseRef};
 use unros::{
-    node::AsyncNode,
-    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
-    runtime::RuntimeContext,
-    setup_logging,
-    tokio::task::block_in_place,
-    DontDrop, ShouldNotDrop,
+    float::Float, node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, runtime::RuntimeContext, setup_logging, tokio::task::block_in_place, DontDrop, ShouldNotDrop
 };
 
 pub mod drive;
@@ -20,9 +15,6 @@ pub mod pathfinding;
 // mod utils;
 // pub mod pathfinders;
 
-type Float = f32;
-
-const PI: Float = std::f64::consts::PI as Float;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriveMode {
@@ -32,19 +24,19 @@ pub enum DriveMode {
 }
 
 #[derive(ShouldNotDrop)]
-pub struct DifferentialDriver<F: FnMut(Float) -> Float + Send + 'static> {
-    path_sub: Subscriber<Arc<[Point3<Float>]>>,
-    steering_signal: Publisher<Steering>,
+pub struct DifferentialDriver<N: Float, F: FnMut(N) -> N + Send + 'static> {
+    path_sub: Subscriber<Arc<[Point3<N>]>>,
+    steering_signal: Publisher<Steering<N>>,
     robot_base: RobotBaseRef,
     pub refresh_rate: Duration,
     drive_mode: WatchSubscriber<DriveMode>,
-    pub full_turn_angle: Float,
-    pub completion_distance: Float,
+    pub full_turn_angle: N,
+    pub completion_distance: N,
     pub turn_fn: F,
     dont_drop: DontDrop<Self>,
 }
 
-impl DifferentialDriver<fn(Float) -> Float> {
+impl<N: Float> DifferentialDriver<N, fn(N) -> N> {
     pub fn new(robot_base: RobotBaseRef) -> Self {
         Self {
             path_sub: Subscriber::new(1),
@@ -52,21 +44,21 @@ impl DifferentialDriver<fn(Float) -> Float> {
             robot_base,
             refresh_rate: Duration::from_millis(20),
             drive_mode: WatchSubscriber::new(DriveMode::Both),
-            completion_distance: 0.15,
+            completion_distance: nalgebra::convert(0.15),
             // 30 degrees
-            full_turn_angle: std::f64::consts::FRAC_PI_6 as Float,
-            turn_fn: |frac| -2.0 * frac + 1.0,
+            full_turn_angle: N::frac_pi_6(),
+            turn_fn: |frac| nalgebra::convert::<_, N>(-2.0) * frac + N::one(),
             dont_drop: DontDrop::new("diff-driver"),
         }
     }
 }
 
-impl<F: FnMut(Float) -> Float + Send + 'static> DifferentialDriver<F> {
-    pub fn steering_pub(&self) -> PublisherRef<Steering> {
+impl<N: Float, F: FnMut(N) -> N + Send + 'static> DifferentialDriver<N, F> {
+    pub fn steering_pub(&self) -> PublisherRef<Steering<N>> {
         self.steering_signal.get_ref()
     }
 
-    pub fn create_path_sub(&self) -> DirectSubscription<Arc<[Point3<Float>]>> {
+    pub fn create_path_sub(&self) -> DirectSubscription<Arc<[Point3<N>]>> {
         self.path_sub.create_subscription()
     }
 
@@ -75,9 +67,9 @@ impl<F: FnMut(Float) -> Float + Send + 'static> DifferentialDriver<F> {
     }
 }
 
-impl<F> AsyncNode for DifferentialDriver<F>
+impl<N: Float, F> AsyncNode for DifferentialDriver<N, F>
 where
-    F: FnMut(Float) -> Float + Send + 'static,
+    F: FnMut(N) -> N + Send + 'static,
 {
     type Result = ();
 
@@ -104,7 +96,7 @@ where
                     WatchSubscriber::try_update(&mut self.drive_mode);
 
                     let isometry = self.robot_base.get_isometry();
-                    let position = Vector2::new(isometry.translation.x, isometry.translation.z);
+                    let position: Vector2<N> = nalgebra::convert(Vector2::new(isometry.translation.x, isometry.translation.z));
 
                     let (i, _) = path
                         .iter()
@@ -122,7 +114,7 @@ where
 
                     let next = Vector2::new(next.x, next.z);
 
-                    let forward = isometry.get_forward_vector();
+                    let forward: Vector3<N> = nalgebra::convert(isometry.get_forward_vector());
                     let forward = UnitVector2::new_normalize(Vector2::new(forward.x, forward.z));
 
                     let mut travel = next - position;
@@ -133,42 +125,42 @@ where
                     }
 
                     travel.unscale_mut(distance);
-                    let cross = (forward.x * travel.y - forward.y * travel.x).signum();
+                    let cross = (forward.x * travel.y - forward.y * travel.x).sign();
                     assert!(!travel.x.is_nan(), "{position:?} {next:?} {path:?}");
                     assert!(!travel.y.is_nan(), "{position:?} {next:?} {path:?}");
                     let mut angle = forward.angle(&travel);
-                    let mut reversing = 1.0;
+                    let mut reversing = N::one();
 
                     if self.drive_mode.deref() == &DriveMode::ReverseOnly
-                        || (angle > PI / 2.0 && self.drive_mode.deref() != &DriveMode::ForwardOnly)
+                        || (angle > N::pi() / nalgebra::convert(2.0) && self.drive_mode.deref() != &DriveMode::ForwardOnly)
                     {
-                        angle = PI - angle;
-                        reversing = -1.0;
+                        angle = N::pi() - angle;
+                        reversing = -N::one();
                     }
 
                     if angle > self.full_turn_angle {
-                        if cross > 0.0 {
+                        if cross > N::zero() {
                             self.steering_signal
-                                .set(Steering::new(1.0 * reversing, -1.0 * reversing));
+                                .set(Steering::new(N::one() * reversing, -N::one() * reversing));
                         } else {
                             self.steering_signal
-                                .set(Steering::new(-1.0 * reversing, 1.0 * reversing));
+                                .set(Steering::new(-N::one() * reversing, N::one() * reversing));
                         }
                     } else {
                         let smaller_ratio = (self.turn_fn)(angle / self.full_turn_angle);
 
-                        if cross > 0.0 {
+                        if cross > N::zero() {
                             self.steering_signal
-                                .set(Steering::new(1.0 * reversing, smaller_ratio * reversing));
+                                .set(Steering::new(N::one() * reversing, smaller_ratio * reversing));
                         } else {
                             self.steering_signal
-                                .set(Steering::new(smaller_ratio * reversing, 1.0 * reversing));
+                                .set(Steering::new(smaller_ratio * reversing, N::one() * reversing));
                         }
                     }
 
                     sleeper.sleep(self.refresh_rate);
                 }
-                self.steering_signal.set(Steering::new(0.0, 0.0));
+                self.steering_signal.set(Steering::new(N::zero(), N::zero()));
             });
 
             // if let Some(goal_forward) = goal_forward {

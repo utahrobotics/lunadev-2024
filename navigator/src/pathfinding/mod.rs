@@ -1,28 +1,21 @@
 use std::{
-    marker::PhantomData,
-    sync::{
+    future::Future, marker::PhantomData, sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
-    },
-    time::{Duration, Instant},
+    }, time::{Duration, Instant}
 };
 
-use costmap::Costmap;
 use nalgebra::{convert as nconvert, Point3, RealField, UnitQuaternion, Vector2, Vector3};
+use obstacles::ObstacleHub;
 use ordered_float::{FloatCore, NotNan};
-use pathfinding::directed::{astar::astar, bfs::bfs};
 use rig::RobotBaseRef;
 use simba::scalar::SupersetOf;
 use spin_sleep::SpinSleeper;
 use unros::{
-    node::SyncNode,
-    pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber},
-    runtime::RuntimeContext,
-    service::{new_service, Service, ServiceHandle},
-    setup_logging,
-    tokio::{self, sync::oneshot},
-    DontDrop, ShouldNotDrop,
+    float::Float, node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, runtime::RuntimeContext, service::{new_service, Service, ServiceHandle}, setup_logging, tokio::{self, sync::oneshot}, DontDrop, ShouldNotDrop
 };
+
+mod alg;
 
 #[derive(Debug)]
 pub enum NavigationError {
@@ -68,26 +61,26 @@ pub type NavigationServiceHandle<N> =
 //     }
 // }
 
-pub trait PathfindingEngine<N: RealField>: Send + 'static {
+pub trait PathfindingEngine<N: Float>: Send + 'static {
     fn pathfind(
         &mut self,
         start: Point3<N>,
         end: Point3<N>,
-        costmap: &Costmap<N>,
+        obstacle_hub: &ObstacleHub<N>,
         resolution: N,
         agent_radius: N,
         max_height_diff: N,
         context: &RuntimeContext,
-    ) -> Option<Vec<Point3<N>>>;
+    ) -> impl Future<Output=Option<Vec<Point3<N>>>>;
 }
 
 #[derive(ShouldNotDrop)]
 pub struct Pathfinder<
-    N: RealField + SupersetOf<f32> + Copy = f32,
+    N: Float = f32,
     E: PathfindingEngine<N> = DirectPathfinder<N>,
 > {
     engine: E,
-    costmap_sub: Subscriber<Costmap<N>>,
+    obstacle_hub: ObstacleHub<N>,
     dont_drop: DontDrop<Self>,
     service: Service<Point3<N>, NavigationError, NavigationProgress, Result<(), NavigationError>>,
     service_handle: NavigationServiceHandle<N>,
@@ -100,12 +93,12 @@ pub struct Pathfinder<
     pub refresh_rate: Duration,
 }
 
-impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<N, E> {
-    pub fn new_with_engine(agent_radius: N, engine: E, robot_base: RobotBaseRef) -> Self {
+impl<N: Float, E: PathfindingEngine<N>> Pathfinder<N, E> {
+    pub fn new_with_engine(agent_radius: N, engine: E, obstacle_hub: ObstacleHub<N>, robot_base: RobotBaseRef) -> Self {
         let (service, service_handle) = new_service();
         Self {
             engine,
-            costmap_sub: Subscriber::new(1),
+            obstacle_hub,
             dont_drop: DontDrop::new("pathfinder"),
             service,
             service_handle,
@@ -119,10 +112,6 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
         }
     }
 
-    pub fn create_costmap_sub(&self) -> DirectSubscription<Costmap<N>> {
-        self.costmap_sub.create_subscription()
-    }
-
     pub fn get_path_pub(&self) -> PublisherRef<Arc<[Point3<N>]>> {
         self.path_pub.get_ref()
     }
@@ -133,34 +122,16 @@ impl<N: RealField + SupersetOf<f32> + Copy, E: PathfindingEngine<N>> Pathfinder<
 }
 
 impl<
-        N: RealField
-            + SupersetOf<f32>
-            + SupersetOf<usize>
-            + SupersetOf<i64>
-            + SupersetOf<isize>
-            + SupersetOf<u8>
-            + FloatCore
-            + Copy,
+        N: Float,
         E: PathfindingEngine<N>,
-    > SyncNode for Pathfinder<N, E>
+    > AsyncNode for Pathfinder<N, E>
 {
     type Result = ();
 
-    fn run(mut self, context: RuntimeContext) -> Self::Result {
+    async fn run(mut self, context: RuntimeContext) -> Self::Result {
         setup_logging!(context);
         drop(self.service_handle);
         self.dont_drop.ignore_drop = true;
-        let (costmap_sender, costmap_receiver) = oneshot::channel();
-        tokio::spawn(async move {
-            let Ok(costmap) = self.costmap_sub.into_watch_or_closed().await else {
-                return;
-            };
-            let _ = costmap_sender.send(costmap);
-        });
-        let Ok(mut costmap) = costmap_receiver.blocking_recv() else {
-            warn!("Costmap dropped before we could start");
-            return;
-        };
         let mut start_time = Instant::now();
         let sleeper = SpinSleeper::default();
 
@@ -184,16 +155,15 @@ impl<
                 let mut start: Vector3<N> =
                     nalgebra::convert(self.robot_base.get_isometry().translation.vector);
 
-                WatchSubscriber::try_update(&mut costmap);
                 if let Some(path) = self.engine.pathfind(
                     start.into(),
                     end,
-                    &costmap,
+                    &self.obstacle_hub,
                     self.resolution,
                     self.agent_radius,
                     self.max_height_diff,
                     &context,
-                ) {
+                ).await {
                     let path: Arc<[Point3<N>]> = Arc::from(path.into_boxed_slice());
                     self.path_pub.set(path.clone());
 
@@ -229,7 +199,7 @@ impl<
                                 to.coords,
                                 self.agent_radius,
                                 self.max_height_diff,
-                                &costmap,
+                                &self.obstacle_hub,
                                 self.resolution,
                             ) {
                                 break 'repathfind;
@@ -249,22 +219,13 @@ pub struct DirectPathfinder<N> {
     phantom: PhantomData<N>,
 }
 
-impl<N> PathfindingEngine<N> for DirectPathfinder<N>
-where
-    N: RealField
-        + Copy
-        + SupersetOf<usize>
-        + SupersetOf<isize>
-        + SupersetOf<i64>
-        + SupersetOf<f32>
-        + SupersetOf<u8>
-        + SupersetOf<u32>,
+impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
 {
     fn pathfind(
         &mut self,
         start: Point3<N>,
         end: Point3<N>,
-        costmap: &Costmap<N>,
+        obstacle_hub: &ObstacleHub<N>,
         resolution: N,
         agent_radius: N,
         max_height_diff: N,
@@ -275,7 +236,7 @@ where
         let mut pre_path = vec![];
 
         if !costmap.is_global_point_safe(start.into(), agent_radius, max_height_diff) {
-            if let Some(mut path) = bfs(
+            if let Some(mut path) = astar(
                 &CVec3 {
                     inner: start,
                     resolution,
@@ -451,7 +412,7 @@ fn traverse_to<N>(
     to: Vector3<N>,
     agent_radius: N,
     max_height_diff: N,
-    costmap: &Costmap<N>,
+    obstacle_hub: &ObstacleHub<N>,
     resolution: N,
 ) -> bool
 where
