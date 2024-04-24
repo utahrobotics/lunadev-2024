@@ -95,8 +95,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                     obstacle_hub
                         .get_height_only_within::<()>(
                             &Shape::Cylinder {
-                                radius: 0.25,
-                                height: 0.5,
+                                radius: 0.02,
+                                height: 1.0,
                                 isometry: Isometry3::from_parts(
                                     (origin
                                         + Vector3::new(

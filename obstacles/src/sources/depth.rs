@@ -114,7 +114,7 @@ pub fn new_depth_map<N: Float, D: Send + 'static>(
         DepthMap {
             rays,
             max_cylinders: 8,
-            max_concurrent: 8,
+            max_concurrent: 16,
             depth_sub: Subscriber::new(1),
             requests,
             robot_element_ref,
@@ -281,6 +281,7 @@ impl<D: Deref<Target = [f32]> + Clone + Send + 'static> AsyncNode for DepthMap<f
                     let depth = height_within_compute_depth.take();
                     let transform = Box::leak(Box::new(transform));
                     while height_only_pending.len() >= self.max_concurrent {
+                        unros::log::info!("a");
                         let _ = height_only_pending.next().await;
                     }
                     height_only_pending.push(async {
