@@ -37,10 +37,10 @@ async fn get_gpu_device() -> anyhow::Result<&'static GpuDevice> {
             let (device, queue) = adapter
                 .request_device(
                     &wgpu::DeviceDescriptor {
-                        required_features: wgpu::Features::empty(),
+                        features: wgpu::Features::empty(),
                         // WebGL doesn't support all of wgpu's features, so if
                         // we're building for the web, we'll have to disable some.
-                        required_limits: if cfg!(target_arch = "wasm32") {
+                        limits: if cfg!(target_arch = "wasm32") {
                             wgpu::Limits::downlevel_webgl2_defaults()
                         } else {
                             wgpu::Limits::default()
@@ -119,7 +119,7 @@ impl<A: IntoBuffers, V: FromBuffer + ?Sized> Compute<A, V> {
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Render Pass"),
-                timestamp_writes: None,
+                // timestamp_writes: None,
             });
 
             compute_pass.set_pipeline(&self.state.compute_pipeline);

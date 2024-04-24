@@ -12,7 +12,6 @@ use std::{
     io::{ErrorKind, Write},
     net::{SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -21,6 +20,7 @@ use crossbeam::{queue::ArrayQueue, utils::Backoff};
 use ffmpeg_sidecar::{child::FfmpegChild, command::FfmpegCommand, event::FfmpegEvent};
 use image::{DynamicImage, EncodableLayout};
 use log::{error, info, warn};
+use show_image::create_window;
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt, BufWriter},
@@ -227,6 +227,8 @@ pub enum VideoDumpInitError {
     LoggingError(anyhow::Error),
     /// An error automatically installing `ffmpeg`.
     FFMPEGInstallError(String),
+    /// An error initializing the display window.
+    CreateWindowError(show_image::error::CreateWindowError),
 }
 
 impl Error for VideoDumpInitError {}
@@ -246,6 +248,9 @@ impl Display for VideoDumpInitError {
             ),
             VideoDumpInitError::VideoError(e) => {
                 write!(f, "Faced an error while encoding video: {e}")
+            }
+            VideoDumpInitError::CreateWindowError(e) => {
+                write!(f, "Faced an error while creating the display window: {e}")
             }
         }
     }
@@ -298,42 +303,25 @@ a=fmtp:96 packetization-mode=1",
     pub fn new_display(
         in_width: u32,
         in_height: u32,
-        fps: usize,
         context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
-        let mut cmd = Command::new("ffplay")
-            .args([
-                "-f",
-                "rawvideo",
-                "-pixel_format",
-                "rgb24",
-                "-video_size",
-                &format!("{in_width}x{in_height}"),
-                "-vf",
-                &format!("fps={fps}"),
-                "-i",
-                "-",
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(VideoDumpInitError::IOError)?;
+        let name = context.get_name().to_string();
+        let window = create_window(&name, Default::default())
+            .map_err(|e| VideoDumpInitError::CreateWindowError(e))?;
 
         let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();
-
-        let mut video_out = cmd.stdin.take().unwrap();
-        // let mut video_err = cmd.stderr.unwrap();
 
         let backoff = Backoff::new();
 
         context.spawn_persistent_sync(move || loop {
             let Some(frame) = queue_receiver.pop() else {
                 if Arc::strong_count(&queue_receiver) == 1 {
-                    if let Err(e) = video_out.flush() {
-                        error!("Failed to flush Display: {e}");
-                    }
+                    window
+                        .run_function_wait(|handle| {
+                            handle.destroy();
+                        })
+                        .expect("Window should still be open");
                     break;
                 }
                 backoff.snooze();
@@ -341,23 +329,8 @@ a=fmtp:96 packetization-mode=1",
             };
             backoff.reset();
 
-            if let Err(e) = video_out.write_all(frame.to_rgb8().as_bytes()) {
-                if e.kind() == ErrorKind::BrokenPipe {
-                    match cmd.wait_with_output() {
-                        Ok(output) => {
-                            if !output.status.success() {
-                                let err = String::from_utf8_lossy(&output.stderr);
-                                error!("Display closed: {err}");
-                            }
-                        }
-                        Err(e) => {
-                            error!("Display closed: {e}");
-                        }
-                    }
-                    break;
-                } else {
-                    error!("Faced the following error while writing video frame to Display: {e}");
-                }
+            if let Err(e) = window.set_image(&name, frame.to_rgb8()) {
+                error!("Faced the following error while writing video frame to Display: {e}");
             }
         });
 

@@ -8,7 +8,7 @@ use std::{
 };
 
 use image::DynamicImage;
-use lunabot::{
+use lunabot_lib::{
     make_negotiation, ArmParameters, ControlsPacket, ImportantMessage, VIDEO_HEIGHT, VIDEO_WIDTH,
 };
 use navigator::drive::Steering;

@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 unros = { path = "../unros" }
-networking = { path = "../networking" }
 camera = { path = "../camera" }
 navigator = { path = "../navigator" }
 localization = { path = "../localization" }
@@ -25,6 +24,7 @@ image = { workspace = true }
 serde = { workspace = true }
 ordered-float = { workspace = true }
 py-repl = { path = "../py-repl" }
+lunabot-lib = { path = "../lunabot-lib" }
 base64 = "0"
 rodio = "0"
 

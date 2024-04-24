@@ -48,7 +48,9 @@ impl<N: Float> Default for ObstacleHub<N> {
 
 impl<N: Float> Clone for ObstacleHub<N> {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 

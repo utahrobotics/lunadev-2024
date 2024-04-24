@@ -11,7 +11,7 @@ use std::{
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
-use lunabot::{make_negotiation, ArmParameters, ControlsPacket, ImportantMessage};
+use lunabot_lib::{make_negotiation, ArmParameters, ControlsPacket, ImportantMessage};
 use networking::new_server;
 use unros::{
     anyhow,

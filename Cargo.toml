@@ -2,6 +2,7 @@
 members = [
     "unros-core",
     "lunabot",
+    "lunabot-lib",
     "camera",
     "apriltag",
     "realsense",
@@ -19,7 +20,7 @@ exclude = ["publishing/", "dump/", "lunabase/", "camera-db/"]
 fxhash = "0.2"
 chrono = "0.4"
 static_assertions = "1"
-image = "0.24"
+image = "0.25"
 ordered-float = "4"
 nalgebra = { version = "0.32", features = ["serde-serialize"] }
 toml = "0.8"

@@ -164,6 +164,7 @@ pub(crate) fn init_default_logger(context: &MainRuntimeContext) {
         let _ = fern::Dispatch::new()
             // Add blanket level filter -
             .level(log::LevelFilter::Debug)
+            .filter(|x| !(x.target().starts_with("wgpu") && x.level() >= Level::Info))
             // Output to stdout, files, and other Dispatch configurations
             .chain(
                 fern::Dispatch::new()

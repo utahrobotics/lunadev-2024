@@ -13,4 +13,4 @@ crossbeam = { workspace = true }
 # interprocess = { workspace = true }
 networking = { path = "../networking" }
 unros = { path = "../unros" }
-lunabot = { path = "../lunabot" }
+lunabot-lib = { path = "../lunabot-lib" }

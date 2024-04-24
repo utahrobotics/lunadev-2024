@@ -1,12 +1,13 @@
 use std::ops::DerefMut;
 
 use fxhash::FxBuildHasher;
+use image::{DynamicImage, ImageBuffer, Luma};
 use localization::{
     engines::window::{DefaultWindowConfig, WindowLocalizer},
     frames::{IMUFrame, OrientationFrame, PositionFrame},
     Localizer,
 };
-use nalgebra::{Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
+use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
 use navigator::{
     pathfinding::{direct::DirectPathfinder, Pathfinder},
     DifferentialDriver, DriveMode,
@@ -25,6 +26,7 @@ use unros::{
         self,
         io::{AsyncReadExt, AsyncWriteExt, BufStream},
         net::TcpListener,
+        task::JoinSet,
     },
 };
 
@@ -62,33 +64,78 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         robot_base.get_ref(),
     );
 
+    let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(200, 200, &context)?;
+    tokio::spawn(async move {
+        loop {
+            // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let mut heights = vec![0.0; 200 * 200];
+            let origin = Vector3::new(0.0, 0.0, -1.0);
+            let mut join_set = JoinSet::new();
 
-    // let mut costmap_display =
-    //     unros::logging::dump::VideoDataDump::new_display(400, 400, 24, &context)?;
-    // tokio::spawn(async move {
-    //     loop {
-    //         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    //         obstacle_hub
-    //             .get_height_and_variance_within::<()>(
-    //                 &Shape::Cylinder {
-    //                     radius: 0.25,
-    //                     height: 0.5,
-    //                     isometry: Isometry3::from_parts(
-    //                         Point3::new(0.0, 0.0, -0.5).into(),
-    //                         UnitQuaternion::default(),
-    //                     ),
-    //                 },
-    //                 |heights| {
-    //                     log::info!("{:?}", heights);
-    //                     None
-    //                 },
-    //             )
-    //             .await;
-    //     }
-    // });
-    // costmap
-    //     .get_costmap_pub()
-    //     .accept_subscription(pathfinder.create_costmap_sub());
+            for (i, height_ptr) in heights.iter_mut().enumerate() {
+                struct SafePtr(*mut f32);
+                unsafe impl Send for SafePtr {}
+                impl SafePtr {
+                    fn write(&mut self, value: f32) {
+                        unsafe {
+                            *self.0 = value;
+                        }
+                    }
+                }
+
+                let mut height_ptr = SafePtr(height_ptr);
+
+                let x = (i % 200) as isize;
+                let y = (i / 200) as isize;
+                let obstacle_hub = obstacle_hub.clone();
+                while join_set.len() >= 16 {
+                    join_set.join_next().await.unwrap().unwrap();
+                }
+                join_set.spawn(async move {
+                    obstacle_hub
+                        .get_height_only_within::<()>(
+                            &Shape::Cylinder {
+                                radius: 0.25,
+                                height: 0.5,
+                                isometry: Isometry3::from_parts(
+                                    (origin
+                                        + Vector3::new(
+                                            (x - 100) as f32 * 0.02,
+                                            0.0,
+                                            (y - 100) as f32 * 0.02,
+                                        ))
+                                    .into(),
+                                    UnitQuaternion::default(),
+                                ),
+                            },
+                            |height| {
+                                height_ptr.write(height.height.abs());
+                                None
+                            },
+                        )
+                        .await;
+                });
+            }
+            while !join_set.is_empty() {
+                join_set.join_next().await.unwrap().unwrap();
+            }
+            let max_height = heights
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max)
+                .max(0.1);
+            let img_data: Vec<_> = heights
+                .into_iter()
+                .map(|h| (h / max_height * 255.0).round() as u8)
+                .collect();
+            let buf = ImageBuffer::<Luma<u8>, _>::from_raw(200, 200, img_data).unwrap();
+            let img = DynamicImage::from(buf);
+            if costmap_display.write_frame(img.into()).is_err() {
+                break;
+            }
+        }
+    });
+
     let path_sub = Subscriber::new(1);
     pathfinder
         .get_path_pub()

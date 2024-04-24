@@ -30,3 +30,4 @@ rayon = { workspace = true }
 nalgebra = { workspace = true }
 simba = { workspace = true }
 ordered-float = { workspace = true }
+show-image = { version = "0.14.0", features = ["image"] }

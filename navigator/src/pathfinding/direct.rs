@@ -104,7 +104,9 @@ impl<'a, N: Float> AStarModule<Node<N>, usize> for DirectPathfinderModule<'a, N>
             successor_func!(current.position + Vector2::new(-1, 0)),
             async {
                 let end_diff = self.end_node.position - current.position;
-                if (end_diff.x == 0 && end_diff.y.abs() <= 1) || (end_diff.y == 0 && end_diff.x.abs() <= 1) {
+                if (end_diff.x == 0 && end_diff.y.abs() <= 1)
+                    || (end_diff.y == 0 && end_diff.x.abs() <= 1)
+                {
                     successor_func!(self.end_node.position).await
                 } else {
                     None

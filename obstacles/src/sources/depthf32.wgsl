@@ -31,7 +31,7 @@ fn main(
     }
     let point = transform.matrix * rays[index] * depth + transform.origin;
     var past_all_shapes = true;
-    for (var i: u32 = 0; i < cylinder_count; i++) {
+    for (var i = u32(0); i < cylinder_count; i++) {
         let cylinder = cylinders[i];
         let local_point = cylinder.inv_matrix * (point - cylinder.origin);
         let half_height = cylinder.height / 2.0;
