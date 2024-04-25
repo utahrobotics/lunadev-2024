@@ -4,7 +4,7 @@ use buffers::{BufferSize, BufferSizeIter, FromBuffer, IntoBuffer, IntoBuffers, R
 use crossbeam::queue::SegQueue;
 use tokio::sync::{oneshot, OnceCell};
 pub use wgpu;
-use wgpu::{util::StagingBelt, MapMode};
+use wgpu::util::StagingBelt;
 
 pub mod buffers;
 
@@ -153,14 +153,12 @@ impl<A: IntoBuffers, V: FromBuffer + ?Sized> Compute<A, V> {
         let (sender, receiver) = oneshot::channel();
         rayon::spawn(move || {
             device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(idx));
-            let buffer = return_staging_buffer.clone();
-            buffer.slice(..).map_async(MapMode::Read, move |_| {
-                let _ = sender.send(ReturnBuffer::new(
-                    return_staging_buffer,
-                    return_staging_buffers,
-                ));
-            });
-            device.poll(wgpu::MaintainBase::Poll);
+            V::from_buffer(
+                return_staging_buffer,
+                device,
+                return_staging_buffers,
+                sender,
+            );
         });
         receiver.await.unwrap()
     }

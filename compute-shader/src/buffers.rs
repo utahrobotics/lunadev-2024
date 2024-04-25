@@ -1,17 +1,15 @@
 use std::{
-    marker::PhantomData,
-    mem::size_of,
-    num::NonZeroU64,
-    ops::{Deref, DerefMut},
-    sync::Arc,
+    marker::PhantomData, mem::size_of, num::NonZeroU64, ops::{Deref, DerefMut}, ptr::NonNull, sync::Arc
 };
 
 use bytemuck::{bytes_of, from_bytes_mut};
 use crossbeam::queue::SegQueue;
-use wgpu::{util::StagingBelt, CommandEncoder};
+use tokio::sync::oneshot;
+use wgpu::{util::StagingBelt, CommandEncoder, MapMode};
 
-pub trait BufferSize: Copy + Send + 'static {
+pub trait BufferSize: Copy + Default + Send + 'static {
     fn size(&self) -> u64;
+    fn from_size(size: u64) -> Self;
 }
 
 pub struct StaticSize<T>(PhantomData<T>);
@@ -33,6 +31,10 @@ impl<T: Send + 'static> BufferSize for StaticSize<T> {
     fn size(&self) -> u64 {
         size_of::<T>() as u64
     }
+    fn from_size(size: u64) -> Self {
+        assert_eq!(size, size_of::<T>() as u64);
+        Self(PhantomData)
+    }
 }
 
 pub struct DynamicSize<T>(pub usize, PhantomData<T>);
@@ -41,11 +43,20 @@ impl<T: Send + 'static> BufferSize for DynamicSize<T> {
     fn size(&self) -> u64 {
         (self.0 * size_of::<T>()) as u64
     }
+    fn from_size(size: u64) -> Self {
+        assert_eq!(size % size_of::<T>() as u64, 0);
+        Self((size / size_of::<T>() as u64) as usize, PhantomData)
+    }
 }
 
 impl<T> DynamicSize<T> {
     pub fn new(len: usize) -> Self {
         Self(len, PhantomData)
+    }
+}
+impl<T> Default for DynamicSize<T> {
+    fn default() -> Self {
+        Self(0, PhantomData)
     }
 }
 impl<T> Copy for DynamicSize<T> {}
@@ -102,6 +113,7 @@ impl<T: BufferSize, T1: BufferSize, T2: BufferSize, T3: BufferSize, T4: BufferSi
 
 pub trait IntoBuffer: Copy {
     type Size: BufferSize;
+    fn get_size(&self) -> Self::Size;
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -113,6 +125,10 @@ pub trait IntoBuffer: Copy {
 
 impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &T {
     type Size = StaticSize<T>;
+
+    fn get_size(&self) -> Self::Size {
+        StaticSize::default()
+    }
 
     fn into_buffer(
         self,
@@ -136,9 +152,9 @@ impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &T {
 impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &[T] {
     type Size = DynamicSize<T>;
 
-    // fn get_size(&self) -> Self::Size {
-    //     DynamicSize::new(self.len())
-    // }
+    fn get_size(&self) -> Self::Size {
+        DynamicSize::new(self.len())
+    }
 
     fn into_buffer(
         self,
@@ -161,11 +177,58 @@ impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &[T] {
     }
 }
 
+
+impl<T: IntoBuffer> IntoBuffer for &ReturnBuffer<T> {
+    type Size = T::Size;
+
+    fn get_size(&self) -> Self::Size {
+        unsafe {
+            (*self.pointer).get_size()
+        }
+    }
+
+    fn into_buffer(
+        self,
+        command_encoder: &mut CommandEncoder,
+        buffer: &wgpu::Buffer,
+        _stager: &mut StagingBelt,
+        _device: &wgpu::Device,
+    ) {
+        command_encoder.copy_buffer_to_buffer(&self.buffer, 0, buffer, 0, self.get_size().size());
+    }
+}
+
+
+impl<T: FromBuffer> IntoBuffer for &ReturnBuffer<Opaque<T>> {
+    type Size = T::Size;
+
+    fn get_size(&self) -> Self::Size {
+        Self::Size::from_size(self.buffer.size())
+    }
+
+    fn into_buffer(
+        self,
+        command_encoder: &mut CommandEncoder,
+        buffer: &wgpu::Buffer,
+        _stager: &mut StagingBelt,
+        _device: &wgpu::Device,
+    ) {
+        command_encoder.copy_buffer_to_buffer(&self.buffer, 0, buffer, 0, self.get_size().size());
+    }
+}
+
 impl<'a, T: ?Sized> IntoBuffer for Option<&'a T>
 where
     &'a T: IntoBuffer,
 {
     type Size = <&'a T as IntoBuffer>::Size;
+
+    fn get_size(&self) -> Self::Size {
+        match self {
+            Some(item) => item.get_size(),
+            None => Default::default(),
+        }
+    }
 
     fn into_buffer(
         self,
@@ -279,48 +342,100 @@ impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, T3: IntoBuffer, T4: IntoBuff
 pub trait FromBuffer: Send + 'static {
     type Size: BufferSize;
 
-    fn from_buffer<'a>(buffer: &'a mut wgpu::BufferViewMut) -> &'a mut Self;
+    fn from_buffer(
+        buffer: Arc<wgpu::Buffer>,
+        device: &wgpu::Device,
+        buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
+        sender: oneshot::Sender<ReturnBuffer<Self>>,
+    );
 }
 
 impl<T: bytemuck::Pod + Send> FromBuffer for T {
     type Size = StaticSize<T>;
 
-    fn from_buffer<'a>(buffer: &'a mut wgpu::BufferViewMut) -> &'a mut Self {
-        from_bytes_mut(buffer)
+    fn from_buffer(
+        buffer: Arc<wgpu::Buffer>,
+        device: &wgpu::Device,
+        buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
+        sender: oneshot::Sender<ReturnBuffer<Self>>,
+    ) {
+        buffer.clone().slice(..).map_async(MapMode::Read, move |_| {
+            let pointer: *mut T = {
+                let mut view = buffer.slice(..).get_mapped_range_mut();
+                from_bytes_mut(&mut view)
+            };
+
+            let _ = sender.send(ReturnBuffer {
+                buffer,
+                mapped: true,
+                pointer,
+                buffer_queue,
+            });
+        });
+        device.poll(wgpu::MaintainBase::Poll);
     }
 }
 
 impl<T: bytemuck::Pod + Send> FromBuffer for [T] {
     type Size = DynamicSize<T>;
 
-    fn from_buffer<'a>(buffer: &'a mut wgpu::BufferViewMut) -> &'a mut Self {
-        let buffer: &mut [u8] = buffer;
-        if buffer.len() % size_of::<T>() != 0 {
-            panic!("Buffer size is not a multiple of the size of T");
-        }
-        let count = buffer.len() / size_of::<T>();
-        unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), count) }
+    fn from_buffer(
+        buffer: Arc<wgpu::Buffer>,
+        device: &wgpu::Device,
+        buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
+        sender: oneshot::Sender<ReturnBuffer<Self>>,
+    ) {
+        buffer.clone().slice(..).map_async(MapMode::Read, move |_| {
+            let pointer: *mut [T] = {
+                let mut view = buffer.slice(..).get_mapped_range_mut();
+                let view: &mut [u8] = &mut view;
+                if view.len() % size_of::<T>() != 0 {
+                    panic!("Buffer size is not a multiple of the size of T");
+                }
+                let count = view.len() / size_of::<T>();
+                unsafe { std::slice::from_raw_parts_mut(view.as_mut_ptr().cast(), count) }
+            };
+
+            let _ = sender.send(ReturnBuffer {
+                buffer,
+                mapped: true,
+                pointer,
+                buffer_queue,
+            });
+        });
+        device.poll(wgpu::MaintainBase::Poll);
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Opaque<T>(PhantomData<T>);
+
+
+impl<T: FromBuffer> FromBuffer for Opaque<T> {
+    type Size = T::Size;
+
+    fn from_buffer(
+        buffer: Arc<wgpu::Buffer>,
+        _device: &wgpu::Device,
+        buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
+        sender: oneshot::Sender<ReturnBuffer<Self>>,
+    ) {
+        let pointer: *mut Opaque<T> = NonNull::dangling().as_ptr();
+
+        let _ = sender.send(ReturnBuffer {
+            buffer,
+            mapped: false,
+            pointer,
+            buffer_queue,
+        });
     }
 }
 
 pub struct ReturnBuffer<T: ?Sized> {
     buffer: Arc<wgpu::Buffer>,
+    mapped: bool,
     pointer: *mut T,
     buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
-}
-
-impl<T: FromBuffer + ?Sized> ReturnBuffer<T> {
-    pub fn new(buffer: Arc<wgpu::Buffer>, buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>) -> Self {
-        let pointer: *mut T = {
-            let mut view = buffer.slice(..).get_mapped_range_mut();
-            T::from_buffer(&mut view)
-        };
-        Self {
-            buffer,
-            pointer,
-            buffer_queue,
-        }
-    }
 }
 
 impl<T: ?Sized> Deref for ReturnBuffer<T> {
@@ -342,7 +457,9 @@ unsafe impl<T: Sync + ?Sized> Sync for ReturnBuffer<T> {}
 
 impl<T: ?Sized> Drop for ReturnBuffer<T> {
     fn drop(&mut self) {
-        self.buffer.unmap();
+        if self.mapped {
+            self.buffer.unmap();
+        }
         self.buffer_queue.push(self.buffer.clone());
     }
 }

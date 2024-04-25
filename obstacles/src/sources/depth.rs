@@ -1,4 +1,4 @@
-use std::{ops::Deref, sync::Arc};
+use std::{any::Any, ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 use compute_shader::{
@@ -6,6 +6,7 @@ use compute_shader::{
     wgpu::include_wgsl,
     Compute,
 };
+use crossbeam::atomic::AtomicCell;
 use futures::{stream::FuturesUnordered, StreamExt};
 use nalgebra::UnitVector3;
 use rig::RobotElementRef;
@@ -28,71 +29,81 @@ use crate::Shape;
 
 use super::{HeightAndVariance, HeightOnly, ObstacleSource};
 
-enum Request<N: Float> {
-    HeightOnlyWithin {
-        shape: Shape<N>,
-        sender: oneshot::Sender<HeightOnly<N>>,
-    },
-    HeightVarianceWithin {
-        shape: Shape<N>,
-        sender: oneshot::Sender<HeightAndVariance<N>>,
-    },
-}
-
-pub struct DepthMap<N: Float, D> {
-    rays: Arc<[[N; 4]]>,
-
-    pub max_cylinders: usize,
-    pub max_concurrent: usize,
-
-    depth_sub: Subscriber<D>,
-    requests: AsyncReceiver<Request<N>>,
-    robot_element_ref: RobotElementRef,
-}
-
-impl<N: Float, D: Send + 'static> DepthMap<N, D> {
+impl<N: Float, D: Send + 'static> DepthMapSource<N, D> {
     pub fn create_depth_subscription(&self) -> DirectSubscription<D> {
         self.depth_sub.create_subscription()
     }
 }
 
-pub struct DepthMapSource<N: Float> {
-    requests_sender: AsyncSender<Request<N>>,
+pub struct DepthMapSource<N: Float, D> {
+    pub max_cylinders: usize,
+    depth_sub: Subscriber<D>,
+    robot_element_ref: RobotElementRef,
+
+    height_within_compute: Box<dyn Any + Send + Sync>,
+    height_within_compute_data: AtomicCell<Option<(D, Transform<N>)>>,
+    height_within_rays: AtomicCell<Option<Arc<[[N; 4]]>>>,
+    height_variance_within_rays: AtomicCell<Option<Arc<[[N; 4]]>>>,
 }
 
 #[async_trait]
-impl<N: Float> ObstacleSource<N> for DepthMapSource<N> {
-    async fn get_height_only_within(&self, shape: &Shape<N>) -> Option<HeightOnly<N>> {
-        let (sender, receiver) = oneshot::channel();
-        self.requests_sender
-            .send(Request::HeightOnlyWithin {
-                shape: shape.clone(),
-                sender,
-            })
-            .await
-            .ok()?;
-        Some(receiver.await.unwrap_or_else(|_| HeightOnly {
-            height: N::zero(),
-            unknown: N::one(),
-        }))
+impl<D> ObstacleSource<f32> for DepthMapSource<f32, D>
+where
+    D: Send + Deref<Target = [f32]> + Clone + 'static,
+{
+    async fn get_height_only_within(&self, shape: &Shape<f32>) -> Option<HeightOnly<f32>> {
+        let mut depth = self.depth_sub.try_recv();
+        let mut transform = None;
+        if let Some(tmp_depth) = depth {
+            let isometry = self.robot_element_ref.get_isometry_from_base();
+            let tmp = Transform {
+                origin: [
+                    isometry.translation.x,
+                    isometry.translation.y,
+                    isometry.translation.z,
+                    0.0,
+                ],
+                matrix: isometry
+                    .rotation
+                    .to_rotation_matrix()
+                    .into_inner()
+                    .data
+                    .0
+                    .map(|v| [v[0], v[1], v[2], 0.0]),
+            };
+            // self.other_data.store(Some((tmp_depth.clone(), tmp)));
+            transform = Some(tmp);
+        } else if let Some((old_depth, old_transform)) = self.height_within_compute_data.take() {
+            depth = Some(old_depth);
+            transform = Some(old_transform);
+        }
+        let mut cylinder_buf = vec![];
+        let height_within_compute: &Compute<
+            (
+                Option<&[[f32; 4]]>,
+                Option<&[f32]>,
+                &[Cylinder<f32>],
+                &u32,
+                Option<&Transform<f32>>,
+            ),
+            [f32],
+        > = self.height_within_compute.downcast_ref().unwrap();
+        height_within_compute
+            .call(
+                self.height_within_rays.take().as_deref(),
+                depth.as_deref(),
+                &[shape.clone()],
+                &1,
+                &transform,
+            )
+            .await;
+        None
     }
     async fn get_height_and_variance_within(
         &self,
-        shape: &Shape<N>,
-    ) -> Option<HeightAndVariance<N>> {
-        let (sender, receiver) = oneshot::channel();
-        self.requests_sender
-            .send(Request::HeightVarianceWithin {
-                shape: shape.clone(),
-                sender,
-            })
-            .await
-            .ok()?;
-        Some(receiver.await.unwrap_or_else(|_| HeightAndVariance {
-            height: N::zero(),
-            variance: N::zero(),
-            unknown: N::one(),
-        }))
+        shape: &Shape<f32>,
+    ) -> Option<HeightAndVariance<f32>> {
+        None
     }
 }
 

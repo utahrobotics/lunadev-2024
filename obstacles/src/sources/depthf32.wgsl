@@ -1,22 +1,15 @@
-struct Transform {
+struct Shape {
     origin: vec3<f32>,
-    matrix: mat3x3<f32>,
-}
-
-
-struct Cylinder {
-    origin: vec3<f32>,
+    variant: u32,
     inv_matrix: mat3x3<f32>,
-    height: f32,
-    radius: f32,
+    start_index: u32,
+    data: vec4<f32>,
 }
 
-@group(0) @binding(0) var<storage, read_write> returned: array<f32>;
-@group(0) @binding(1) var<storage, read> rays: array<vec3<f32>>;
-@group(0) @binding(2) var<storage, read> depths: array<f32>;
-@group(0) @binding(3) var<storage, read> cylinders: array<Cylinder>;
-@group(0) @binding(4) var<storage, read> cylinder_count: u32;
-@group(0) @binding(5) var<storage, read> transform: Transform;
+@group(0) @binding(0) var<storage, read_write> heights: array<f32>;
+@group(0) @binding(1) var<storage, read> points: array<vec3<f32>>;
+@group(0) @binding(2) var<storage, read> shapes: array<Shape>;
+@group(0) @binding(3) var<storage, read_write> height_indices: array<atomic<u32>>;
 
 @compute
 @workgroup_size(1, 1, 1)
