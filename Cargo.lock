@@ -957,6 +957,7 @@ dependencies = [
  "bytemuck",
  "crossbeam",
  "env_logger 0.11.3",
+ "futures",
  "fxhash",
  "nalgebra",
  "rand",

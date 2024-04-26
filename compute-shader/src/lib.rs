@@ -1,8 +1,15 @@
 // use std::sync::Arc;
 
+use std::sync::RwLock;
+
+use buffers::{BufferDestination, BufferSized, BufferSize, BufferSource, BufferType, HostReadableWritable, ShaderWritable};
+use crossbeam::queue::SegQueue;
+use futures::FutureExt;
+use fxhash::FxHashMap;
 // use buffers::{BufferSize, BufferSizeIter, FromBuffer, IntoBuffer, IntoBuffers, ReturnBuffer};
 // use crossbeam::queue::SegQueue;
 use tokio::sync::{oneshot, OnceCell};
+use wgpu::{util::StagingBelt, CommandEncoder};
 // pub use wgpu;
 // use wgpu::util::StagingBelt;
 
@@ -53,6 +60,144 @@ async fn get_gpu_device() -> anyhow::Result<&'static GpuDevice> {
             Ok(GpuDevice { device, queue })
         })
         .await
+}
+
+pub struct Compute<A> {
+    arg_buffers: Box<[wgpu::Buffer]>,
+
+    staging_belt_size: u64,
+    staging_belts: SegQueue<StagingBelt>,
+    compute_pipeline: wgpu::ComputePipeline,
+    bind_group: wgpu::BindGroup,
+
+    buffers: RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+
+    phantom: std::marker::PhantomData<A>,
+}
+
+impl<T1: BufferSized + 'static, H1: HostReadableWritable, S1: ShaderWritable> Compute<(BufferType<T1, H1, S1>,)> {
+    pub async fn new(shader_module_decsriptor: wgpu::ShaderModuleDescriptor<'_>, type1: BufferType<T1, H1, S1>) -> anyhow::Result<Self> {
+        let GpuDevice { device, .. } = get_gpu_device().await?;
+
+        let module = device.create_shader_module(shader_module_decsriptor);
+
+        let arg_buffers: Box<[_]> = [type1]
+            .into_iter()
+            .enumerate()
+            .map(|(index, buf_type)| {
+                buf_type.into_buffer(index, device)
+            })
+            .collect();
+
+        let entries: Box<[_]> =
+            [type1]
+                .into_iter()
+                .enumerate()
+                .map(|(i, buf_type)| {
+                    buf_type.into_layout(i as u32)
+                })
+        .collect();
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &entries,
+            label: Some("bind_group_layout"),
+        });
+
+        let entries: Box<[_]> =
+            arg_buffers
+                .iter()
+                .enumerate()
+                .map(|(i, buf)| wgpu::BindGroupEntry {
+                    binding: i as u32,
+                    resource: wgpu::BindingResource::Buffer(buf.as_entire_buffer_binding()),
+                })
+        
+        .collect();
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &entries,
+            label: Some("bind_group"),
+        });
+
+        let compute_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compute Pipeline Layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Compute Pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &module,
+            entry_point: "main",
+        });
+
+        let staging_belt_size = [type1.size()].into_iter().max().unwrap();
+
+        Ok(Self {
+            staging_belts: SegQueue::new(),
+            staging_belt_size,
+            arg_buffers,
+            compute_pipeline,
+            bind_group,
+            buffers: RwLock::new(FxHashMap::default()),
+            phantom: std::marker::PhantomData,
+        })
+    }
+    
+    pub fn new_pass(&self, arg1: impl BufferSource<T1>) -> ComputePass<(BufferType<T1, H1, S1>,)> {
+        let GpuDevice { device, .. } = get_gpu_device().now_or_never().unwrap().unwrap();
+
+        let mut command_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Render Encoder"),
+        });
+        let mut stager = self.staging_belts.pop().unwrap_or_else(|| StagingBelt::new(self.staging_belt_size));
+        arg1.into_buffer(&mut command_encoder, &self.arg_buffers[0], &mut stager, device);
+        ComputePass { command_encoder, compute: self, stager, workgroup_size: (1, 1, 1) }
+    }
+}
+
+pub struct ComputePass<'a, A> {
+    command_encoder: CommandEncoder,
+    compute: &'a Compute<A>,
+    stager: StagingBelt,
+    pub workgroup_size: (u32, u32, u32),
+}
+
+impl<'a, T1: 'static> ComputePass<'a, (T1,)> {
+    pub async fn call(mut self, mut arg1: impl BufferDestination<T1>) {
+        let GpuDevice { queue, device } = get_gpu_device().await.unwrap();
+        let Compute { compute_pipeline, bind_group, arg_buffers, buffers, staging_belts, .. } = self.compute;
+
+        self.stager.finish();
+        {
+            let mut compute_pass = self.command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Render Pass"),
+                timestamp_writes: None,
+            });
+
+            compute_pass.set_pipeline(compute_pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            compute_pass.dispatch_workgroups(
+                self.workgroup_size.0,
+                self.workgroup_size.1,
+                self.workgroup_size.2,
+            );
+        }
+        let state1 = arg1.enqueue(&mut self.command_encoder, &arg_buffers[0], &buffers, device);
+
+        let idx = queue.submit(std::iter::once(self.command_encoder.finish()));
+        self.stager.recall();
+        staging_belts.push(self.stager);
+
+        tokio::task::spawn_blocking(|| {
+            device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(idx));
+        }).await.unwrap();
+
+        arg1.from_buffer(state1, device, buffers).await;
+    }
 }
 
 // pub struct Compute<A, V: ?Sized> {

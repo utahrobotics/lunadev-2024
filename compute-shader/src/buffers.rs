@@ -7,7 +7,7 @@ use std::{
     sync::RwLock,
 };
 
-use bytemuck::{bytes_of, from_bytes, from_bytes_mut};
+use bytemuck::{bytes_of, from_bytes};
 use crossbeam::queue::SegQueue;
 use fxhash::FxHashMap;
 use tokio::sync::oneshot;
@@ -16,11 +16,156 @@ use wgpu::{util::StagingBelt, CommandEncoder, Maintain, MapMode};
 use crate::{get_gpu_device, GpuDevice};
 
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReadOrWrite {
-    ReadOnly,
-    ReadWrite,
+pub trait HostReadableWritable {
+    const CAN_READ: bool;
+    const CAN_WRITE: bool;
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct HostReadOnly;
+
+impl HostReadableWritable for HostReadOnly {
+    const CAN_READ: bool = true;
+    const CAN_WRITE: bool = false;
+}
+#[derive(Debug, Clone, Copy)]
+pub struct HostWriteOnly;
+
+impl HostReadableWritable for HostWriteOnly {
+    const CAN_READ: bool = false;
+    const CAN_WRITE: bool = true;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HostReadWrite;
+
+impl HostReadableWritable for HostReadWrite {
+    const CAN_READ: bool = true;
+    const CAN_WRITE: bool = true;
+}
+
+pub trait ShaderWritable {
+    const CAN_WRITE: bool;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ShaderReadOnly;
+
+impl ShaderWritable for ShaderReadOnly {
+    const CAN_WRITE: bool = false;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ShaderReadWrite;
+
+impl ShaderWritable for ShaderReadWrite {
+    const CAN_WRITE: bool = true;
+}
+
+pub struct BufferType<T: BufferSized, H, S> {
+    size: T::Size,
+    _phantom: PhantomData<(T, H, S)>,
+}
+
+impl<T: BufferSized, H, S> Clone for BufferType<T, H, S> {
+    fn clone(&self) -> Self {
+        Self { size: self.size, _phantom: PhantomData }
+    }
+}
+
+impl<T: BufferSized, H, S> Copy for BufferType<T, H, S> { }
+
+impl<T: BufferSized<Size=StaticSize<T>>, H, S> BufferType<T, H, S> {
+    pub fn new() -> Self {
+        Self {
+            size: StaticSize::default(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: BufferSized<Size=DynamicSize<T>>, H, S> BufferType<T, H, S> {
+    pub fn new_dyn(len: usize) -> Self {
+        Self {
+            size: DynamicSize::new(len),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: BufferSized, H: HostReadableWritable, S: ShaderWritable> BufferType<T, H, S> {
+    const HOST_CAN_READ: bool = H::CAN_READ;
+    const HOST_CAN_WRITE: bool = H::CAN_WRITE;
+    const SHADER_CAN_WRITE: bool = S::CAN_WRITE;
+
+    pub fn size(&self) -> u64 {
+        self.size.size()
+    }
+
+    pub(crate) fn into_buffer(&self, index: usize, device: &wgpu::Device) -> wgpu::Buffer {
+        let additional_usage = if Self::HOST_CAN_READ && Self::HOST_CAN_WRITE {
+            wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST
+        } else if Self::HOST_CAN_WRITE {
+            wgpu::BufferUsages::COPY_DST
+        } else {
+            wgpu::BufferUsages::COPY_SRC
+        };
+        
+        if Self::SHADER_CAN_WRITE || self.size.size() > 64000 {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Arg Buffer {index}")),
+                size: self.size.size(),
+                usage: wgpu::BufferUsages::STORAGE | additional_usage,
+                mapped_at_creation: false,
+            })
+        } else {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Arg Buffer {index}")),
+                size: self.size.size(),
+                usage: wgpu::BufferUsages::UNIFORM | additional_usage,
+                mapped_at_creation: false,
+            })
+        }
+    }
+
+    pub(crate) fn into_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
+        if Self::SHADER_CAN_WRITE {
+            wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        } else if self.size.size() > 64000 {
+            wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        } else {
+            wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        }
+    }
+}
+
 
 pub trait BufferSize: Copy + Default + Send + 'static {
     fn size(&self) -> u64;
@@ -79,19 +224,19 @@ impl<T> Clone for DynamicSize<T> {
     }
 }
 
-pub trait BufferInit {
+pub trait BufferSized {
     type Size: BufferSize;
 }
 
-impl<T: 'static> BufferInit for T {
+impl<T: 'static> BufferSized for T {
     type Size = StaticSize<T>;
 }
 
-impl<T: 'static> BufferInit for [T] {
+impl<T: 'static> BufferSized for [T] {
     type Size = DynamicSize<T>;
 }
 
-pub trait BufferSource<T: BufferInit> {
+pub trait BufferSource<T: BufferSized> {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -101,7 +246,7 @@ pub trait BufferSource<T: BufferInit> {
     );
 }
 
-impl<T: BufferInit> BufferSource<T> for () {
+impl<T: 'static> BufferSource<T> for () {
     fn into_buffer(
         self,
         _command_encoder: &mut CommandEncoder,
@@ -112,7 +257,7 @@ impl<T: BufferInit> BufferSource<T> for () {
     }
 }
 
-impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for &T {
+impl<T: BufferSized + bytemuck::Pod> BufferSource<T> for &T {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -132,7 +277,7 @@ impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for &T {
     }
 }
 
-impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for &[T] {
+impl<T: BufferSized + bytemuck::Pod> BufferSource<T> for &[T] {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -167,7 +312,7 @@ impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for &[T] {
     }
 }
 
-impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for Option<&T> {
+impl<T: BufferSized + bytemuck::Pod> BufferSource<T> for Option<&T> {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -181,28 +326,28 @@ impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for Option<&T> {
     }
 }
 
-pub trait BufferDestination<T: BufferInit> {
+pub trait BufferDestination<T: BufferSized> {
     type State;
     fn enqueue(
-        self,
+        &self,
         command_encoder: &mut CommandEncoder,
         src_buffer: &wgpu::Buffer,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
         device: &wgpu::Device,
     ) -> Self::State;
     fn from_buffer(
-        self,
+        &mut self,
         state: Self::State,
         device: &wgpu::Device,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
     ) -> impl Future<Output = ()>;
 }
 
-impl<T: BufferInit + bytemuck::Pod> BufferDestination<T> for &mut T {
+impl<T: BufferSized + bytemuck::Pod> BufferDestination<T> for &mut T {
     type State = wgpu::Buffer;
 
     fn enqueue(
-        self,
+        &self,
         command_encoder: &mut CommandEncoder,
         src_buffer: &wgpu::Buffer,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
@@ -229,7 +374,7 @@ impl<T: BufferInit + bytemuck::Pod> BufferDestination<T> for &mut T {
     }
 
     async fn from_buffer(
-        self,
+        &mut self,
         buffer: Self::State,
         device: &wgpu::Device,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
@@ -247,7 +392,7 @@ impl<T: BufferInit + bytemuck::Pod> BufferDestination<T> for &mut T {
             receiver.await.expect("Failed to map buffer");
             let slice = slice.get_mapped_range();
             let buffer_ref: &T = from_bytes(&slice);
-            *self = *buffer_ref;
+            **self = *buffer_ref;
         }
 
         buffer.unmap();
@@ -269,11 +414,11 @@ impl<T: BufferInit + bytemuck::Pod> BufferDestination<T> for &mut T {
     }
 }
 
-impl<T: BufferInit + bytemuck::Pod + Send> BufferDestination<T> for &mut [T] {
+impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<T> for &mut [T] {
     type State = wgpu::Buffer;
 
     fn enqueue(
-        self,
+        &self,
         command_encoder: &mut CommandEncoder,
         src_buffer: &wgpu::Buffer,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
@@ -302,7 +447,7 @@ impl<T: BufferInit + bytemuck::Pod + Send> BufferDestination<T> for &mut [T] {
     }
 
     async fn from_buffer(
-        self,
+        &mut self,
         buffer: Self::State,
         device: &wgpu::Device,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
@@ -342,6 +487,60 @@ impl<T: BufferInit + bytemuck::Pod + Send> BufferDestination<T> for &mut [T] {
 }
 
 
+impl<'a, T: 'static> BufferDestination<T> for Option<&'a mut T> where &'a mut T: BufferDestination<T> {
+    type State = Option<<&'a mut T as BufferDestination<T>>::State>;
+
+    fn enqueue(
+        &self,
+        command_encoder: &mut CommandEncoder,
+        src_buffer: &wgpu::Buffer,
+        buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+        device: &wgpu::Device,
+    ) -> Self::State {
+        if let Some(item) = self {
+            Some(item.enqueue(command_encoder, src_buffer, buffers, device))
+        } else {
+            None
+        }
+    }
+
+    async fn from_buffer(
+        &mut self,
+        state: Self::State,
+        device: &wgpu::Device,
+        buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+    ) {
+        if let Some(item) = self {
+            item.from_buffer(state.unwrap(), device, buffers).await;
+        }
+    }
+}
+
+
+impl<T: 'static> BufferDestination<T> for () {
+    type State = ();
+
+    fn enqueue(
+        &self,
+        _command_encoder: &mut CommandEncoder,
+        _src_buffer: &wgpu::Buffer,
+        _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+        _device: &wgpu::Device,
+    ) -> Self::State {
+
+    }
+
+    async fn from_buffer(
+        &mut self,
+        _state: Self::State,
+        _device: &wgpu::Device,
+        _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+    ) {
+        
+    }
+}
+
+
 pub struct OpaqueBuffer {
     buffer: wgpu::Buffer,
 }
@@ -363,7 +562,7 @@ impl<T: 'static> BufferDestination<T> for &mut OpaqueBuffer {
     type State = ();
 
     fn enqueue(
-        self,
+        &self,
         command_encoder: &mut CommandEncoder,
         src_buffer: &wgpu::Buffer,
         _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
@@ -373,7 +572,7 @@ impl<T: 'static> BufferDestination<T> for &mut OpaqueBuffer {
     }
 
     async fn from_buffer(
-        self,
+        &mut self,
         (): Self::State,
         _device: &wgpu::Device,
         _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
