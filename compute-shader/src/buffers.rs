@@ -1,18 +1,35 @@
 use std::{
-    marker::PhantomData, mem::size_of, num::NonZeroU64, ops::{Deref, DerefMut}, ptr::NonNull, sync::Arc
+    future::Future,
+    marker::PhantomData,
+    mem::{align_of, size_of, transmute},
+    num::NonZeroU64,
+    ops::Deref,
+    sync::RwLock,
 };
 
-use bytemuck::{bytes_of, from_bytes_mut};
+use bytemuck::{bytes_of, from_bytes, from_bytes_mut};
 use crossbeam::queue::SegQueue;
+use fxhash::FxHashMap;
 use tokio::sync::oneshot;
-use wgpu::{util::StagingBelt, CommandEncoder, MapMode};
+use wgpu::{util::StagingBelt, CommandEncoder, Maintain, MapMode};
+
+use crate::{get_gpu_device, GpuDevice};
+
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadOrWrite {
+    ReadOnly,
+    ReadWrite,
+}
 
 pub trait BufferSize: Copy + Default + Send + 'static {
     fn size(&self) -> u64;
-    fn from_size(size: u64) -> Self;
 }
 
 pub struct StaticSize<T>(PhantomData<T>);
+
+unsafe impl<T> Send for StaticSize<T> {}
+unsafe impl<T> Sync for StaticSize<T> {}
 
 impl<T> Default for StaticSize<T> {
     fn default() -> Self {
@@ -27,25 +44,21 @@ impl<T> Clone for StaticSize<T> {
     }
 }
 
-impl<T: Send + 'static> BufferSize for StaticSize<T> {
+impl<T: 'static> BufferSize for StaticSize<T> {
     fn size(&self) -> u64 {
         size_of::<T>() as u64
-    }
-    fn from_size(size: u64) -> Self {
-        assert_eq!(size, size_of::<T>() as u64);
-        Self(PhantomData)
     }
 }
 
 pub struct DynamicSize<T>(pub usize, PhantomData<T>);
 
-impl<T: Send + 'static> BufferSize for DynamicSize<T> {
+unsafe impl<T> Send for DynamicSize<T> {}
+unsafe impl<T> Sync for DynamicSize<T> {}
+
+impl<T: 'static> BufferSize for DynamicSize<T> {
     fn size(&self) -> u64 {
-        (self.0 * size_of::<T>()) as u64
-    }
-    fn from_size(size: u64) -> Self {
-        assert_eq!(size % size_of::<T>() as u64, 0);
-        Self((size / size_of::<T>() as u64) as usize, PhantomData)
+        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
+        self.0 as u64 * stride
     }
 }
 
@@ -66,54 +79,19 @@ impl<T> Clone for DynamicSize<T> {
     }
 }
 
-pub trait BufferSizeIter: Copy {
-    fn into_iter(self) -> impl Iterator<Item = u64>;
-}
-
-impl<T: BufferSize> BufferSizeIter for (T,) {
-    fn into_iter(self) -> impl Iterator<Item = u64> {
-        std::iter::once(self.0.size())
-    }
-}
-
-impl<T: BufferSize, T1: BufferSize> BufferSizeIter for (T, T1) {
-    fn into_iter(self) -> impl Iterator<Item = u64> {
-        [self.0.size(), self.1.size()].into_iter()
-    }
-}
-
-impl<T: BufferSize, T1: BufferSize, T2: BufferSize> BufferSizeIter for (T, T1, T2) {
-    fn into_iter(self) -> impl Iterator<Item = u64> {
-        [self.0.size(), self.1.size(), self.2.size()].into_iter()
-    }
-}
-
-impl<T: BufferSize, T1: BufferSize, T2: BufferSize, T3: BufferSize> BufferSizeIter
-    for (T, T1, T2, T3)
-{
-    fn into_iter(self) -> impl Iterator<Item = u64> {
-        [self.0.size(), self.1.size(), self.2.size(), self.3.size()].into_iter()
-    }
-}
-
-impl<T: BufferSize, T1: BufferSize, T2: BufferSize, T3: BufferSize, T4: BufferSize> BufferSizeIter
-    for (T, T1, T2, T3, T4)
-{
-    fn into_iter(self) -> impl Iterator<Item = u64> {
-        [
-            self.0.size(),
-            self.1.size(),
-            self.2.size(),
-            self.3.size(),
-            self.4.size(),
-        ]
-        .into_iter()
-    }
-}
-
-pub trait IntoBuffer: Copy {
+pub trait BufferInit {
     type Size: BufferSize;
-    fn get_size(&self) -> Self::Size;
+}
+
+impl<T: 'static> BufferInit for T {
+    type Size = StaticSize<T>;
+}
+
+impl<T: 'static> BufferInit for [T] {
+    type Size = DynamicSize<T>;
+}
+
+pub trait BufferSource<T: BufferInit> {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -123,13 +101,18 @@ pub trait IntoBuffer: Copy {
     );
 }
 
-impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &T {
-    type Size = StaticSize<T>;
-
-    fn get_size(&self) -> Self::Size {
-        StaticSize::default()
+impl<T: BufferInit> BufferSource<T> for () {
+    fn into_buffer(
+        self,
+        _command_encoder: &mut CommandEncoder,
+        _buffer: &wgpu::Buffer,
+        _stager: &mut StagingBelt,
+        _device: &wgpu::Device,
+    ) {
     }
+}
 
+impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for &T {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -149,13 +132,7 @@ impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &T {
     }
 }
 
-impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &[T] {
-    type Size = DynamicSize<T>;
-
-    fn get_size(&self) -> Self::Size {
-        DynamicSize::new(self.len())
-    }
-
+impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for &[T] {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -163,73 +140,34 @@ impl<T: bytemuck::Pod + Send + 'static> IntoBuffer for &[T] {
         stager: &mut StagingBelt,
         device: &wgpu::Device,
     ) {
-        for (i, item) in self.iter().enumerate() {
+        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
+        if const { size_of::<T>() % align_of::<T>() == 0 } {
             stager
                 .write_buffer(
                     command_encoder,
                     buffer,
-                    (i * size_of::<T>()) as u64,
-                    NonZeroU64::new(size_of::<T>() as u64).unwrap(),
+                    0,
+                    NonZeroU64::new(stride * self.len() as u64).unwrap(),
                     device,
                 )
-                .copy_from_slice(bytes_of(item));
+                .copy_from_slice(unsafe { transmute(self) });
+        } else {
+            for (i, item) in self.iter().enumerate() {
+                stager
+                    .write_buffer(
+                        command_encoder,
+                        buffer,
+                        i as u64 * stride,
+                        NonZeroU64::new(stride).unwrap(),
+                        device,
+                    )
+                    .copy_from_slice(bytes_of(item));
+            }
         }
     }
 }
 
-
-impl<T: IntoBuffer> IntoBuffer for &ReturnBuffer<T> {
-    type Size = T::Size;
-
-    fn get_size(&self) -> Self::Size {
-        unsafe {
-            (*self.pointer).get_size()
-        }
-    }
-
-    fn into_buffer(
-        self,
-        command_encoder: &mut CommandEncoder,
-        buffer: &wgpu::Buffer,
-        _stager: &mut StagingBelt,
-        _device: &wgpu::Device,
-    ) {
-        command_encoder.copy_buffer_to_buffer(&self.buffer, 0, buffer, 0, self.get_size().size());
-    }
-}
-
-
-impl<T: FromBuffer> IntoBuffer for &ReturnBuffer<Opaque<T>> {
-    type Size = T::Size;
-
-    fn get_size(&self) -> Self::Size {
-        Self::Size::from_size(self.buffer.size())
-    }
-
-    fn into_buffer(
-        self,
-        command_encoder: &mut CommandEncoder,
-        buffer: &wgpu::Buffer,
-        _stager: &mut StagingBelt,
-        _device: &wgpu::Device,
-    ) {
-        command_encoder.copy_buffer_to_buffer(&self.buffer, 0, buffer, 0, self.get_size().size());
-    }
-}
-
-impl<'a, T: ?Sized> IntoBuffer for Option<&'a T>
-where
-    &'a T: IntoBuffer,
-{
-    type Size = <&'a T as IntoBuffer>::Size;
-
-    fn get_size(&self) -> Self::Size {
-        match self {
-            Some(item) => item.get_size(),
-            None => Default::default(),
-        }
-    }
-
+impl<T: BufferInit + bytemuck::Pod> BufferSource<T> for Option<&T> {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -237,247 +175,361 @@ where
         stager: &mut StagingBelt,
         device: &wgpu::Device,
     ) {
-        match self {
-            Some(item) => item.into_buffer(command_encoder, buffer, stager, device),
-            None => {}
+        if let Some(item) = self {
+            item.into_buffer(command_encoder, buffer, stager, device);
         }
     }
 }
 
-pub trait IntoBuffers {
-    type Sizes: BufferSizeIter;
-    fn into_buffers(
-        &self,
+pub trait BufferDestination<T: BufferInit> {
+    type State;
+    fn enqueue(
+        self,
         command_encoder: &mut CommandEncoder,
-        buffers: &[wgpu::Buffer],
-        stager: &mut StagingBelt,
+        src_buffer: &wgpu::Buffer,
+        buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
         device: &wgpu::Device,
-    );
-}
-
-impl<T: IntoBuffer> IntoBuffers for (T,) {
-    type Sizes = (T::Size,);
-
-    fn into_buffers(
-        &self,
-        command_encoder: &mut CommandEncoder,
-        buffers: &[wgpu::Buffer],
-        stager: &mut StagingBelt,
-        device: &wgpu::Device,
-    ) {
-        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
-    }
-}
-
-impl<T: IntoBuffer, T1: IntoBuffer> IntoBuffers for (T, T1) {
-    type Sizes = (T::Size, T1::Size);
-
-    fn into_buffers(
-        &self,
-        command_encoder: &mut CommandEncoder,
-        buffers: &[wgpu::Buffer],
-        stager: &mut StagingBelt,
-        device: &wgpu::Device,
-    ) {
-        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
-        (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
-    }
-}
-
-impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer> IntoBuffers for (T, T1, T2) {
-    type Sizes = (T::Size, T1::Size, T2::Size);
-
-    fn into_buffers(
-        &self,
-        command_encoder: &mut CommandEncoder,
-        buffers: &[wgpu::Buffer],
-        stager: &mut StagingBelt,
-        device: &wgpu::Device,
-    ) {
-        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
-        (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
-        (&self.2).into_buffer(command_encoder, &buffers[2], stager, device);
-    }
-}
-
-impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, T3: IntoBuffer> IntoBuffers
-    for (T, T1, T2, T3)
-{
-    type Sizes = (T::Size, T1::Size, T2::Size, T3::Size);
-
-    fn into_buffers(
-        &self,
-        command_encoder: &mut CommandEncoder,
-        buffers: &[wgpu::Buffer],
-        stager: &mut StagingBelt,
-        device: &wgpu::Device,
-    ) {
-        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
-        (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
-        (&self.2).into_buffer(command_encoder, &buffers[2], stager, device);
-        (&self.3).into_buffer(command_encoder, &buffers[3], stager, device);
-    }
-}
-
-impl<T: IntoBuffer, T1: IntoBuffer, T2: IntoBuffer, T3: IntoBuffer, T4: IntoBuffer> IntoBuffers
-    for (T, T1, T2, T3, T4)
-{
-    type Sizes = (T::Size, T1::Size, T2::Size, T3::Size, T4::Size);
-
-    fn into_buffers(
-        &self,
-        command_encoder: &mut CommandEncoder,
-        buffers: &[wgpu::Buffer],
-        stager: &mut StagingBelt,
-        device: &wgpu::Device,
-    ) {
-        (&self.0).into_buffer(command_encoder, &buffers[0], stager, device);
-        (&self.1).into_buffer(command_encoder, &buffers[1], stager, device);
-        (&self.2).into_buffer(command_encoder, &buffers[2], stager, device);
-        (&self.3).into_buffer(command_encoder, &buffers[3], stager, device);
-        (&self.4).into_buffer(command_encoder, &buffers[4], stager, device);
-    }
-}
-
-pub trait FromBuffer: Send + 'static {
-    type Size: BufferSize;
-
+    ) -> Self::State;
     fn from_buffer(
-        buffer: Arc<wgpu::Buffer>,
+        self,
+        state: Self::State,
         device: &wgpu::Device,
-        buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
-        sender: oneshot::Sender<ReturnBuffer<Self>>,
-    );
+        buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+    ) -> impl Future<Output = ()>;
 }
 
-impl<T: bytemuck::Pod + Send> FromBuffer for T {
-    type Size = StaticSize<T>;
+impl<T: BufferInit + bytemuck::Pod> BufferDestination<T> for &mut T {
+    type State = wgpu::Buffer;
 
-    fn from_buffer(
-        buffer: Arc<wgpu::Buffer>,
+    fn enqueue(
+        self,
+        command_encoder: &mut CommandEncoder,
+        src_buffer: &wgpu::Buffer,
+        buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
         device: &wgpu::Device,
-        buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
-        sender: oneshot::Sender<ReturnBuffer<Self>>,
-    ) {
-        buffer.clone().slice(..).map_async(MapMode::Read, move |_| {
-            let pointer: *mut T = {
-                let mut view = buffer.slice(..).get_mapped_range_mut();
-                from_bytes_mut(&mut view)
-            };
+    ) -> Self::State {
+        let buffer = {
+            let reader = buffers.read().unwrap();
+            reader
+                .get(&(size_of::<T>() as u64))
+                .and_then(|queue| queue.pop())
+                .unwrap_or_else(|| {
+                    device.create_buffer(&wgpu::BufferDescriptor {
+                        label: None,
+                        size: size_of::<T>() as u64,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    })
+                })
+        };
 
-            let _ = sender.send(ReturnBuffer {
-                buffer,
-                mapped: true,
-                pointer,
-                buffer_queue,
-            });
-        });
-        device.poll(wgpu::MaintainBase::Poll);
+        command_encoder.copy_buffer_to_buffer(&src_buffer, 0, &buffer, 0, size_of::<T>() as u64);
+
+        buffer
     }
-}
 
-impl<T: bytemuck::Pod + Send> FromBuffer for [T] {
-    type Size = DynamicSize<T>;
-
-    fn from_buffer(
-        buffer: Arc<wgpu::Buffer>,
+    async fn from_buffer(
+        self,
+        buffer: Self::State,
         device: &wgpu::Device,
-        buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
-        sender: oneshot::Sender<ReturnBuffer<Self>>,
+        buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
     ) {
-        buffer.clone().slice(..).map_async(MapMode::Read, move |_| {
-            let pointer: *mut [T] = {
-                let mut view = buffer.slice(..).get_mapped_range_mut();
-                let view: &mut [u8] = &mut view;
-                if view.len() % size_of::<T>() != 0 {
-                    panic!("Buffer size is not a multiple of the size of T");
+        {
+            let slice = buffer.slice(..);
+            let (sender, receiver) = oneshot::channel::<()>();
+            slice.map_async(MapMode::Read, move |result| {
+                if result.is_err() {
+                    return;
                 }
-                let count = view.len() / size_of::<T>();
-                unsafe { std::slice::from_raw_parts_mut(view.as_mut_ptr().cast(), count) }
-            };
-
-            let _ = sender.send(ReturnBuffer {
-                buffer,
-                mapped: true,
-                pointer,
-                buffer_queue,
+                let _ = sender.send(());
             });
-        });
-        device.poll(wgpu::MaintainBase::Poll);
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Opaque<T>(PhantomData<T>);
-
-
-impl<T: FromBuffer> FromBuffer for Opaque<T> {
-    type Size = T::Size;
-
-    fn from_buffer(
-        buffer: Arc<wgpu::Buffer>,
-        _device: &wgpu::Device,
-        buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
-        sender: oneshot::Sender<ReturnBuffer<Self>>,
-    ) {
-        let pointer: *mut Opaque<T> = NonNull::dangling().as_ptr();
-
-        let _ = sender.send(ReturnBuffer {
-            buffer,
-            mapped: false,
-            pointer,
-            buffer_queue,
-        });
-    }
-}
-
-pub struct ReturnBuffer<T: ?Sized> {
-    buffer: Arc<wgpu::Buffer>,
-    mapped: bool,
-    pointer: *mut T,
-    buffer_queue: Arc<SegQueue<Arc<wgpu::Buffer>>>,
-}
-
-impl<T: ?Sized> Deref for ReturnBuffer<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*self.pointer }
-    }
-}
-
-impl<T: ?Sized> DerefMut for ReturnBuffer<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.pointer }
-    }
-}
-
-unsafe impl<T: Send + ?Sized> Send for ReturnBuffer<T> {}
-unsafe impl<T: Sync + ?Sized> Sync for ReturnBuffer<T> {}
-
-impl<T: ?Sized> Drop for ReturnBuffer<T> {
-    fn drop(&mut self) {
-        if self.mapped {
-            self.buffer.unmap();
+            device.poll(Maintain::Poll);
+            receiver.await.expect("Failed to map buffer");
+            let slice = slice.get_mapped_range();
+            let buffer_ref: &T = from_bytes(&slice);
+            *self = *buffer_ref;
         }
-        self.buffer_queue.push(self.buffer.clone());
+
+        buffer.unmap();
+
+        {
+            let reader = buffers.read().unwrap();
+            if let Some(queue) = reader.get(&(size_of::<T>() as u64)) {
+                queue.push(buffer);
+                return;
+            }
+        }
+
+        let queue = SegQueue::new();
+        queue.push(buffer);
+        buffers
+            .write()
+            .unwrap()
+            .insert(size_of::<T>() as u64, queue);
     }
 }
 
-impl<'a, T> IntoIterator for &'a ReturnBuffer<[T]> {
-    type Item = &'a T;
-    type IntoIter = std::slice::Iter<'a, T>;
+impl<T: BufferInit + bytemuck::Pod + Send> BufferDestination<T> for &mut [T] {
+    type State = wgpu::Buffer;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.deref().iter()
+    fn enqueue(
+        self,
+        command_encoder: &mut CommandEncoder,
+        src_buffer: &wgpu::Buffer,
+        buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+        device: &wgpu::Device,
+    ) -> Self::State {
+        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
+        let size = stride * self.len() as u64;
+        let buffer = {
+            let reader = buffers.read().unwrap();
+            reader
+                .get(&size)
+                .and_then(|queue| queue.pop())
+                .unwrap_or_else(|| {
+                    device.create_buffer(&wgpu::BufferDescriptor {
+                        label: None,
+                        size,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    })
+                })
+        };
+
+        command_encoder.copy_buffer_to_buffer(&src_buffer, 0, &buffer, 0, size);
+
+        buffer
+    }
+
+    async fn from_buffer(
+        self,
+        buffer: Self::State,
+        device: &wgpu::Device,
+        buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+    ) {
+        {
+            let slice = buffer.slice(..);
+            let (sender, receiver) = oneshot::channel::<()>();
+            slice.map_async(MapMode::Read, move |result| {
+                if result.is_err() {
+                    return;
+                }
+                let _ = sender.send(());
+            });
+            device.poll(Maintain::Poll);
+            receiver.await.expect("Failed to map buffer");
+            let slice = slice.get_mapped_range();
+
+            let buffer_ref: &[T] = unsafe { transmute(slice.deref()) };
+            self.copy_from_slice(buffer_ref);
+        }
+
+        buffer.unmap();
+        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
+
+        {
+            let reader = buffers.read().unwrap();
+            if let Some(queue) = reader.get(&stride) {
+                queue.push(buffer);
+                return;
+            }
+        }
+
+        let queue = SegQueue::new();
+        queue.push(buffer);
+        buffers.write().unwrap().insert(stride, queue);
     }
 }
 
-impl<'a, T> IntoIterator for &'a mut ReturnBuffer<[T]> {
-    type Item = &'a mut T;
-    type IntoIter = std::slice::IterMut<'a, T>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.deref_mut().iter_mut()
+pub struct OpaqueBuffer {
+    buffer: wgpu::Buffer,
+}
+
+
+impl<T: 'static> BufferSource<T> for &OpaqueBuffer {
+    fn into_buffer(
+        self,
+        command_encoder: &mut CommandEncoder,
+        buffer: &wgpu::Buffer,
+        _stager: &mut StagingBelt,
+        _device: &wgpu::Device,
+    ) {
+        command_encoder.copy_buffer_to_buffer(&self.buffer, 0, &buffer, 0, size_of::<T>() as u64);
     }
 }
+
+impl<T: 'static> BufferDestination<T> for &mut OpaqueBuffer {
+    type State = ();
+
+    fn enqueue(
+        self,
+        command_encoder: &mut CommandEncoder,
+        src_buffer: &wgpu::Buffer,
+        _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+        _device: &wgpu::Device,
+    ) -> Self::State {
+        command_encoder.copy_buffer_to_buffer(&src_buffer, 0, &self.buffer, 0, self.buffer.size());
+    }
+
+    async fn from_buffer(
+        self,
+        (): Self::State,
+        _device: &wgpu::Device,
+        _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+    ) { }
+}
+
+impl OpaqueBuffer {
+    pub async fn new(size: impl BufferSize) -> anyhow::Result<Self> {
+        let size = size.size();
+        let GpuDevice { device, .. } = get_gpu_device().await?;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size,
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
+        Ok(Self {
+            buffer
+        })
+    }
+    
+    pub async fn new_from_value<T: bytemuck::Pod>(value: &T) -> anyhow::Result<Self> {
+        let GpuDevice { device, .. } = get_gpu_device().await?;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: size_of::<T>() as u64,
+            mapped_at_creation: true,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
+        buffer.slice(..).get_mapped_range_mut().copy_from_slice(bytes_of(value));
+        buffer.unmap();
+        Ok(Self {
+            buffer
+        })
+    }
+    
+    pub async fn new_from_slice<T: bytemuck::Pod>(slice: &[T]) -> anyhow::Result<Self> {
+        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
+        let GpuDevice { device, .. } = get_gpu_device().await?;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: stride * slice.len() as u64,
+            mapped_at_creation: true,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        });
+        let bytes: &[u8] = unsafe { transmute(slice) };
+        buffer.slice(..).get_mapped_range_mut().copy_from_slice(bytes);
+        buffer.unmap();
+        Ok(Self {
+            buffer
+        })
+    }
+}
+
+
+// pub struct ManualBuffer<T: ?Sized> {
+//     buffer: wgpu::Buffer,
+//     _phantom: PhantomData<T>,
+// }
+
+// impl<T: bytemuck::Pod + 'static> BufferSource<T> for &ManualBuffer<T> {
+//     fn into_buffer(
+//         self,
+//         command_encoder: &mut CommandEncoder,
+//         buffer: &wgpu::Buffer,
+//         _stager: &mut StagingBelt,
+//         _device: &wgpu::Device,
+//     ) {
+//         command_encoder.copy_buffer_to_buffer(&self.buffer, 0, &buffer, 0, size_of::<T>() as u64);
+//     }
+// }
+
+// impl<T: 'static> BufferDestination<T> for &mut ManualBuffer<T> {
+//     type State = ();
+
+//     fn enqueue(
+//         self,
+//         command_encoder: &mut CommandEncoder,
+//         src_buffer: &wgpu::Buffer,
+//         _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+//         _device: &wgpu::Device,
+//     ) -> Self::State {
+//         command_encoder.copy_buffer_to_buffer(&src_buffer, 0, &self.buffer, 0, self.buffer.size());
+//     }
+
+//     async fn from_buffer(
+//         self,
+//         (): Self::State,
+//         _device: &wgpu::Device,
+//         _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
+//     ) { }
+// }
+
+// impl<T: 'static> ManualBuffer<T> {
+//     pub async fn lock(&mut self) -> ManualBufferLock<T> {
+//         let GpuDevice { device, .. } = get_gpu_device().await.unwrap();
+//         let slice = self.buffer.slice(..);
+//         let (sender, receiver) = oneshot::channel::<()>();
+//         slice.map_async(MapMode::Read, move |result| {
+//             if result.is_err() {
+//                 return;
+//             }
+//             let _ = sender.send(());
+//         });
+//         device.poll(Maintain::Poll);
+//         receiver.await.expect("Failed to map buffer");
+//         let range = slice.get_mapped_range_mut();
+
+//         ManualBufferLock {
+//             buffer: &self.buffer,
+//             _slice: slice,
+//             range,
+//             phantom: PhantomData,
+//         }
+//     }
+// }
+
+// pub struct ManualBufferLock<'a, T> {
+//     buffer: &'a wgpu::Buffer,
+//     _slice: wgpu::BufferSlice<'a>,
+//     range: wgpu::BufferViewMut<'a>,
+//     phantom: PhantomData<T>,
+// }
+
+// impl<'a, T: bytemuck::Pod> Deref for ManualBufferLock<'a, T> {
+//     type Target = T;
+
+//     fn deref(&self) -> &Self::Target {
+//         let ptr: *const _ = &self.range;
+//         let ptr: *const T = ptr.cast();
+//         unsafe { &*ptr }
+//     }
+// }
+
+// impl<'a, T: bytemuck::Pod> DerefMut for ManualBufferLock<'a, T> {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         let ptr: *mut _ = &mut self.range;
+//         let ptr: *mut T = ptr.cast();
+//         unsafe { &mut *ptr }
+//     }
+// }
+
+// impl<'a, T> Drop for ManualBufferLock<'a, T> {
+//     fn drop(&mut self) {
+//         self.buffer.unmap();
+//     }
+// }
+
+// impl<'a, T: bytemuck::Pod> ManualBuffer<T> {
+//     pub async fn new(value: &T) -> anyhow::Result<Self> {
+//         let GpuDevice { device, .. } = get_gpu_device().await?;
+//         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+//             label: None,
+//             contents: bytes_of(value),
+//             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+//         });
+//         todo!()
+//     }
+// }

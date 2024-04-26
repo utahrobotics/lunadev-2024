@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wgpu = "=0.17"
+wgpu = "0.19"
 anyhow = { workspace = true }
 bytemuck = { workspace = true }
 tokio = { workspace = true }
 crossbeam = { workspace = true }
+fxhash = { workspace = true }
 rayon = { workspace = true }
 
 [dev-dependencies]
