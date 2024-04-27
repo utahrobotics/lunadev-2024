@@ -1,5 +1,3 @@
-// use std::sync::Arc;
-
 use std::sync::RwLock;
 
 use buffers::{
@@ -9,14 +7,14 @@ use buffers::{
 use crossbeam::queue::SegQueue;
 use futures::FutureExt;
 use fxhash::FxHashMap;
-// use buffers::{BufferSize, BufferSizeIter, FromBuffer, IntoBuffer, IntoBuffers, ReturnBuffer};
-// use crossbeam::queue::SegQueue;
 use tokio::sync::OnceCell;
 use wgpu::{util::StagingBelt, BindGroupLayoutEntry, CommandEncoder};
-// pub use wgpu;
-// use wgpu::util::StagingBelt;
 
+pub use bytemuck;
 pub mod buffers;
+
+#[cfg(test)]
+mod tests;
 
 struct GpuDevice {
     device: wgpu::Device,
@@ -164,7 +162,7 @@ impl<A> Compute<A> {
 impl<T1, H1, S1> Compute<(BufferType<T1, H1, S1>,)>
 where
     BufferType<T1, H1, S1>: ValidBufferType,
-    T1: BufferSized + 'static,
+    T1: ?Sized + BufferSized + 'static,
     H1: HostReadableWritable,
     S1: ShaderWritable,
 {
@@ -196,7 +194,7 @@ where
 impl<T1, H1, S1, T2, H2, S2> Compute<(BufferType<T1, H1, S1>, BufferType<T2, H2, S2>)>
 where
     BufferType<T1, H1, S1>: ValidBufferType,
-    T1: BufferSized + 'static,
+    T1: ?Sized + BufferSized + 'static,
     H1: HostReadableWritable,
     S1: ShaderWritable,
     BufferType<T2, H2, S2>: ValidBufferType,
@@ -240,7 +238,7 @@ impl<T1, H1, S1, T2, H2, S2, T3, H3, S3>
     )>
 where
     BufferType<T1, H1, S1>: ValidBufferType,
-    T1: BufferSized + 'static,
+    T1: ?Sized + BufferSized + 'static,
     H1: HostReadableWritable,
     S1: ShaderWritable,
     BufferType<T2, H2, S2>: ValidBufferType,
@@ -361,12 +359,17 @@ impl<'a, A> ComputePass<'a, A> {
 
         (device, buffers, state)
     }
+
+    pub fn workgroup_size(mut self, x: u32, y: u32, z: u32) -> Self {
+        self.workgroup_size = (x, y, z);
+        self
+    }
 }
 
 impl<'a, T1, H1, S1> ComputePass<'a, (BufferType<T1, H1, S1>,)>
 where
     BufferType<T1, H1, S1>: ValidBufferType,
-    T1: 'static,
+    T1: ?Sized + BufferSized + 'static,
 {
     pub async fn call(
         self,
@@ -386,8 +389,8 @@ impl<'a, T1, H1, S1, T2, H2, S2> ComputePass<'a, (BufferType<T1, H1, S1>, Buffer
 where
     BufferType<T1, H1, S1>: ValidBufferType,
     BufferType<T2, H2, S2>: ValidBufferType,
-    T1: 'static,
-    T2: 'static,
+    T1: ?Sized + BufferSized + 'static,
+    T2: ?Sized + BufferSized + 'static,
 {
     pub async fn call(
         self,
@@ -409,18 +412,21 @@ where
 }
 
 impl<'a, T1, H1, S1, T2, H2, S2, T3, H3, S3>
-    ComputePass<'a, (
-        BufferType<T1, H1, S1>,
-        BufferType<T2, H2, S2>,
-        BufferType<T3, H3, S3>,
-    )>
+    ComputePass<
+        'a,
+        (
+            BufferType<T1, H1, S1>,
+            BufferType<T2, H2, S2>,
+            BufferType<T3, H3, S3>,
+        ),
+    >
 where
     BufferType<T1, H1, S1>: ValidBufferType,
     BufferType<T2, H2, S2>: ValidBufferType,
     BufferType<T3, H3, S3>: ValidBufferType,
-    T1: 'static,
-    T2: 'static,
-    T3: 'static,
+    T1: ?Sized + BufferSized + 'static,
+    T2: ?Sized + BufferSized + 'static,
+    T3: ?Sized + BufferSized + 'static,
 {
     pub async fn call(
         self,

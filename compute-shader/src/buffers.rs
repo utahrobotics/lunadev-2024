@@ -1,9 +1,9 @@
+use core::slice;
 use std::{
     future::Future,
     marker::PhantomData,
-    mem::{align_of, size_of, transmute},
+    mem::{align_of, size_of},
     num::NonZeroU64,
-    ops::Deref,
     sync::RwLock,
 };
 
@@ -61,9 +61,9 @@ impl ShaderWritable for ShaderReadWrite {
     const CAN_WRITE: bool = true;
 }
 
-pub struct BufferType<T: BufferSized, H, S> {
+pub struct BufferType<T: BufferSized + ?Sized, H, S> {
     size: T::Size,
-    _phantom: PhantomData<(T, H, S)>,
+    _phantom: PhantomData<(H, S, T)>,
 }
 
 impl<T: BufferSized, H, S> Clone for BufferType<T, H, S> {
@@ -77,7 +77,7 @@ impl<T: BufferSized, H, S> Clone for BufferType<T, H, S> {
 
 impl<T: BufferSized, H, S> Copy for BufferType<T, H, S> {}
 
-impl<T: BufferSized<Size = StaticSize<T>>, H, S> BufferType<T, H, S> {
+impl<T: 'static, H, S> BufferType<T, H, S> {
     pub fn new() -> Self {
         Self {
             size: StaticSize::default(),
@@ -86,7 +86,7 @@ impl<T: BufferSized<Size = StaticSize<T>>, H, S> BufferType<T, H, S> {
     }
 }
 
-impl<T: BufferSized<Size = DynamicSize<T>>, H, S> BufferType<T, H, S> {
+impl<T: 'static, H, S> BufferType<[T], H, S> {
     pub fn new_dyn(len: usize) -> Self {
         Self {
             size: DynamicSize::new(len),
@@ -95,7 +95,7 @@ impl<T: BufferSized<Size = DynamicSize<T>>, H, S> BufferType<T, H, S> {
     }
 }
 
-impl<T: BufferSized, H: HostReadableWritable, S: ShaderWritable> BufferType<T, H, S> {
+impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable> BufferType<T, H, S> {
     const HOST_CAN_READ: bool = H::CAN_READ;
     const HOST_CAN_WRITE: bool = H::CAN_WRITE;
     const SHADER_CAN_WRITE: bool = S::CAN_WRITE;
@@ -169,8 +169,8 @@ impl<T: BufferSized, H: HostReadableWritable, S: ShaderWritable> BufferType<T, H
 }
 
 pub trait ValidBufferType {
-    type WriteType: 'static;
-    type ReadType: 'static;
+    type WriteType: ?Sized + BufferSized + 'static;
+    type ReadType: ?Sized + BufferSized + 'static;
 }
 
 impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<T, HostReadOnly, S> {
@@ -186,6 +186,21 @@ impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<T, HostWriteO
 impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<T, HostReadWrite, S> {
     type WriteType = T;
     type ReadType = T;
+}
+
+impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<[T], HostReadOnly, S> {
+    type WriteType = ();
+    type ReadType = [T];
+}
+
+impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<[T], HostWriteOnly, S> {
+    type WriteType = [T];
+    type ReadType = ();
+}
+
+impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<[T], HostReadWrite, S> {
+    type WriteType = [T];
+    type ReadType = [T];
 }
 
 pub trait BufferSize: Copy + Default + Send + 'static {
@@ -216,7 +231,7 @@ impl<T: 'static> BufferSize for StaticSize<T> {
     }
 }
 
-pub struct DynamicSize<T>(pub usize, PhantomData<T>);
+pub struct DynamicSize<T: ?Sized>(pub usize, PhantomData<T>);
 
 unsafe impl<T> Send for DynamicSize<T> {}
 unsafe impl<T> Sync for DynamicSize<T> {}
@@ -228,18 +243,18 @@ impl<T: 'static> BufferSize for DynamicSize<T> {
     }
 }
 
-impl<T> DynamicSize<T> {
+impl<T: ?Sized> DynamicSize<T> {
     pub fn new(len: usize) -> Self {
         Self(len, PhantomData)
     }
 }
-impl<T> Default for DynamicSize<T> {
+impl<T: ?Sized> Default for DynamicSize<T> {
     fn default() -> Self {
         Self(0, PhantomData)
     }
 }
-impl<T> Copy for DynamicSize<T> {}
-impl<T> Clone for DynamicSize<T> {
+impl<T: ?Sized> Copy for DynamicSize<T> {}
+impl<T: ?Sized> Clone for DynamicSize<T> {
     fn clone(&self) -> Self {
         *self
     }
@@ -257,7 +272,7 @@ impl<T: 'static> BufferSized for [T] {
     type Size = DynamicSize<T>;
 }
 
-pub trait BufferSource<T: BufferSized> {
+pub trait BufferSource<T: BufferSized + ?Sized> {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -267,7 +282,7 @@ pub trait BufferSource<T: BufferSized> {
     );
 }
 
-impl<T: 'static> BufferSource<T> for () {
+impl<T: ?Sized + BufferSized + 'static> BufferSource<T> for () {
     fn into_buffer(
         self,
         _command_encoder: &mut CommandEncoder,
@@ -298,7 +313,7 @@ impl<T: BufferSized + bytemuck::Pod> BufferSource<T> for &T {
     }
 }
 
-impl<T: BufferSized + bytemuck::Pod> BufferSource<T> for &[T] {
+impl<T: BufferSized + bytemuck::Pod> BufferSource<[T]> for &[T] {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -316,7 +331,10 @@ impl<T: BufferSized + bytemuck::Pod> BufferSource<T> for &[T] {
                     NonZeroU64::new(stride * self.len() as u64).unwrap(),
                     device,
                 )
-                .copy_from_slice(unsafe { transmute(self) });
+                .copy_from_slice(unsafe {
+                    let data: *const u8 = self.as_ptr().cast();
+                    slice::from_raw_parts(data, stride as usize * self.len())
+                });
         } else {
             for (i, item) in self.iter().enumerate() {
                 stager
@@ -347,7 +365,7 @@ impl<T: BufferSized + bytemuck::Pod> BufferSource<T> for Option<&T> {
     }
 }
 
-pub trait BufferDestination<T: BufferSized> {
+pub trait BufferDestination<T: BufferSized + ?Sized> {
     type State;
     fn enqueue(
         &self,
@@ -435,7 +453,7 @@ impl<T: BufferSized + bytemuck::Pod> BufferDestination<T> for &mut T {
     }
 }
 
-impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<T> for &mut [T] {
+impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<[T]> for &mut [T] {
     type State = wgpu::Buffer;
 
     fn enqueue(
@@ -473,6 +491,7 @@ impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<T> for &mut [T] {
         device: &wgpu::Device,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
     ) {
+        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
         {
             let slice = buffer.slice(..);
             let (sender, receiver) = oneshot::channel::<()>();
@@ -486,12 +505,14 @@ impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<T> for &mut [T] {
             receiver.await.expect("Failed to map buffer");
             let slice = slice.get_mapped_range();
 
-            let buffer_ref: &[T] = unsafe { transmute(slice.deref()) };
+            let buffer_ref: &[T] = unsafe {
+                let data: *const T = slice.as_ptr().cast();
+                slice::from_raw_parts(data, self.len())
+            };
             self.copy_from_slice(buffer_ref);
         }
 
         buffer.unmap();
-        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
 
         {
             let reader = buffers.read().unwrap();
@@ -539,7 +560,7 @@ where
     }
 }
 
-impl<T: 'static> BufferDestination<T> for () {
+impl<T: ?Sized + BufferSized + 'static> BufferDestination<T> for () {
     type State = ();
 
     fn enqueue(
@@ -636,7 +657,10 @@ impl OpaqueBuffer {
             mapped_at_creation: true,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
-        let bytes: &[u8] = unsafe { transmute(slice) };
+        let bytes: &[u8] = unsafe {
+            let data: *const u8 = slice.as_ptr().cast();
+            slice::from_raw_parts(data, stride as usize * slice.len())
+        };
         buffer
             .slice(..)
             .get_mapped_range_mut()
