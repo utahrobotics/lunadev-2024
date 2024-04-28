@@ -5,7 +5,6 @@ use crate::{
     Compute,
 };
 
-
 #[tokio::test]
 async fn mul2() {
     env_logger::init();
@@ -16,9 +15,19 @@ async fn mul2() {
     .await
     .unwrap();
 
-    let original = [[1, 2, 3, 1], [4, 5, 6, 3], [7, 8, 9, 5], [10, 11, 12, 2], [13, 14, 15, 2]];
+    let original = [
+        [1, 2, 3, 1],
+        [4, 5, 6, 3],
+        [7, 8, 9, 5],
+        [10, 11, 12, 2],
+        [13, 14, 15, 2],
+    ];
     let mut vecs = original;
-    compute.new_pass(vecs.as_slice()).workgroup_size(5, 1, 1).call(vecs.as_mut_slice()).await;
+    compute
+        .new_pass(vecs.as_slice())
+        .workgroup_size(5, 1, 1)
+        .call(vecs.as_mut_slice())
+        .await;
 
     for (input, output) in original.into_iter().zip(vecs.into_iter()) {
         assert_eq!(

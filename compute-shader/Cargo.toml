@@ -11,9 +11,9 @@ tokio = { workspace = true }
 crossbeam = { workspace = true }
 futures = { workspace = true }
 fxhash = { workspace = true }
-rayon = { workspace = true }
+# rayon = { workspace = true }
 
 [dev-dependencies]
 env_logger = "0"
-rand = { workspace = true }
+# rand = { workspace = true }
 nalgebra = { workspace = true }

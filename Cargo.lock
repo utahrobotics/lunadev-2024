@@ -960,8 +960,6 @@ dependencies = [
  "futures",
  "fxhash",
  "nalgebra",
- "rand",
- "rayon",
  "tokio",
  "wgpu 0.19.4",
 ]

@@ -61,12 +61,35 @@ impl ShaderWritable for ShaderReadWrite {
     const CAN_WRITE: bool = true;
 }
 
-pub struct BufferType<T: BufferSized + ?Sized, H, S> {
-    size: T::Size,
-    _phantom: PhantomData<(H, S, T)>,
+
+pub trait UniformOrStorage {
+    const IS_UNIFORM: bool;
 }
 
-impl<T: BufferSized, H, S> Clone for BufferType<T, H, S> {
+
+#[derive(Debug, Clone, Copy)]
+pub struct UniformOnly;
+
+impl UniformOrStorage for UniformOnly {
+    const IS_UNIFORM: bool = true;
+}
+
+
+#[derive(Debug, Clone, Copy)]
+pub struct StorageOnly;
+
+
+impl UniformOrStorage for StorageOnly {
+    const IS_UNIFORM: bool = false;
+}
+
+
+pub struct BufferType<T: BufferSized + ?Sized, H, S, O=StorageOnly> {
+    size: T::Size,
+    _phantom: PhantomData<(H, S, O, T)>,
+}
+
+impl<T: BufferSized, H, S, O> Clone for BufferType<T, H, S, O> {
     fn clone(&self) -> Self {
         Self {
             size: self.size,
@@ -75,9 +98,9 @@ impl<T: BufferSized, H, S> Clone for BufferType<T, H, S> {
     }
 }
 
-impl<T: BufferSized, H, S> Copy for BufferType<T, H, S> {}
+impl<T: BufferSized, H, S, O> Copy for BufferType<T, H, S, O> {}
 
-impl<T: 'static, H, S> BufferType<T, H, S> {
+impl<T: 'static, H, S, O> BufferType<T, H, S, O> {
     pub fn new() -> Self {
         Self {
             size: StaticSize::default(),
@@ -86,7 +109,7 @@ impl<T: 'static, H, S> BufferType<T, H, S> {
     }
 }
 
-impl<T: 'static, H, S> BufferType<[T], H, S> {
+impl<T: 'static, H, S, O> BufferType<[T], H, S, O> {
     pub fn new_dyn(len: usize) -> Self {
         Self {
             size: DynamicSize::new(len),
@@ -95,7 +118,7 @@ impl<T: 'static, H, S> BufferType<[T], H, S> {
     }
 }
 
-impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable> BufferType<T, H, S> {
+impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable, O: UniformOrStorage> BufferType<T, H, S, O> {
     const HOST_CAN_READ: bool = H::CAN_READ;
     const HOST_CAN_WRITE: bool = H::CAN_WRITE;
     const SHADER_CAN_WRITE: bool = S::CAN_WRITE;
@@ -113,18 +136,18 @@ impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable> Buffer
             wgpu::BufferUsages::COPY_SRC
         };
 
-        if Self::SHADER_CAN_WRITE || self.size.size() > 64000 {
+        if O::IS_UNIFORM {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("Arg Buffer {index}")),
                 size: self.size.size(),
-                usage: wgpu::BufferUsages::STORAGE | additional_usage,
+                usage: wgpu::BufferUsages::UNIFORM | additional_usage,
                 mapped_at_creation: false,
             })
         } else {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("Arg Buffer {index}")),
                 size: self.size.size(),
-                usage: wgpu::BufferUsages::UNIFORM | additional_usage,
+                usage: wgpu::BufferUsages::STORAGE | additional_usage,
                 mapped_at_creation: false,
             })
         }
@@ -142,12 +165,12 @@ impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable> Buffer
                 },
                 count: None,
             }
-        } else if self.size.size() > 64000 {
+        } else if O::IS_UNIFORM {
             wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -158,7 +181,7 @@ impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable> Buffer
                 binding,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -173,32 +196,32 @@ pub trait ValidBufferType {
     type ReadType: ?Sized + BufferSized + 'static;
 }
 
-impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<T, HostReadOnly, S> {
+impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<T, HostReadOnly, S, O> {
     type WriteType = ();
     type ReadType = T;
 }
 
-impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<T, HostWriteOnly, S> {
+impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<T, HostWriteOnly, S, O> {
     type WriteType = T;
     type ReadType = ();
 }
 
-impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<T, HostReadWrite, S> {
+impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<T, HostReadWrite, S, O> {
     type WriteType = T;
     type ReadType = T;
 }
 
-impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<[T], HostReadOnly, S> {
+impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<[T], HostReadOnly, S, O> {
     type WriteType = ();
     type ReadType = [T];
 }
 
-impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<[T], HostWriteOnly, S> {
+impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<[T], HostWriteOnly, S, O> {
     type WriteType = [T];
     type ReadType = ();
 }
 
-impl<T: 'static, S: ShaderWritable> ValidBufferType for BufferType<[T], HostReadWrite, S> {
+impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<[T], HostReadWrite, S, O> {
     type WriteType = [T];
     type ReadType = [T];
 }

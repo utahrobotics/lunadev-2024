@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use futures::{stream::FuturesUnordered, StreamExt};
+use async_trait::async_trait;
+use futures::{stream::FuturesUnordered, Future, StreamExt};
 use nalgebra::{Isometry3, Translation3};
-use sources::{HeightAndVariance, HeightOnly, ObstacleSource};
 use unros::{float::Float, tokio::sync::RwLock};
+use utils::RecycledVec;
 
 pub mod sources;
+pub mod utils;
 
 #[non_exhaustive]
 #[derive(Clone, Debug)]
@@ -28,15 +30,15 @@ impl<N: Float> Shape<N> {
     }
 }
 
-struct ObstacleHubInner<N: Float> {
-    sources: RwLock<Vec<Box<dyn ObstacleSource<N>>>>,
+struct ObstacleHubInner<N: Float, I> {
+    sources: RwLock<Vec<Box<dyn HeightMap<N, I>>>>,
 }
 
-pub struct ObstacleHub<N: Float> {
-    inner: Arc<ObstacleHubInner<N>>,
+pub struct ObstacleHub<N: Float, I> {
+    inner: Arc<ObstacleHubInner<N, I>>,
 }
 
-impl<N: Float> Default for ObstacleHub<N> {
+impl<N: Float, I> Default for ObstacleHub<N, I> {
     fn default() -> Self {
         Self {
             inner: Arc::new(ObstacleHubInner {
@@ -46,7 +48,7 @@ impl<N: Float> Default for ObstacleHub<N> {
     }
 }
 
-impl<N: Float> Clone for ObstacleHub<N> {
+impl<N: Float, I> Clone for ObstacleHub<N, I> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -68,12 +70,12 @@ impl<T> std::fmt::Display for AddSourceMutError<T> {
     }
 }
 
-impl<N: Float> ObstacleHub<N> {
-    pub async fn add_source(&self, source: impl ObstacleSource<N> + 'static) {
+impl<N: Float, I> ObstacleHub<N, I> {
+    pub async fn add_source(&self, source: impl HeightMap<N, I> + 'static) {
         self.inner.sources.write().await.push(Box::new(source));
     }
 
-    pub fn add_source_mut<T: ObstacleSource<N> + 'static>(
+    pub fn add_source_mut<T: HeightMap<N, I> + 'static>(
         &mut self,
         source: T,
     ) -> Result<(), AddSourceMutError<T>> {
@@ -85,25 +87,28 @@ impl<N: Float> ObstacleHub<N> {
             None => Err(AddSourceMutError(source)),
         }
     }
+}
 
-    pub async fn get_height_only_within<T>(
+impl<N: Float, I> ObstacleHub<N, I> {
+    pub async fn query_height<T, F: Future<Output = Option<T>>>(
         &self,
-        shape: &Shape<N>,
-        mut filter: impl FnMut(HeightOnly<N>) -> Option<T>,
+        shapes: I,
+        mut filter: impl FnMut(RecycledVec<N>) -> F,
     ) -> Option<T> {
         let mut indices_to_remove = Vec::new();
         let result = 'check: {
             let sources = self.inner.sources.read().await;
             let mut futures = FuturesUnordered::new();
             for (i, source) in sources.iter().enumerate() {
-                futures.push(async move { (i, source.get_height_only_within(shape).await) });
+                let fut = source.query_height(&shapes);
+                futures.push(async move { (i, fut.await) });
             }
             while let Some((i, result)) = futures.next().await {
                 let Some(value) = result else {
                     indices_to_remove.push(i);
                     continue;
                 };
-                if let Some(result) = filter(value) {
+                if let Some(result) = filter(value).await {
                     break 'check Some(result);
                 }
             }
@@ -120,39 +125,9 @@ impl<N: Float> ObstacleHub<N> {
         }
         result
     }
-    pub async fn get_height_and_variance_within<T>(
-        &self,
-        shape: &Shape<N>,
-        mut filter: impl FnMut(HeightAndVariance<N>) -> Option<T>,
-    ) -> Option<T> {
-        let mut indices_to_remove = Vec::new();
-        let result = 'check: {
-            let sources = self.inner.sources.read().await;
-            let mut futures = FuturesUnordered::new();
-            for (i, source) in sources.iter().enumerate() {
-                futures
-                    .push(async move { (i, source.get_height_and_variance_within(shape).await) });
-            }
-            while let Some((i, result)) = futures.next().await {
-                let Some(value) = result else {
-                    indices_to_remove.push(i);
-                    continue;
-                };
-                if let Some(result) = filter(value) {
-                    break 'check Some(result);
-                }
-            }
-            None
-        };
+}
 
-        if indices_to_remove.is_empty() {
-            return result;
-        }
-        indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
-        let mut sources = self.inner.sources.write().await;
-        for i in indices_to_remove {
-            sources.swap_remove(i);
-        }
-        result
-    }
+#[async_trait]
+pub trait HeightMap<N: Float, I>: Send + Sync {
+    async fn query_height(&self, shapes: &I) -> Option<RecycledVec<N>>;
 }
