@@ -317,6 +317,7 @@ a=fmtp:96 packetization-mode=1",
                 in_height as usize,
                 WindowOptions {
                     resize: true,
+                    scale_mode: minifb::ScaleMode::AspectRatioStretch,
                     ..Default::default()
                 },
             ) {
@@ -336,7 +337,13 @@ a=fmtp:96 packetization-mode=1",
                     continue;
                 };
                 backoff.reset();
-                buffer.extend(frame.to_rgb8().chunks(3).map(|x| [0, x[0], x[1], x[2]]).map(u32::from_le_bytes));
+                buffer.extend(
+                    frame
+                        .to_rgb8()
+                        .chunks(3)
+                        .map(|x| [x[0], x[1], x[2], 0])
+                        .map(u32::from_ne_bytes),
+                );
 
                 if let Err(e) =
                     window.update_with_buffer(&buffer, in_width as usize, in_height as usize)

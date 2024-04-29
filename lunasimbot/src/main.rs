@@ -52,7 +52,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         camera_ref,
         0.05,
         40000,
-        32,
+        64,
     )
     .await?;
     depth_signal.accept_subscription(depth_source.create_depth_subscription());
@@ -75,47 +75,42 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let mut heights = vec![0.0; 200 * 200];
             let origin = Vector3::new(0.0, 0.0, -1.0);
+            let query: Box<[_]> = (-100..100)
+                .into_iter()
+                .flat_map(|y| {
+                    (-100..100).into_iter().map(move |x| HeightQuery {
+                        isometry: Isometry3::from_parts(
+                            (origin + Vector3::new(x as f32 * 0.02, 0.0, y as f32 * 0.02)).into(),
+                            UnitQuaternion::default(),
+                        ),
+                        max_points: 64,
+                        shape: Shape::Cylinder {
+                            radius: 0.1,
+                            height: 4.0,
+                        },
+                    })
+                })
+                .collect();
 
             obstacle_hub
-                .query_height(
-                    (0..200).into_iter().flat_map(|y| {
-                        (0..200).into_iter().map(move |x| {
-                            let z = 0.0;
-                            HeightQuery {
-                                isometry: Isometry3::from_parts(
-                                    (origin
-                                        + Vector3::new(
-                                            (x - 100) as f32 * 0.02,
-                                            0.0,
-                                            (y - 100) as f32 * 0.02,
-                                        ))
-                                    .into(),
-                                    UnitQuaternion::default(),
-                                ),
-                                max_points: 32,
-                                shape: Shape::Cylinder {
-                                    radius: 0.02,
-                                    height: 2.0,
-                                },
-                            }
-                        })
-                    }),
-                    |heights_vec| {
-                        heights_vec
-                            .par_iter()
-                            .map(|x| x.deref())
-                            .zip(&mut heights)
-                            .for_each(|(heights_in_shape, height)| {
-
-                                let mean = heights_in_shape.iter().copied().sum::<f32>() / heights_in_shape.len() as f32;
-                                if mean.is_finite() {
-                                    println!("{mean}");
-                                }
-                                *height = mean;
-                            });
-                        std::future::ready(Some(()))
-                    },
-                )
+                .query_height(query.iter().copied(), |heights_vec| {
+                    heights_vec
+                        .par_iter()
+                        .map(|x| x.deref())
+                        .zip(&mut heights)
+                        .for_each(|(heights_in_shape, height)| {
+                            // if !heights_in_shape.is_empty() {
+                            //     println!("{}", heights_in_shape.len());
+                            // }
+                            let mean = heights_in_shape.iter().copied().sum::<f32>()
+                                / heights_in_shape.len() as f32;
+                            // if mean.is_finite() && mean != 0.0 {
+                            //     println!("{mean}");
+                            // }
+                            *height = mean;
+                        });
+                    std::future::ready(Some(()))
+                })
                 .await;
 
             let max_height = heights
@@ -126,17 +121,17 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 .max(0.1);
             let img_data: Vec<_> = heights
                 .into_iter()
-                .map(|h| 
+                .map(|h| {
                     if h.is_finite() {
                         (h / max_height * 255.0).round() as u8
                     } else {
                         0
                     }
-                )
+                })
                 .collect();
             let buf = ImageBuffer::<Luma<u8>, _>::from_raw(200, 200, img_data).unwrap();
             let img = DynamicImage::from(buf);
-            if costmap_display.write_frame(img.into()).is_err() {
+            if costmap_display.write_frame_quiet(img.into()).is_err() {
                 break;
             }
         }

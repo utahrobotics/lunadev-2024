@@ -702,4 +702,26 @@ impl OpaqueBuffer {
             start_offset: 0,
         })
     }
+
+    // pub async fn get_bytes(&mut self, f: impl FnOnce(&[u8])) {
+    //     let slice = self.buffer.slice(0..self.size);
+    //     let (sender, receiver) = oneshot::channel::<()>();
+    //     slice.map_async(MapMode::Read, move |_| {
+    //         let _sender = sender;
+    //     });
+    //     let _ = receiver.await;
+    //     f(&slice.get_mapped_range());
+    //     self.buffer.unmap();
+    // }
+
+    // pub async fn get_bytes_mut(&mut self, f: impl FnOnce(&mut [u8])) {
+    //     let slice = self.buffer.slice(0..self.size);
+    //     let (sender, receiver) = oneshot::channel::<()>();
+    //     slice.map_async(MapMode::Write, move |_| {
+    //         let _sender = sender;
+    //     });
+    //     let _ = receiver.await;
+    //     f(&mut slice.get_mapped_range_mut());
+    //     self.buffer.unmap();
+    // }
 }

@@ -36,7 +36,6 @@ fn main(
             }
         }
         default: {
-            atomicAdd(&height_indices[global_invocation_id.y], 1u);
             return;
         }
     }

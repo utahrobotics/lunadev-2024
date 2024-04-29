@@ -127,6 +127,7 @@ impl<N: Float> ObstacleHub<N> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct HeightQuery<N: Float> {
     pub max_points: usize,
     pub shape: Shape<N>,

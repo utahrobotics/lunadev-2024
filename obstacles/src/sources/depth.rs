@@ -81,6 +81,8 @@ impl<D: Send + IntoDepthData + 'static> DepthMapSource<D> {
         )
         .await?;
 
+        project_depth.write_args((), rays.deref(), (), ()).await;
+
         let height_map_compute = Compute::<(
             BufferType<[f32], HostReadOnly, ShaderReadWrite, StorageOnly>,
             BufferType<[[f32; 4]], HostWriteOnly, ShaderReadOnly, StorageOnly>,
@@ -101,7 +103,10 @@ impl<D: Send + IntoDepthData + 'static> DepthMapSource<D> {
             max_points_per_shape,
             depth_sub: Subscriber::new(1),
             robot_element_ref,
-            point_count: rays.len().try_into().context("The maximum number of rays is u32::MAX")?,
+            point_count: rays
+                .len()
+                .try_into()
+                .context("The maximum number of rays is u32::MAX")?,
             points_buffer: AsyncMutex::new(
                 OpaqueBuffer::new(DynamicSize::<[f32; 4]>::new(rays.len())).await?,
             ),
@@ -178,7 +183,11 @@ where
                 buf.iter_mut().for_each(|x| *x = 0);
                 buf
             })
-            .unwrap_or_else(|| std::iter::repeat(0).take(self.max_shapes as usize).collect());
+            .unwrap_or_else(|| {
+                std::iter::repeat(0)
+                    .take(self.max_shapes as usize)
+                    .collect()
+            });
 
         let mut pass = if let Some(depth) = self.depth_sub.try_recv() {
             let depth = depth.into_depth_data();
@@ -190,17 +199,28 @@ where
                     isometry.translation.y,
                     isometry.translation.z,
                 ],
-                matrix: matrix.map(|row| [row[0], row[1], row[2], 0.0]),
                 min_depth: self.min_depth,
+                matrix: matrix.map(|row| [row[0], row[1], row[2], 0.0]),
             };
-            let mut guard = self.points_buffer.lock().await;
+            // let mut guard = self.points_buffer.lock().await;
+            // self.project_depth
+            //     .new_pass(depth.deref(), (), (), &intrinsics)
+            //     .workgroup_size(self.point_count, 1, 1)
+            //     .call((), (), guard.deref_mut(), ())
+            //     .await;
+            let mut points: Box<[_]> = (0..self.point_count).map(|_| [0.0f32; 4]).collect();
             self.project_depth
                 .new_pass(depth.deref(), (), (), &intrinsics)
                 .workgroup_size(self.point_count, 1, 1)
-                .call((), (), guard.deref_mut(), ())
+                .call((), (), points.deref_mut(), ())
                 .await;
-            self.height_map_compute
-                .new_pass((), guard.deref(), shapes.deref(), indices_buf.deref())
+            // println!("{} {:?}", depth[0], points[0]);
+            self.height_map_compute.new_pass(
+                (),
+                points.deref(),
+                shapes.deref(),
+                indices_buf.deref(),
+            )
         } else {
             self.height_map_compute
                 .new_pass((), (), shapes.deref(), indices_buf.deref())
@@ -212,11 +232,15 @@ where
         pass.call(heights_buf.deref_mut(), (), (), indices_mut)
             .await;
 
-        let mut heights_iter = heights_buf.iter().copied();
         let mut result = RecycledVec::default();
-        for height_count in indices_buf.iter().take(shapes.len()).copied() {
+        for (height_count, shape) in indices_buf.iter().take(shapes.len()).copied().zip(&shapes) {
             let mut heights = RecycledVec::default();
-            heights.extend(heights_iter.by_ref().take(height_count as usize));
+            let heights_slice = heights_buf
+                .split_at(shape.start_index as usize)
+                .1
+                .split_at(height_count as usize)
+                .0;
+            heights.extend_from_slice(heights_slice);
             result.push(heights);
         }
 

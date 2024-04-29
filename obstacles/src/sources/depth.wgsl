@@ -21,5 +21,5 @@ fn main(
     }
     var point = rays[global_invocation_id.x].xyz * depth;
     point = intrinsics.matrix * point + intrinsics.origin;
-    points[global_invocation_id.x] = vec4<f32>(1.0, point);
+    points[global_invocation_id.x] = vec4<f32>(point, 1.0);
 }
