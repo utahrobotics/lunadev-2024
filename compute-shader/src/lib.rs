@@ -510,11 +510,10 @@ impl<'a, A> ComputePass<'a, A> {
         self.stager.recall();
         staging_belts.push(self.stager);
 
-        tokio::task::spawn_blocking(|| {
+        let _ = tokio::task::spawn_blocking(|| {
             device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(idx));
         })
-        .await
-        .unwrap();
+        .await;
 
         (device, buffers, state)
     }

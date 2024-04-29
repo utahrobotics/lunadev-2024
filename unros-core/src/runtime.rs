@@ -15,7 +15,6 @@ use std::{
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 use crossbeam::queue::SegQueue;
-use show_image::run_context;
 use sysinfo::Pid;
 use tokio::{
     runtime::{Builder as TokioBuilder, Handle},
@@ -455,16 +454,4 @@ pub fn start_unros_runtime<T: Send + 'static, F: Future<Output = T> + Send + 'st
     });
 
     result
-}
-
-pub fn start_unros_runtime_main_thread<
-    T: Send + 'static,
-    F: Future<Output = T> + Send + 'static,
->(
-    main: impl FnOnce(MainRuntimeContext) -> F + Send + 'static,
-    builder: impl FnOnce(&mut RuntimeBuilder) + Send + 'static,
-) -> ! {
-    run_context(|| {
-        start_unros_runtime(main, builder);
-    })
 }

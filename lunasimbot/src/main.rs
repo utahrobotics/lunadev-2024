@@ -1,4 +1,4 @@
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 
 use fxhash::FxBuildHasher;
 use image::{DynamicImage, ImageBuffer, Luma};
@@ -8,11 +8,11 @@ use localization::{
     Localizer,
 };
 use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
-use navigator::{
-    pathfinding::{direct::DirectPathfinder, Pathfinder},
-    DifferentialDriver, DriveMode,
-};
-use obstacles::{sources::depth::new_depth_map, ObstacleHub, Shape};
+// use navigator::{
+//     pathfinding::{direct::DirectPathfinder, Pathfinder},
+//     DifferentialDriver, DriveMode,
+// };
+use obstacles::{sources::depth::DepthMapSource, HeightQuery, ObstacleHub, Shape};
 // use navigator::{pathfinders::DirectPathfinder, DifferentialDriver};
 use rand_distr::{Distribution, Normal};
 use rig::Robot;
@@ -20,6 +20,10 @@ use unros::{
     anyhow, log,
     node::AsyncNode,
     pubsub::{subs::Subscription, Publisher, Subscriber},
+    rayon::iter::{
+        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
+        ParallelIterator,
+    },
     rng::quick_rng,
     runtime::MainRuntimeContext,
     tokio::{
@@ -43,26 +47,27 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
 
     let mut obstacle_hub = ObstacleHub::default();
     let depth_signal = Publisher::<Vec<f32>>::default();
-    let (depth_map, depth_source) = new_depth_map(
-        4,
+    let depth_source = DepthMapSource::new(
         rays::RAYS.iter().copied().map(UnitVector3::new_unchecked),
         camera_ref,
-    );
-    depth_signal.accept_subscription(depth_map.create_depth_subscription());
-    depth_map.spawn(context.make_context("depth_map"));
+        0.05,
+        40000,
+        32,
+    )
+    .await?;
+    depth_signal.accept_subscription(depth_source.create_depth_subscription());
     obstacle_hub.add_source_mut(depth_source).unwrap();
 
-    let pathfinder: Pathfinder = Pathfinder::new_with_engine(
-        Shape::Cylinder {
-            radius: 0.5,
-            height: 1.0,
-            isometry: Default::default(),
-        },
-        0.1,
-        DirectPathfinder,
-        obstacle_hub.clone(),
-        robot_base.get_ref(),
-    );
+    // let pathfinder: Pathfinder = Pathfinder::new_with_engine(
+    //     Shape::Cylinder {
+    //         radius: 0.5,
+    //         height: 1.0,
+    //     },
+    //     0.1,
+    //     DirectPathfinder,
+    //     obstacle_hub.clone(),
+    //     robot_base.get_ref(),
+    // );
 
     let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(200, 200, &context)?;
     tokio::spawn(async move {
@@ -70,33 +75,13 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let mut heights = vec![0.0; 200 * 200];
             let origin = Vector3::new(0.0, 0.0, -1.0);
-            let mut join_set = JoinSet::new();
 
-            for (i, height_ptr) in heights.iter_mut().enumerate() {
-                struct SafePtr(*mut f32);
-                unsafe impl Send for SafePtr {}
-                impl SafePtr {
-                    fn write(&mut self, value: f32) {
-                        unsafe {
-                            *self.0 = value;
-                        }
-                    }
-                }
-
-                let mut height_ptr = SafePtr(height_ptr);
-
-                let x = (i % 200) as isize;
-                let y = (i / 200) as isize;
-                let obstacle_hub = obstacle_hub.clone();
-                while join_set.len() >= 16 {
-                    join_set.join_next().await.unwrap().unwrap();
-                }
-                join_set.spawn(async move {
-                    obstacle_hub
-                        .get_height_only_within::<()>(
-                            &Shape::Cylinder {
-                                radius: 0.02,
-                                height: 1.0,
+            obstacle_hub
+                .query_height(
+                    (0..200).into_iter().flat_map(|y| {
+                        (0..200).into_iter().map(move |x| {
+                            let z = 0.0;
+                            HeightQuery {
                                 isometry: Isometry3::from_parts(
                                     (origin
                                         + Vector3::new(
@@ -107,26 +92,47 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                                     .into(),
                                     UnitQuaternion::default(),
                                 ),
-                            },
-                            |height| {
-                                height_ptr.write(height.height.abs());
-                                None
-                            },
-                        )
-                        .await;
-                });
-            }
-            while !join_set.is_empty() {
-                join_set.join_next().await.unwrap().unwrap();
-            }
+                                max_points: 32,
+                                shape: Shape::Cylinder {
+                                    radius: 0.02,
+                                    height: 2.0,
+                                },
+                            }
+                        })
+                    }),
+                    |heights_vec| {
+                        heights_vec
+                            .par_iter()
+                            .map(|x| x.deref())
+                            .zip(&mut heights)
+                            .for_each(|(heights_in_shape, height)| {
+
+                                let mean = heights_in_shape.iter().copied().sum::<f32>() / heights_in_shape.len() as f32;
+                                if mean.is_finite() {
+                                    println!("{mean}");
+                                }
+                                *height = mean;
+                            });
+                        std::future::ready(Some(()))
+                    },
+                )
+                .await;
+
             let max_height = heights
                 .iter()
                 .copied()
+                .filter(|x| x.is_finite())
                 .fold(f32::NEG_INFINITY, f32::max)
                 .max(0.1);
             let img_data: Vec<_> = heights
                 .into_iter()
-                .map(|h| (h / max_height * 255.0).round() as u8)
+                .map(|h| 
+                    if h.is_finite() {
+                        (h / max_height * 255.0).round() as u8
+                    } else {
+                        0
+                    }
+                )
                 .collect();
             let buf = ImageBuffer::<Luma<u8>, _>::from_raw(200, 200, img_data).unwrap();
             let img = DynamicImage::from(buf);
@@ -136,18 +142,18 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         }
     });
 
-    let path_sub = Subscriber::new(1);
-    pathfinder
-        .get_path_pub()
-        .accept_subscription(path_sub.create_subscription());
+    // let path_sub = Subscriber::new(1);
+    // pathfinder
+    //     .get_path_pub()
+    //     .accept_subscription(path_sub.create_subscription());
 
-    let driver = DifferentialDriver::new(robot_base.get_ref());
-    let mut drive_mode_pub = driver.create_drive_mode_sub().into_mono_pub();
-    drive_mode_pub.set(DriveMode::ForwardOnly);
-    pathfinder
-        .get_path_pub()
-        .accept_subscription(driver.create_path_sub());
-    let nav_task = pathfinder.get_navigation_handle();
+    // let driver = DifferentialDriver::new(robot_base.get_ref());
+    // let mut drive_mode_pub = driver.create_drive_mode_sub().into_mono_pub();
+    // drive_mode_pub.set(DriveMode::ForwardOnly);
+    // pathfinder
+    //     .get_path_pub()
+    //     .accept_subscription(driver.create_path_sub());
+    // let nav_task = pathfinder.get_navigation_handle();
 
     let mut localizer: Localizer<f32, WindowLocalizer<f32, _, _, _, _>> =
         Localizer::new(robot_base, DefaultWindowConfig::default());
@@ -172,10 +178,10 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let imu_pub = Publisher::default();
     imu_pub.accept_subscription(localizer.create_imu_sub().set_name("imu"));
 
-    let steering_sub = Subscriber::new(1);
-    driver
-        .steering_pub()
-        .accept_subscription(steering_sub.create_subscription());
+    // let steering_sub = Subscriber::new(1);
+    // driver
+    //     .steering_pub()
+    //     .accept_subscription(steering_sub.create_subscription());
 
     let tcp_listener = TcpListener::bind("0.0.0.0:11433").await?;
     tokio::spawn(async move {
@@ -318,44 +324,44 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             {
                 let x = stream.read_f32_le().await.expect("Failed to receive point");
                 let y = stream.read_f32_le().await.expect("Failed to receive point");
-                match nav_task
-                    .try_schedule_or_closed(Point3::new(x, 0.0, y))
-                    .await
-                {
-                    Some(Ok(handle)) => {
-                        tokio::spawn(async move {
-                            match handle.wait().await {
-                                Ok(()) => log::info!("Navigation complete"),
-                                Err(e) => log::error!("{e}"),
-                            }
-                        });
-                    }
-                    Some(Err(e)) => log::error!("{e}"),
-                    None => log::error!("Navigation task closed"),
-                }
+                // match nav_task
+                //     .try_schedule_or_closed(Point3::new(x, 0.0, y))
+                //     .await
+                // {
+                //     Some(Ok(handle)) => {
+                //         tokio::spawn(async move {
+                //             match handle.wait().await {
+                //                 Ok(()) => log::info!("Navigation complete"),
+                //                 Err(e) => log::error!("{e}"),
+                //             }
+                //         });
+                //     }
+                //     Some(Err(e)) => log::error!("{e}"),
+                //     None => log::error!("Navigation task closed"),
+                // }
             }
 
-            if let Some(steering) = steering_sub.try_recv() {
-                last_left_steering = steering.left.into_inner();
-                last_right_steering = steering.right.into_inner();
-                stream
-                    .write_f32_le(last_left_steering)
-                    .await
-                    .expect("Failed to write steering");
-                stream
-                    .write_f32_le(last_right_steering)
-                    .await
-                    .expect("Failed to write steering");
-            } else {
-                stream
-                    .write_f32_le(last_left_steering)
-                    .await
-                    .expect("Failed to write steering");
-                stream
-                    .write_f32_le(last_right_steering)
-                    .await
-                    .expect("Failed to write steering");
-            }
+            // if let Some(steering) = steering_sub.try_recv() {
+            //     last_left_steering = steering.left.into_inner();
+            //     last_right_steering = steering.right.into_inner();
+            //     stream
+            //         .write_f32_le(last_left_steering)
+            //         .await
+            //         .expect("Failed to write steering");
+            //     stream
+            //         .write_f32_le(last_right_steering)
+            //         .await
+            //         .expect("Failed to write steering");
+            // } else {
+            stream
+                .write_f32_le(last_left_steering)
+                .await
+                .expect("Failed to write steering");
+            stream
+                .write_f32_le(last_right_steering)
+                .await
+                .expect("Failed to write steering");
+            // }
 
             let isometry = camera.get_isometry_of_base();
 
@@ -391,34 +397,34 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
 
             stream.flush().await.expect("Failed to write steering");
 
-            if let Some(path) = path_sub.try_recv() {
-                stream
-                    .write_u16_le(path.len() as u16)
-                    .await
-                    .expect("Failed to write path length");
-                for point in path.iter() {
-                    stream
-                        .write_f32_le(point.x)
-                        .await
-                        .expect("Failed to write point.x");
-                    stream
-                        .write_f32_le(point.z)
-                        .await
-                        .expect("Failed to write point.z");
-                }
-            } else {
-                stream
-                    .write_u16_le(0)
-                    .await
-                    .expect("Failed to write path length");
-            }
+            // if let Some(path) = path_sub.try_recv() {
+            //     stream
+            //         .write_u16_le(path.len() as u16)
+            //         .await
+            //         .expect("Failed to write path length");
+            //     for point in path.iter() {
+            //         stream
+            //             .write_f32_le(point.x)
+            //             .await
+            //             .expect("Failed to write point.x");
+            //         stream
+            //             .write_f32_le(point.z)
+            //             .await
+            //             .expect("Failed to write point.z");
+            //     }
+            // } else {
+            stream
+                .write_u16_le(0)
+                .await
+                .expect("Failed to write path length");
+            // }
 
             stream.flush().await.expect("Failed to write path");
         }
     });
 
-    driver.spawn(context.make_context("driver"));
-    pathfinder.spawn(context.make_context("pathfinder"));
+    // driver.spawn(context.make_context("driver"));
+    // pathfinder.spawn(context.make_context("pathfinder"));
     localizer.spawn(context.make_context("localizer"));
 
     context.wait_for_exit().await;

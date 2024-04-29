@@ -20,7 +20,7 @@ use crossbeam::{queue::ArrayQueue, utils::Backoff};
 use ffmpeg_sidecar::{child::FfmpegChild, command::FfmpegCommand, event::FfmpegEvent};
 use image::{DynamicImage, EncodableLayout};
 use log::{error, info, warn};
-use show_image::create_window;
+use minifb::{Window, WindowOptions};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt, BufWriter},
@@ -227,8 +227,8 @@ pub enum VideoDumpInitError {
     LoggingError(anyhow::Error),
     /// An error automatically installing `ffmpeg`.
     FFMPEGInstallError(String),
-    /// An error initializing the display window.
-    CreateWindowError(show_image::error::CreateWindowError),
+    // /// An error initializing the display window.
+    // CreateWindowError(minifb::Error),
 }
 
 impl Error for VideoDumpInitError {}
@@ -248,10 +248,9 @@ impl Display for VideoDumpInitError {
             ),
             VideoDumpInitError::VideoError(e) => {
                 write!(f, "Faced an error while encoding video: {e}")
-            }
-            VideoDumpInitError::CreateWindowError(e) => {
-                write!(f, "Faced an error while creating the display window: {e}")
-            }
+            } // VideoDumpInitError::CreateWindowError(e) => {
+              //     write!(f, "Faced an error while creating the display window: {e}")
+              // }
         }
     }
 }
@@ -305,32 +304,47 @@ a=fmtp:96 packetization-mode=1",
         in_height: u32,
         context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
-        let name = context.get_name().to_string();
-        let window = create_window(&name, Default::default())
-            .map_err(|e| VideoDumpInitError::CreateWindowError(e))?;
-
         let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
         let queue_receiver = queue_sender.clone();
 
         let backoff = Backoff::new();
+        let name = context.get_name().to_string();
 
-        context.spawn_persistent_sync(move || loop {
-            let Some(frame) = queue_receiver.pop() else {
-                if Arc::strong_count(&queue_receiver) == 1 {
-                    window
-                        .run_function_wait(|handle| {
-                            handle.destroy();
-                        })
-                        .expect("Window should still be open");
+        context.spawn_persistent_sync(move || {
+            let mut window = match Window::new(
+                &name,
+                in_width as usize,
+                in_height as usize,
+                WindowOptions {
+                    resize: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(x) => x,
+                Err(e) => {
+                    error!("Faced the following error while creating display: {e}");
+                    return;
+                }
+            };
+            let mut buffer = Vec::with_capacity(in_width as usize * in_height as usize);
+            loop {
+                let Some(frame) = queue_receiver.pop() else {
+                    if Arc::strong_count(&queue_receiver) == 1 {
+                        break;
+                    }
+                    backoff.snooze();
+                    continue;
+                };
+                backoff.reset();
+                buffer.extend(frame.to_rgb8().chunks(3).map(|x| [0, x[0], x[1], x[2]]).map(u32::from_le_bytes));
+
+                if let Err(e) =
+                    window.update_with_buffer(&buffer, in_width as usize, in_height as usize)
+                {
+                    error!("Faced the following error while writing video frame to display: {e}");
                     break;
                 }
-                backoff.snooze();
-                continue;
-            };
-            backoff.reset();
-
-            if let Err(e) = window.set_image(&name, frame.to_rgb8()) {
-                error!("Faced the following error while writing video frame to Display: {e}");
+                buffer.clear();
             }
         });
 

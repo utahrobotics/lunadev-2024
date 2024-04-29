@@ -6,32 +6,31 @@ use std::{
 use async_trait::async_trait;
 use compute_shader::{
     buffers::{
-        BufferType, HostReadOnly, HostReadWrite, HostWriteOnly, OpaqueBuffer, ShaderReadOnly,
-        ShaderReadWrite, StorageOnly, UniformOnly,
+        BufferType, DynamicSize, HostReadOnly, HostReadWrite, HostWriteOnly, OpaqueBuffer,
+        ShaderReadOnly, ShaderReadWrite, StorageOnly, UniformOnly,
     },
+    wgpu::include_wgsl,
     Compute,
 };
 use crossbeam::queue::ArrayQueue;
+use nalgebra::UnitVector3;
 use rig::RobotElementRef;
 use unros::{
+    anyhow::{self, Context},
     pubsub::{subs::DirectSubscription, Subscriber},
     tokio::sync::Mutex as AsyncMutex,
 };
 
 use crate::{utils::RecycledVec, HeightMap, HeightQuery, Shape};
 
-impl<D: Send + IntoDepthData + 'static> DepthMapSource<D> {
-    pub fn create_depth_subscription(&self) -> DirectSubscription<D> {
-        self.depth_sub.create_subscription()
-    }
-}
-
 pub struct DepthMapSource<D: IntoDepthData> {
     min_depth: f32,
-    max_shapes: usize,
+    max_shapes: u32,
+    max_points_per_shape: usize,
     depth_sub: Subscriber<D>,
     robot_element_ref: RobotElementRef,
     points_buffer: AsyncMutex<OpaqueBuffer>,
+    point_count: u32,
 
     heights_queue: ArrayQueue<Vec<f32>>,
     shapes_queue: ArrayQueue<Vec<FloatShape>>,
@@ -40,7 +39,8 @@ pub struct DepthMapSource<D: IntoDepthData> {
     project_depth: Arc<
         Compute<(
             BufferType<[f32], HostWriteOnly, ShaderReadOnly, StorageOnly>,
-            BufferType<[[f32; 4]], HostReadWrite, ShaderReadWrite, StorageOnly>,
+            BufferType<[[f32; 4]], HostWriteOnly, ShaderReadOnly, StorageOnly>,
+            BufferType<[[f32; 4]], HostReadOnly, ShaderReadWrite, StorageOnly>,
             BufferType<FloatIntrinsics, HostWriteOnly, ShaderReadOnly, UniformOnly>,
         )>,
     >,
@@ -48,10 +48,76 @@ pub struct DepthMapSource<D: IntoDepthData> {
         Compute<(
             BufferType<[f32], HostReadOnly, ShaderReadWrite, StorageOnly>,
             BufferType<[[f32; 4]], HostWriteOnly, ShaderReadOnly, StorageOnly>,
-            BufferType<[FloatShape], HostWriteOnly, ShaderReadOnly, UniformOnly>,
+            BufferType<[FloatShape], HostWriteOnly, ShaderReadOnly, StorageOnly>,
             BufferType<[u32], HostReadWrite, ShaderReadWrite, StorageOnly>,
         )>,
     >,
+}
+
+impl<D: Send + IntoDepthData + 'static> DepthMapSource<D> {
+    pub async fn new(
+        rays: impl IntoIterator<Item = UnitVector3<f32>>,
+        robot_element_ref: RobotElementRef,
+        min_depth: f32,
+        max_shapes: u32,
+        max_points_per_shape: usize,
+    ) -> anyhow::Result<Self> {
+        let rays: Box<[[f32; 4]]> = rays
+            .into_iter()
+            .map(|ray| [ray.x, ray.y, ray.z, 0.0])
+            .collect();
+
+        let project_depth = Compute::<(
+            BufferType<[f32], HostWriteOnly, ShaderReadOnly, StorageOnly>,
+            BufferType<[[f32; 4]], HostWriteOnly, ShaderReadOnly, StorageOnly>,
+            BufferType<[[f32; 4]], HostReadOnly, ShaderReadWrite, StorageOnly>,
+            BufferType<FloatIntrinsics, HostWriteOnly, ShaderReadOnly, UniformOnly>,
+        )>::new(
+            include_wgsl!("depth.wgsl"),
+            BufferType::new_dyn(rays.len()),
+            BufferType::new_dyn(rays.len()),
+            BufferType::new_dyn(rays.len()),
+            BufferType::new(),
+        )
+        .await?;
+
+        let height_map_compute = Compute::<(
+            BufferType<[f32], HostReadOnly, ShaderReadWrite, StorageOnly>,
+            BufferType<[[f32; 4]], HostWriteOnly, ShaderReadOnly, StorageOnly>,
+            BufferType<[FloatShape], HostWriteOnly, ShaderReadOnly, StorageOnly>,
+            BufferType<[u32], HostReadWrite, ShaderReadWrite, StorageOnly>,
+        )>::new(
+            include_wgsl!("intersect.wgsl"),
+            BufferType::new_dyn(max_points_per_shape * max_shapes as usize),
+            BufferType::new_dyn(rays.len()),
+            BufferType::new_dyn(max_shapes as usize),
+            BufferType::new_dyn(max_shapes as usize),
+        )
+        .await?;
+
+        Ok(Self {
+            min_depth,
+            max_shapes,
+            max_points_per_shape,
+            depth_sub: Subscriber::new(1),
+            robot_element_ref,
+            point_count: rays.len().try_into().context("The maximum number of rays is u32::MAX")?,
+            points_buffer: AsyncMutex::new(
+                OpaqueBuffer::new(DynamicSize::<[f32; 4]>::new(rays.len())).await?,
+            ),
+
+            heights_queue: ArrayQueue::new(1),
+            shapes_queue: ArrayQueue::new(1),
+            indices_queue: ArrayQueue::new(1),
+
+            project_depth: Arc::new(project_depth),
+            height_map_compute: Arc::new(height_map_compute),
+        })
+    }
+
+    pub fn create_depth_subscription(&self) -> DirectSubscription<D> {
+        self.depth_sub.create_subscription()
+    }
 }
 
 #[async_trait]
@@ -73,6 +139,7 @@ where
             .unwrap_or_else(|| Vec::with_capacity(queries.len()));
         let mut heights_count = 0usize;
         shapes.extend(queries.iter().map(|query| {
+            assert!(query.max_points <= self.max_points_per_shape);
             let (data, variant) = match query.shape {
                 Shape::Cylinder { height, radius } => ([radius, height, 0.0], 0),
             };
@@ -89,11 +156,11 @@ where
             FloatShape {
                 origin: query.isometry.translation.into(),
                 variant,
-                inv_matrix_2: [matrix[0], matrix[1]].map(|row| [row[0], row[1], row[2], 0.0]),
-                inv_matrix_1: matrix[2],
+                inv_matrix: matrix.map(|row| [row[0], row[1], row[2], 0.0]),
                 start_index: old_start_index.try_into().unwrap(),
                 data,
                 max_points: query.max_points.try_into().unwrap(),
+                padding: [0; 3],
             }
         }));
         let mut heights_buf = self
@@ -111,9 +178,9 @@ where
                 buf.iter_mut().for_each(|x| *x = 0);
                 buf
             })
-            .unwrap_or_else(|| std::iter::repeat(0).take(self.max_shapes).collect());
+            .unwrap_or_else(|| std::iter::repeat(0).take(self.max_shapes as usize).collect());
 
-        let pass = if let Some(depth) = self.depth_sub.try_recv() {
+        let mut pass = if let Some(depth) = self.depth_sub.try_recv() {
             let depth = depth.into_depth_data();
             let isometry = self.robot_element_ref.get_isometry_from_base();
             let matrix = isometry.rotation.to_rotation_matrix().into_inner().data.0;
@@ -122,16 +189,15 @@ where
                     isometry.translation.x,
                     isometry.translation.y,
                     isometry.translation.z,
-                    0.0,
                 ],
-                matrix_2: [matrix[0], matrix[1]].map(|row| [row[0], row[1], row[2], 0.0]),
-                matrix_1: matrix[2],
+                matrix: matrix.map(|row| [row[0], row[1], row[2], 0.0]),
                 min_depth: self.min_depth,
             };
             let mut guard = self.points_buffer.lock().await;
             self.project_depth
-                .new_pass(depth.deref(), (), &intrinsics)
-                .call((), guard.deref_mut(), ())
+                .new_pass(depth.deref(), (), (), &intrinsics)
+                .workgroup_size(self.point_count, 1, 1)
+                .call((), (), guard.deref_mut(), ())
                 .await;
             self.height_map_compute
                 .new_pass((), guard.deref(), shapes.deref(), indices_buf.deref())
@@ -139,6 +205,7 @@ where
             self.height_map_compute
                 .new_pass((), (), shapes.deref(), indices_buf.deref())
         };
+        pass.workgroup_size = (self.point_count, shapes.len() as u32, 1);
 
         let indices_mut = indices_buf.deref_mut().split_at_mut(shapes.len()).0;
 
@@ -162,20 +229,19 @@ where
 struct FloatShape {
     origin: [f32; 3],
     variant: u32,
-    inv_matrix_2: [[f32; 4]; 2],
-    inv_matrix_1: [f32; 3],
-    start_index: u32,
+    inv_matrix: [[f32; 4]; 3],
     data: [f32; 3],
+    start_index: u32,
     max_points: u32,
+    padding: [u32; 3],
 }
 
 #[repr(C, align(16))]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct FloatIntrinsics {
-    origin: [f32; 4],
-    matrix_2: [[f32; 4]; 2],
-    matrix_1: [f32; 3],
+    origin: [f32; 3],
     min_depth: f32,
+    matrix: [[f32; 4]; 3],
 }
 
 pub trait IntoDepthData {
