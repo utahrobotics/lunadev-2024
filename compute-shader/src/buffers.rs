@@ -1,4 +1,3 @@
-use core::slice;
 use std::{
     future::Future,
     marker::PhantomData,
@@ -7,7 +6,7 @@ use std::{
     sync::RwLock,
 };
 
-use bytemuck::{bytes_of, from_bytes};
+use bytemuck::{bytes_of, cast_slice, from_bytes};
 use crossbeam::queue::SegQueue;
 use fxhash::FxHashMap;
 use tokio::sync::oneshot;
@@ -61,11 +60,9 @@ impl ShaderWritable for ShaderReadWrite {
     const CAN_WRITE: bool = true;
 }
 
-
 pub trait UniformOrStorage {
     const IS_UNIFORM: bool;
 }
-
 
 #[derive(Debug, Clone, Copy)]
 pub struct UniformOnly;
@@ -74,17 +71,14 @@ impl UniformOrStorage for UniformOnly {
     const IS_UNIFORM: bool = true;
 }
 
-
 #[derive(Debug, Clone, Copy)]
 pub struct StorageOnly;
-
 
 impl UniformOrStorage for StorageOnly {
     const IS_UNIFORM: bool = false;
 }
 
-
-pub struct BufferType<T: BufferSized + ?Sized, H, S, O=StorageOnly> {
+pub struct BufferType<T: BufferSized + ?Sized, H, S, O = StorageOnly> {
     size: T::Size,
     _phantom: PhantomData<(H, S, O, T)>,
 }
@@ -118,7 +112,9 @@ impl<T: 'static, H, S, O> BufferType<[T], H, S, O> {
     }
 }
 
-impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable, O: UniformOrStorage> BufferType<T, H, S, O> {
+impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable, O: UniformOrStorage>
+    BufferType<T, H, S, O>
+{
     const HOST_CAN_READ: bool = H::CAN_READ;
     const HOST_CAN_WRITE: bool = H::CAN_WRITE;
     const SHADER_CAN_WRITE: bool = S::CAN_WRITE;
@@ -196,34 +192,46 @@ pub trait ValidBufferType {
     type ReadType: ?Sized + BufferSized + 'static;
 }
 
-impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<T, HostReadOnly, S, O> {
+impl<T: BufferSized + ?Sized + 'static, O> ValidBufferType
+    for BufferType<T, HostReadOnly, ShaderReadOnly, O>
+{
     type WriteType = ();
     type ReadType = T;
 }
 
-impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<T, HostWriteOnly, S, O> {
+impl<T: BufferSized + ?Sized + 'static, O> ValidBufferType
+    for BufferType<T, HostWriteOnly, ShaderReadOnly, O>
+{
     type WriteType = T;
     type ReadType = ();
 }
 
-impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<T, HostReadWrite, S, O> {
+impl<T: BufferSized + ?Sized + 'static, O> ValidBufferType
+    for BufferType<T, HostReadWrite, ShaderReadOnly, O>
+{
     type WriteType = T;
     type ReadType = T;
 }
 
-impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<[T], HostReadOnly, S, O> {
+impl<T: BufferSized + ?Sized + 'static> ValidBufferType
+    for BufferType<T, HostReadOnly, ShaderReadWrite, StorageOnly>
+{
     type WriteType = ();
-    type ReadType = [T];
+    type ReadType = T;
 }
 
-impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<[T], HostWriteOnly, S, O> {
-    type WriteType = [T];
+impl<T: BufferSized + ?Sized + 'static> ValidBufferType
+    for BufferType<T, HostWriteOnly, ShaderReadWrite, StorageOnly>
+{
+    type WriteType = T;
     type ReadType = ();
 }
 
-impl<T: 'static, S: ShaderWritable, O> ValidBufferType for BufferType<[T], HostReadWrite, S, O> {
-    type WriteType = [T];
-    type ReadType = [T];
+impl<T: BufferSized + ?Sized + 'static> ValidBufferType
+    for BufferType<T, HostReadWrite, ShaderReadWrite, StorageOnly>
+{
+    type WriteType = T;
+    type ReadType = T;
 }
 
 pub trait BufferSize: Copy + Default + Send + 'static {
@@ -344,33 +352,16 @@ impl<T: BufferSized + bytemuck::Pod> BufferSource<[T]> for &[T] {
         stager: &mut StagingBelt,
         device: &wgpu::Device,
     ) {
-        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
-        if const { size_of::<T>() % align_of::<T>() == 0 } {
-            stager
-                .write_buffer(
-                    command_encoder,
-                    buffer,
-                    0,
-                    NonZeroU64::new(stride * self.len() as u64).unwrap(),
-                    device,
-                )
-                .copy_from_slice(unsafe {
-                    let data: *const u8 = self.as_ptr().cast();
-                    slice::from_raw_parts(data, stride as usize * self.len())
-                });
-        } else {
-            for (i, item) in self.iter().enumerate() {
-                stager
-                    .write_buffer(
-                        command_encoder,
-                        buffer,
-                        i as u64 * stride,
-                        NonZeroU64::new(stride).unwrap(),
-                        device,
-                    )
-                    .copy_from_slice(bytes_of(item));
-            }
-        }
+        let bytes = cast_slice(self);
+        stager
+            .write_buffer(
+                command_encoder,
+                buffer,
+                0,
+                NonZeroU64::new(bytes.len() as u64).unwrap(),
+                device,
+            )
+            .copy_from_slice(bytes);
     }
 }
 
@@ -486,8 +477,7 @@ impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<[T]> for &mut [T] 
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
         device: &wgpu::Device,
     ) -> Self::State {
-        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
-        let size = stride * self.len() as u64;
+        let size = (self.len() * size_of::<T>()) as u64;
         let buffer = {
             let reader = buffers.read().unwrap();
             reader
@@ -514,9 +504,9 @@ impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<[T]> for &mut [T] 
         device: &wgpu::Device,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
     ) {
-        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
         {
-            let slice = buffer.slice(..);
+            let size = (self.len() * size_of::<T>()) as u64;
+            let slice = buffer.slice(0..size);
             let (sender, receiver) = oneshot::channel::<()>();
             slice.map_async(MapMode::Read, move |result| {
                 if result.is_err() {
@@ -528,26 +518,23 @@ impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<[T]> for &mut [T] 
             receiver.await.expect("Failed to map buffer");
             let slice = slice.get_mapped_range();
 
-            let buffer_ref: &[T] = unsafe {
-                let data: *const T = slice.as_ptr().cast();
-                slice::from_raw_parts(data, self.len())
-            };
-            self.copy_from_slice(buffer_ref);
+            self.copy_from_slice(cast_slice(&slice));
         }
 
         buffer.unmap();
 
         {
             let reader = buffers.read().unwrap();
-            if let Some(queue) = reader.get(&stride) {
+            if let Some(queue) = reader.get(&buffer.size()) {
                 queue.push(buffer);
                 return;
             }
         }
 
         let queue = SegQueue::new();
+        let size = buffer.size();
         queue.push(buffer);
-        buffers.write().unwrap().insert(stride, queue);
+        buffers.write().unwrap().insert(size, queue);
     }
 }
 
@@ -605,10 +592,12 @@ impl<T: ?Sized + BufferSized + 'static> BufferDestination<T> for () {
 }
 
 pub struct OpaqueBuffer {
+    pub size: u64,
+    pub start_offset: u64,
     buffer: wgpu::Buffer,
 }
 
-impl<T: 'static> BufferSource<T> for &OpaqueBuffer {
+impl<T: ?Sized + BufferSized + 'static> BufferSource<T> for &OpaqueBuffer {
     fn into_buffer(
         self,
         command_encoder: &mut CommandEncoder,
@@ -616,11 +605,17 @@ impl<T: 'static> BufferSource<T> for &OpaqueBuffer {
         _stager: &mut StagingBelt,
         _device: &wgpu::Device,
     ) {
-        command_encoder.copy_buffer_to_buffer(&self.buffer, 0, &buffer, 0, size_of::<T>() as u64);
+        command_encoder.copy_buffer_to_buffer(
+            &self.buffer,
+            self.start_offset,
+            &buffer,
+            0,
+            self.size,
+        );
     }
 }
 
-impl<T: 'static> BufferDestination<T> for &mut OpaqueBuffer {
+impl<T: ?Sized + BufferSized + 'static> BufferDestination<T> for &mut OpaqueBuffer {
     type State = ();
 
     fn enqueue(
@@ -630,7 +625,13 @@ impl<T: 'static> BufferDestination<T> for &mut OpaqueBuffer {
         _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
         _device: &wgpu::Device,
     ) -> Self::State {
-        command_encoder.copy_buffer_to_buffer(&src_buffer, 0, &self.buffer, 0, self.buffer.size());
+        command_encoder.copy_buffer_to_buffer(
+            &src_buffer,
+            0,
+            &self.buffer,
+            self.start_offset,
+            self.size,
+        );
     }
 
     async fn from_buffer(
@@ -652,14 +653,19 @@ impl OpaqueBuffer {
             mapped_at_creation: false,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
-        Ok(Self { buffer })
+        Ok(Self {
+            buffer,
+            size,
+            start_offset: 0,
+        })
     }
 
     pub async fn new_from_value<T: bytemuck::Pod>(value: &T) -> anyhow::Result<Self> {
+        let size = size_of::<T>() as u64;
         let GpuDevice { device, .. } = get_gpu_device().await?;
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: size_of::<T>() as u64,
+            size,
             mapped_at_creation: true,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
@@ -668,132 +674,32 @@ impl OpaqueBuffer {
             .get_mapped_range_mut()
             .copy_from_slice(bytes_of(value));
         buffer.unmap();
-        Ok(Self { buffer })
+        Ok(Self {
+            buffer,
+            size,
+            start_offset: 0,
+        })
     }
 
     pub async fn new_from_slice<T: bytemuck::Pod>(slice: &[T]) -> anyhow::Result<Self> {
-        let stride = size_of::<T>().next_multiple_of(align_of::<T>()) as u64;
         let GpuDevice { device, .. } = get_gpu_device().await?;
+        let bytes: &[u8] = cast_slice(slice);
+        let size = bytes.len() as u64;
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: stride * slice.len() as u64,
+            size,
             mapped_at_creation: true,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
-        let bytes: &[u8] = unsafe {
-            let data: *const u8 = slice.as_ptr().cast();
-            slice::from_raw_parts(data, stride as usize * slice.len())
-        };
         buffer
             .slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytes);
         buffer.unmap();
-        Ok(Self { buffer })
+        Ok(Self {
+            buffer,
+            size,
+            start_offset: 0,
+        })
     }
 }
-
-// pub struct ManualBuffer<T: ?Sized> {
-//     buffer: wgpu::Buffer,
-//     _phantom: PhantomData<T>,
-// }
-
-// impl<T: bytemuck::Pod + 'static> BufferSource<T> for &ManualBuffer<T> {
-//     fn into_buffer(
-//         self,
-//         command_encoder: &mut CommandEncoder,
-//         buffer: &wgpu::Buffer,
-//         _stager: &mut StagingBelt,
-//         _device: &wgpu::Device,
-//     ) {
-//         command_encoder.copy_buffer_to_buffer(&self.buffer, 0, &buffer, 0, size_of::<T>() as u64);
-//     }
-// }
-
-// impl<T: 'static> BufferDestination<T> for &mut ManualBuffer<T> {
-//     type State = ();
-
-//     fn enqueue(
-//         self,
-//         command_encoder: &mut CommandEncoder,
-//         src_buffer: &wgpu::Buffer,
-//         _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
-//         _device: &wgpu::Device,
-//     ) -> Self::State {
-//         command_encoder.copy_buffer_to_buffer(&src_buffer, 0, &self.buffer, 0, self.buffer.size());
-//     }
-
-//     async fn from_buffer(
-//         self,
-//         (): Self::State,
-//         _device: &wgpu::Device,
-//         _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
-//     ) { }
-// }
-
-// impl<T: 'static> ManualBuffer<T> {
-//     pub async fn lock(&mut self) -> ManualBufferLock<T> {
-//         let GpuDevice { device, .. } = get_gpu_device().await.unwrap();
-//         let slice = self.buffer.slice(..);
-//         let (sender, receiver) = oneshot::channel::<()>();
-//         slice.map_async(MapMode::Read, move |result| {
-//             if result.is_err() {
-//                 return;
-//             }
-//             let _ = sender.send(());
-//         });
-//         device.poll(Maintain::Poll);
-//         receiver.await.expect("Failed to map buffer");
-//         let range = slice.get_mapped_range_mut();
-
-//         ManualBufferLock {
-//             buffer: &self.buffer,
-//             _slice: slice,
-//             range,
-//             phantom: PhantomData,
-//         }
-//     }
-// }
-
-// pub struct ManualBufferLock<'a, T> {
-//     buffer: &'a wgpu::Buffer,
-//     _slice: wgpu::BufferSlice<'a>,
-//     range: wgpu::BufferViewMut<'a>,
-//     phantom: PhantomData<T>,
-// }
-
-// impl<'a, T: bytemuck::Pod> Deref for ManualBufferLock<'a, T> {
-//     type Target = T;
-
-//     fn deref(&self) -> &Self::Target {
-//         let ptr: *const _ = &self.range;
-//         let ptr: *const T = ptr.cast();
-//         unsafe { &*ptr }
-//     }
-// }
-
-// impl<'a, T: bytemuck::Pod> DerefMut for ManualBufferLock<'a, T> {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         let ptr: *mut _ = &mut self.range;
-//         let ptr: *mut T = ptr.cast();
-//         unsafe { &mut *ptr }
-//     }
-// }
-
-// impl<'a, T> Drop for ManualBufferLock<'a, T> {
-//     fn drop(&mut self) {
-//         self.buffer.unmap();
-//     }
-// }
-
-// impl<'a, T: bytemuck::Pod> ManualBuffer<T> {
-//     pub async fn new(value: &T) -> anyhow::Result<Self> {
-//         let GpuDevice { device, .. } = get_gpu_device().await?;
-//         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-//             label: None,
-//             contents: bytes_of(value),
-//             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-//         });
-//         todo!()
-//     }
-// }

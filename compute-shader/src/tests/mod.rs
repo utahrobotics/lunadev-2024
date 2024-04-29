@@ -8,7 +8,7 @@ use crate::{
 #[tokio::test]
 async fn mul2() {
     env_logger::init();
-    let compute = Compute::<(BufferType<[[u32; 4]], HostReadOnly, ShaderReadWrite>,)>::new(
+    let compute = Compute::<(BufferType<[[u32; 4]], HostReadWrite, ShaderReadWrite>,)>::new(
         include_wgsl!("mul2.wgsl"),
         BufferType::new_dyn(5),
     )

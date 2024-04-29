@@ -1,48 +1,47 @@
-use std::{any::Any, ops::Deref, sync::Arc};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use compute_shader::{
-    buffers::{BufferType, DynamicSize, HostReadOnly, HostReadWrite, HostWriteOnly, ShaderReadOnly, ShaderReadWrite, StaticSize, StorageOnly, UniformOnly},
-    wgpu::include_wgsl,
+    buffers::{
+        BufferType, HostReadOnly, HostReadWrite, HostWriteOnly, OpaqueBuffer, ShaderReadOnly,
+        ShaderReadWrite, StorageOnly, UniformOnly,
+    },
     Compute,
 };
-use crossbeam::atomic::AtomicCell;
-use futures::{stream::FuturesUnordered, StreamExt};
-use nalgebra::UnitVector3;
+use crossbeam::queue::ArrayQueue;
 use rig::RobotElementRef;
 use unros::{
-    anyhow,
-    float::Float,
-    node::AsyncNode,
     pubsub::{subs::DirectSubscription, Subscriber},
-    setup_logging,
-    tokio::{
-        self,
-        sync::{
-            mpsc::{channel as async_channel, Receiver as AsyncReceiver, Sender as AsyncSender},
-            oneshot,
-        },
-    },
+    tokio::sync::Mutex as AsyncMutex,
 };
 
-use crate::{utils::RecycledVec, HeightMap, Shape};
+use crate::{utils::RecycledVec, HeightMap, HeightQuery, Shape};
 
-impl<D: Send + 'static> DepthMapSource<D> {
+impl<D: Send + IntoDepthData + 'static> DepthMapSource<D> {
     pub fn create_depth_subscription(&self) -> DirectSubscription<D> {
         self.depth_sub.create_subscription()
     }
 }
 
-pub struct DepthMapSource<D> {
-    pub max_cylinders: usize,
+pub struct DepthMapSource<D: IntoDepthData> {
+    min_depth: f32,
+    max_shapes: usize,
     depth_sub: Subscriber<D>,
     robot_element_ref: RobotElementRef,
+    points_buffer: AsyncMutex<OpaqueBuffer>,
+
+    heights_queue: ArrayQueue<Vec<f32>>,
+    shapes_queue: ArrayQueue<Vec<FloatShape>>,
+    indices_queue: ArrayQueue<Box<[u32]>>,
 
     project_depth: Arc<
         Compute<(
-            BufferType<[f32], HostReadOnly, ShaderReadWrite, StorageOnly>,
-            BufferType<[[f32; 4]], HostWriteOnly, ShaderReadOnly, StorageOnly>,
-            BufferType<[FloatShape], HostWriteOnly, ShaderReadOnly, UniformOnly>,
+            BufferType<[f32], HostWriteOnly, ShaderReadOnly, StorageOnly>,
+            BufferType<[[f32; 4]], HostReadWrite, ShaderReadWrite, StorageOnly>,
+            BufferType<FloatIntrinsics, HostWriteOnly, ShaderReadOnly, UniformOnly>,
         )>,
     >,
     height_map_compute: Arc<
@@ -50,54 +49,111 @@ pub struct DepthMapSource<D> {
             BufferType<[f32], HostReadOnly, ShaderReadWrite, StorageOnly>,
             BufferType<[[f32; 4]], HostWriteOnly, ShaderReadOnly, StorageOnly>,
             BufferType<[FloatShape], HostWriteOnly, ShaderReadOnly, UniformOnly>,
-            BufferType<[u32], HostReadWrite, ShaderReadWrite, UniformOnly>,
+            BufferType<[u32], HostReadWrite, ShaderReadWrite, StorageOnly>,
         )>,
     >,
 }
 
 #[async_trait]
-impl<D, I> HeightMap<f32, I> for DepthMapSource<D>
+impl<D> HeightMap<f32> for DepthMapSource<D>
 where
-    D: Send + Deref<Target = [f32]> + Clone + 'static,
-    for<'a> &'a I: IntoIterator<Item = Shape<f32>>,
+    D: Send + IntoDepthData + 'static,
 {
-    async fn query_height(&self, shapes: &I) -> Option<RecycledVec<f32>> {
-        let mut depth = self.depth_sub.try_recv();
-        let mut transform = None;
-        if let Some(tmp_depth) = depth {
+    async fn query_height<'a>(
+        &self,
+        queries: Arc<RecycledVec<HeightQuery<f32>>>,
+    ) -> Option<RecycledVec<RecycledVec<f32>>> {
+        let mut shapes = self
+            .shapes_queue
+            .pop()
+            .map(|mut buf| {
+                buf.clear();
+                buf
+            })
+            .unwrap_or_else(|| Vec::with_capacity(queries.len()));
+        let mut heights_count = 0usize;
+        shapes.extend(queries.iter().map(|query| {
+            let (data, variant) = match query.shape {
+                Shape::Cylinder { height, radius } => ([radius, height, 0.0], 0),
+            };
+            let matrix = query
+                .isometry
+                .rotation
+                .to_rotation_matrix()
+                .inverse()
+                .into_inner()
+                .data
+                .0;
+            let old_start_index = heights_count;
+            heights_count += query.max_points;
+            FloatShape {
+                origin: query.isometry.translation.into(),
+                variant,
+                inv_matrix_2: [matrix[0], matrix[1]].map(|row| [row[0], row[1], row[2], 0.0]),
+                inv_matrix_1: matrix[2],
+                start_index: old_start_index.try_into().unwrap(),
+                data,
+                max_points: query.max_points.try_into().unwrap(),
+            }
+        }));
+        let mut heights_buf = self
+            .heights_queue
+            .pop()
+            .map(|mut buf| {
+                buf.resize(heights_count, 0.0);
+                buf
+            })
+            .unwrap_or_else(|| vec![0.0; heights_count]);
+        let mut indices_buf = self
+            .indices_queue
+            .pop()
+            .map(|mut buf| {
+                buf.iter_mut().for_each(|x| *x = 0);
+                buf
+            })
+            .unwrap_or_else(|| std::iter::repeat(0).take(self.max_shapes).collect());
+
+        let pass = if let Some(depth) = self.depth_sub.try_recv() {
+            let depth = depth.into_depth_data();
             let isometry = self.robot_element_ref.get_isometry_from_base();
-            let tmp = FloatTransform {
+            let matrix = isometry.rotation.to_rotation_matrix().into_inner().data.0;
+            let intrinsics = FloatIntrinsics {
                 origin: [
                     isometry.translation.x,
                     isometry.translation.y,
                     isometry.translation.z,
                     0.0,
                 ],
-                matrix: isometry
-                    .rotation
-                    .to_rotation_matrix()
-                    .into_inner()
-                    .data
-                    .0
-                    .map(|v| [v[0], v[1], v[2], 0.0]),
+                matrix_2: [matrix[0], matrix[1]].map(|row| [row[0], row[1], row[2], 0.0]),
+                matrix_1: matrix[2],
+                min_depth: self.min_depth,
             };
-            // self.other_data.store(Some((tmp_depth.clone(), tmp)));
-            transform = Some(tmp);
-        } else if let Some((old_depth, old_transform)) = self.height_within_compute_data.take() {
-            depth = Some(old_depth);
-            transform = Some(old_transform);
-        }
-        let mut cylinder_buf = vec![];
-        height_within_compute
-            .call(
-                self.height_within_rays.take().as_deref(),
-                depth.as_deref(),
-                &[shape.clone()],
-                &1,
-                &transform,
-            )
+            let mut guard = self.points_buffer.lock().await;
+            self.project_depth
+                .new_pass(depth.deref(), (), &intrinsics)
+                .call((), guard.deref_mut(), ())
+                .await;
+            self.height_map_compute
+                .new_pass((), guard.deref(), shapes.deref(), indices_buf.deref())
+        } else {
+            self.height_map_compute
+                .new_pass((), (), shapes.deref(), indices_buf.deref())
+        };
+
+        let indices_mut = indices_buf.deref_mut().split_at_mut(shapes.len()).0;
+
+        pass.call(heights_buf.deref_mut(), (), (), indices_mut)
             .await;
-        None
+
+        let mut heights_iter = heights_buf.iter().copied();
+        let mut result = RecycledVec::default();
+        for height_count in indices_buf.iter().take(shapes.len()).copied() {
+            let mut heights = RecycledVec::default();
+            heights.extend(heights_iter.by_ref().take(height_count as usize));
+            result.push(heights);
+        }
+
+        Some(result)
     }
 }
 
@@ -113,247 +169,24 @@ struct FloatShape {
     max_points: u32,
 }
 
-// #[repr(C, align(16))]
-// #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-// struct FloatTransform {
-//     origin: [f32; 4],
-//     matrix: [[f32; 4]; 3],
-// }
-
 #[repr(C, align(16))]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct FloatIntrinsics {
     origin: [f32; 4],
-    matrix_2: [[f32; 4]; 3],
+    matrix_2: [[f32; 4]; 2],
     matrix_1: [f32; 3],
-    min_depth: f32
+    min_depth: f32,
 }
 
-// impl<D: Deref<Target = [f32]> + Clone + Send + 'static> AsyncNode for DepthMap<f32, D> {
-//     type Result = anyhow::Result<()>;
+pub trait IntoDepthData {
+    type Data: Send + Deref<Target = [f32]>;
+    fn into_depth_data(self) -> Self::Data;
+}
 
-//     async fn run(mut self, context: unros::runtime::RuntimeContext) -> Self::Result {
-//         setup_logging!(context);
-//         let pixel_count = self.rays.len();
-//         let height_within_compute: Compute<
-//             (
-//                 Option<&[[f32; 4]]>,
-//                 Option<&[f32]>,
-//                 &[Cylinder<f32>],
-//                 &u32,
-//                 &Transform<f32>,
-//             ),
-//             [f32],
-//         > = Compute::new(
-//             include_wgsl!("depthf32.wgsl"),
-//             (
-//                 DynamicSize::new(pixel_count),
-//                 DynamicSize::new(pixel_count),
-//                 DynamicSize::new(self.max_cylinders),
-//                 StaticSize::default(),
-//                 StaticSize::default(),
-//             ),
-//             DynamicSize::new(pixel_count),
-//             (pixel_count as u32, 1, 1),
-//         )
-//         .await?;
-//         let Some(starting_depth) = self.depth_sub.recv_or_closed().await else {
-//             return Ok(());
-//         };
-//         let mut height_within_compute_rays = Some(self.rays);
-//         let mut height_within_compute_depth = Some(starting_depth);
+impl<D: Deref<Target = [f32]> + Send> IntoDepthData for D {
+    type Data = D;
 
-//         let mut height_only_pending = FuturesUnordered::new();
-//         let mut height_variance_pending = FuturesUnordered::new();
-
-//         let mut transform = {
-//             let isometry = self.robot_element_ref.get_isometry_from_base();
-//             Transform {
-//                 origin: [
-//                     isometry.translation.x,
-//                     isometry.translation.y,
-//                     isometry.translation.z,
-//                     0.0,
-//                 ],
-//                 matrix: isometry
-//                     .rotation
-//                     .to_rotation_matrix()
-//                     .into_inner()
-//                     .data
-//                     .0
-//                     .map(|v| [v[0], v[1], v[2], 0.0]),
-//             }
-//         };
-
-//         loop {
-//             let request;
-//             tokio::select! {
-//                 _ = async {
-//                     if height_only_pending.is_empty() {
-//                         std::future::pending::<()>().await;
-//                     } else {
-//                         height_only_pending.next().await;
-//                     }
-//                 } => {
-//                     continue;
-//                 }
-//                 _ = async {
-//                     if height_variance_pending.is_empty() {
-//                         std::future::pending::<()>().await;
-//                     } else {
-//                         height_variance_pending.next().await;
-//                     }
-//                 } => {
-//                     continue;
-//                 }
-//                 option = self.requests.recv() => {
-//                     let Some(tmp) = option else {
-//                         break Ok(());
-//                     };
-//                     request = tmp;
-//                 }
-//             }
-
-//             if let Some(new_depth) = self.depth_sub.try_recv() {
-//                 height_within_compute_depth = Some(new_depth.clone());
-//                 let isometry = self.robot_element_ref.get_isometry_from_base();
-//                 transform = Transform {
-//                     origin: [
-//                         isometry.translation.x,
-//                         isometry.translation.y,
-//                         isometry.translation.z,
-//                         0.0,
-//                     ],
-//                     matrix: isometry
-//                         .rotation
-//                         .to_rotation_matrix()
-//                         .into_inner()
-//                         .data
-//                         .0
-//                         .map(|v| [v[0], v[1], v[2], 0.0]),
-//                 };
-//             }
-
-//             match request {
-//                 Request::HeightOnlyWithin { shape, sender } => {
-//                     let mut cylinder_buf = vec![];
-//                     match shape {
-//                         Shape::Cylinder {
-//                             radius,
-//                             height,
-//                             isometry,
-//                         } => {
-//                             let inv_matrix = isometry
-//                                 .rotation
-//                                 .to_rotation_matrix()
-//                                 .inverse()
-//                                 .into_inner();
-//                             cylinder_buf.push(Cylinder {
-//                                 radius,
-//                                 height,
-//                                 origin: [
-//                                     isometry.translation.x,
-//                                     isometry.translation.y,
-//                                     isometry.translation.z,
-//                                     0.0,
-//                                 ],
-//                                 inv_matrix: inv_matrix.data.0.map(|v| [v[0], v[1], v[2], 0.0]),
-//                             });
-//                         }
-//                     }
-//                     let rays = height_within_compute_rays.take();
-//                     let depth = height_within_compute_depth.take();
-//                     let transform = Box::leak(Box::new(transform));
-//                     while height_only_pending.len() >= self.max_concurrent {
-//                         unros::log::info!("a");
-//                         let _ = height_only_pending.next().await;
-//                     }
-//                     height_only_pending.push(async {
-//                         let rays = rays;
-//                         let depth = depth;
-//                         let cylinder_buf = cylinder_buf;
-//                         let heights = height_within_compute
-//                             .call(
-//                                 rays.as_deref(),
-//                                 depth.as_deref(),
-//                                 &cylinder_buf,
-//                                 &(cylinder_buf.len() as u32),
-//                                 transform,
-//                             )
-//                             .await;
-//                         unsafe {
-//                             let _ = Box::from_raw(transform);
-//                         }
-//                         let _ = sender.send(
-//                             heights
-//                                 .into_iter()
-//                                 .copied()
-//                                 .filter(|n| *n != f32::MAX)
-//                                 .map(|n| if n == f32::MIN { None } else { Some(n) })
-//                                 .collect(),
-//                         );
-//                     });
-//                 }
-
-//                 Request::HeightVarianceWithin { shape, sender } => {
-//                     let mut cylinder_buf = vec![];
-//                     match shape {
-//                         Shape::Cylinder {
-//                             radius,
-//                             height,
-//                             isometry,
-//                         } => {
-//                             let inv_matrix = isometry
-//                                 .rotation
-//                                 .to_rotation_matrix()
-//                                 .inverse()
-//                                 .into_inner();
-//                             cylinder_buf.push(Cylinder {
-//                                 radius,
-//                                 height,
-//                                 origin: [
-//                                     isometry.translation.x,
-//                                     isometry.translation.y,
-//                                     isometry.translation.z,
-//                                     0.0,
-//                                 ],
-//                                 inv_matrix: inv_matrix.data.0.map(|v| [v[0], v[1], v[2], 0.0]),
-//                             });
-//                         }
-//                     }
-//                     let rays = height_within_compute_rays.take();
-//                     let depth = height_within_compute_depth.take();
-//                     let transform = Box::leak(Box::new(transform));
-//                     while height_only_pending.len() >= self.max_concurrent {
-//                         let _ = height_only_pending.next().await;
-//                     }
-//                     height_variance_pending.push(async {
-//                         let rays = rays;
-//                         let depth = depth;
-//                         let cylinder_buf = cylinder_buf;
-//                         let heights = height_within_compute
-//                             .call(
-//                                 rays.as_deref(),
-//                                 depth.as_deref(),
-//                                 &cylinder_buf,
-//                                 &(cylinder_buf.len() as u32),
-//                                 transform,
-//                             )
-//                             .await;
-//                         unsafe {
-//                             let _ = Box::from_raw(transform);
-//                         }
-//                         let _ = sender.send(
-//                             heights
-//                                 .into_iter()
-//                                 .copied()
-//                                 .filter(|n| *n != f32::MAX)
-//                                 .map(|n| if n == f32::MIN { None } else { Some(n) })
-//                                 .collect(),
-//                         );
-//                     });
-//                 }
-//             }
-//         }
-//     }
-// }
+    fn into_depth_data(self) -> Self::Data {
+        self
+    }
+}

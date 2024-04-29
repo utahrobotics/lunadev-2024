@@ -1,7 +1,8 @@
 use std::sync::RwLock;
 
 use buffers::{
-    BufferDestination, BufferSized, BufferSource, BufferType, HostReadableWritable, ShaderWritable, UniformOrStorage, ValidBufferType
+    BufferDestination, BufferSized, BufferSource, BufferType, HostReadableWritable, ShaderWritable,
+    UniformOrStorage, ValidBufferType,
 };
 use crossbeam::queue::SegQueue;
 use futures::FutureExt;
@@ -220,7 +221,8 @@ where
     }
 }
 
-impl<T1, H1, S1, O1, T2, H2, S2, O2> Compute<(BufferType<T1, H1, S1, O1>, BufferType<T2, H2, S2, O2>)>
+impl<T1, H1, S1, O1, T2, H2, S2, O2>
+    Compute<(BufferType<T1, H1, S1, O1>, BufferType<T2, H2, S2, O2>)>
 where
     BufferType<T1, H1, S1, O1>: ValidBufferType,
     T1: ?Sized + BufferSized + 'static,
@@ -228,7 +230,7 @@ where
     S1: ShaderWritable,
     O1: UniformOrStorage,
     BufferType<T2, H2, S2, O2>: ValidBufferType,
-    T2: BufferSized + 'static,
+    T2: ?Sized + BufferSized + 'static,
     H2: HostReadableWritable,
     S2: ShaderWritable,
     O2: UniformOrStorage,
@@ -286,12 +288,12 @@ where
     S1: ShaderWritable,
     O1: UniformOrStorage,
     BufferType<T2, H2, S2, O2>: ValidBufferType,
-    T2: BufferSized + 'static,
+    T2: ?Sized + BufferSized + 'static,
     H2: HostReadableWritable,
     S2: ShaderWritable,
     O2: UniformOrStorage,
     BufferType<T3, H3, S3, O3>: ValidBufferType,
-    T3: BufferSized + 'static,
+    T3: ?Sized + BufferSized + 'static,
     H3: HostReadableWritable,
     S3: ShaderWritable,
     O3: UniformOrStorage,
@@ -370,17 +372,17 @@ where
     S1: ShaderWritable,
     O1: UniformOrStorage,
     BufferType<T2, H2, S2, O2>: ValidBufferType,
-    T2: BufferSized + 'static,
+    T2: ?Sized + BufferSized + 'static,
     H2: HostReadableWritable,
     S2: ShaderWritable,
     O2: UniformOrStorage,
     BufferType<T3, H3, S3, O3>: ValidBufferType,
-    T3: BufferSized + 'static,
+    T3: ?Sized + BufferSized + 'static,
     H3: HostReadableWritable,
     S3: ShaderWritable,
     O3: UniformOrStorage,
     BufferType<T4, H4, S4, O4>: ValidBufferType,
-    T4: BufferSized + 'static,
+    T4: ?Sized + BufferSized + 'static,
     H4: HostReadableWritable,
     S4: ShaderWritable,
     O4: UniformOrStorage,
@@ -542,7 +544,8 @@ where
     }
 }
 
-impl<'a, T1, H1, S1, O1, T2, H2, S2, O2> ComputePass<'a, (BufferType<T1, H1, S1, O1>, BufferType<T2, H2, S2, O2>)>
+impl<'a, T1, H1, S1, O1, T2, H2, S2, O2>
+    ComputePass<'a, (BufferType<T1, H1, S1, O1>, BufferType<T2, H2, S2, O2>)>
 where
     BufferType<T1, H1, S1, O1>: ValidBufferType,
     BufferType<T2, H2, S2, O2>: ValidBufferType,

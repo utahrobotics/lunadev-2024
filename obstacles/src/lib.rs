@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
-use nalgebra::{Isometry3, Translation3};
+use nalgebra::Isometry3;
 use unros::{float::Float, tokio::sync::RwLock};
 use utils::RecycledVec;
 
@@ -10,35 +10,30 @@ pub mod sources;
 pub mod utils;
 
 #[non_exhaustive]
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Shape<N: Float> {
-    Cylinder {
-        radius: N,
-        height: N,
-        isometry: Isometry3<N>,
-    },
-    // Composite(Vec<Self>),
+    Cylinder { radius: N, height: N },
 }
 
-impl<N: Float> Shape<N> {
-    pub fn set_origin(&mut self, origin: impl Into<Translation3<N>>) {
-        match self {
-            Self::Cylinder { isometry, .. } => {
-                isometry.translation = origin.into();
-            }
-        }
-    }
+// impl<N: Float> Shape<N> {
+//     pub fn set_origin(&mut self, origin: impl Into<Translation3<N>>) {
+//         match self {
+//             Self::Cylinder { isometry, .. } => {
+//                 isometry.translation = origin.into();
+//             }
+//         }
+//     }
+// }
+
+struct ObstacleHubInner<N: Float> {
+    sources: RwLock<Vec<Box<dyn HeightMap<N>>>>,
 }
 
-struct ObstacleHubInner<N: Float, I> {
-    sources: RwLock<Vec<Box<dyn HeightMap<N, I>>>>,
+pub struct ObstacleHub<N: Float> {
+    inner: Arc<ObstacleHubInner<N>>,
 }
 
-pub struct ObstacleHub<N: Float, I> {
-    inner: Arc<ObstacleHubInner<N, I>>,
-}
-
-impl<N: Float, I> Default for ObstacleHub<N, I> {
+impl<N: Float> Default for ObstacleHub<N> {
     fn default() -> Self {
         Self {
             inner: Arc::new(ObstacleHubInner {
@@ -48,7 +43,7 @@ impl<N: Float, I> Default for ObstacleHub<N, I> {
     }
 }
 
-impl<N: Float, I> Clone for ObstacleHub<N, I> {
+impl<N: Float> Clone for ObstacleHub<N> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -70,12 +65,12 @@ impl<T> std::fmt::Display for AddSourceMutError<T> {
     }
 }
 
-impl<N: Float, I> ObstacleHub<N, I> {
-    pub async fn add_source(&self, source: impl HeightMap<N, I> + 'static) {
+impl<N: Float> ObstacleHub<N> {
+    pub async fn add_source(&self, source: impl HeightMap<N> + 'static) {
         self.inner.sources.write().await.push(Box::new(source));
     }
 
-    pub fn add_source_mut<T: HeightMap<N, I> + 'static>(
+    pub fn add_source_mut<T: HeightMap<N> + 'static>(
         &mut self,
         source: T,
     ) -> Result<(), AddSourceMutError<T>> {
@@ -89,18 +84,23 @@ impl<N: Float, I> ObstacleHub<N, I> {
     }
 }
 
-impl<N: Float, I> ObstacleHub<N, I> {
+impl<N: Float> ObstacleHub<N> {
     pub async fn query_height<T, F: Future<Output = Option<T>>>(
         &self,
-        shapes: I,
-        mut filter: impl FnMut(RecycledVec<N>) -> F,
-    ) -> Option<T> {
+        queries: impl IntoIterator<Item = HeightQuery<N>>,
+        mut filter: impl FnMut(RecycledVec<RecycledVec<N>>) -> F,
+    ) -> Option<T>
+    where
+        RecycledVec<HeightQuery<N>>: Default,
+    {
+        let shapes: RecycledVec<HeightQuery<N>> = queries.into_iter().collect();
+        let shapes = Arc::new(shapes);
         let mut indices_to_remove = Vec::new();
         let result = 'check: {
             let sources = self.inner.sources.read().await;
             let mut futures = FuturesUnordered::new();
             for (i, source) in sources.iter().enumerate() {
-                let fut = source.query_height(&shapes);
+                let fut = source.query_height(shapes.clone());
                 futures.push(async move { (i, fut.await) });
             }
             while let Some((i, result)) = futures.next().await {
@@ -127,7 +127,16 @@ impl<N: Float, I> ObstacleHub<N, I> {
     }
 }
 
+pub struct HeightQuery<N: Float> {
+    pub max_points: usize,
+    pub shape: Shape<N>,
+    pub isometry: Isometry3<N>,
+}
+
 #[async_trait]
-pub trait HeightMap<N: Float, I>: Send + Sync {
-    async fn query_height(&self, shapes: &I) -> Option<RecycledVec<N>>;
+pub trait HeightMap<N: Float>: Send + Sync {
+    async fn query_height<'a>(
+        &self,
+        queries: Arc<RecycledVec<HeightQuery<N>>>,
+    ) -> Option<RecycledVec<RecycledVec<N>>>;
 }

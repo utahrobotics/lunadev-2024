@@ -23,6 +23,7 @@ pub trait Float:
     + SupersetOf<i16>
     + SupersetOf<i8>
     + Sum
+    + 'static
 {
     const MAX: Self;
     const MIN: Self;
