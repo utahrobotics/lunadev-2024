@@ -3871,6 +3871,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sealed"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4a8caec23b7800fb97971a1c6ae365b6239aaeddfb934d6265f8505e795699d"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2 1.0.81",
+ "quote 1.0.36",
+ "syn 2.0.60",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4500,6 +4512,7 @@ dependencies = [
  "ordered-float",
  "rand",
  "rayon",
+ "sealed",
  "serde",
  "simba",
  "sysinfo",

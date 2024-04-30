@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use async_trait::async_trait;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
@@ -88,7 +88,7 @@ impl<N: Float> ObstacleHub<N> {
     pub async fn query_height<T, F: Future<Output = Option<T>>>(
         &self,
         queries: impl IntoIterator<Item = HeightQuery<N>>,
-        mut filter: impl FnMut(RecycledVec<RecycledVec<N>>) -> F,
+        mut filter: impl FnMut(RecycledVec<RecycledVec<N>>, &[HeightQuery<N>]) -> F,
     ) -> Option<T>
     where
         RecycledVec<HeightQuery<N>>: Default,
@@ -108,7 +108,7 @@ impl<N: Float> ObstacleHub<N> {
                     indices_to_remove.push(i);
                     continue;
                 };
-                if let Some(result) = filter(value).await {
+                if let Some(result) = filter(value, shapes.deref().deref()).await {
                     break 'check Some(result);
                 }
             }

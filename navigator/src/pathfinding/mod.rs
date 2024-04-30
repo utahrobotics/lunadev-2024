@@ -8,7 +8,7 @@ use std::{
 };
 
 use nalgebra::{convert as nconvert, Isometry3, Point3, UnitQuaternion, Vector3};
-use obstacles::{ObstacleHub, Shape};
+use obstacles::{utils::RecycledVec, HeightQuery, ObstacleHub, Shape};
 use rig::RobotBaseRef;
 use unros::{
     float::Float,
@@ -78,10 +78,20 @@ pub trait PathfindingEngine<N: Float>: Send + 'static {
         max_height_diff: N,
         context: &RuntimeContext,
     ) -> impl Future<Output = Option<Vec<Point3<N>>>> + Send;
+
+    fn traverse_to(
+        &mut self,
+        from: Vector3<N>,
+        to: Vector3<N>,
+        shape: Shape<N>,
+        max_height_diff: N,
+        obstacle_hub: &ObstacleHub<N>,
+        resolution: N,
+    ) -> impl Future<Output = bool> + Send;
 }
 
 #[derive(ShouldNotDrop)]
-pub struct Pathfinder<N: Float = f32, E: PathfindingEngine<N> = DirectPathfinder> {
+pub struct Pathfinder<N: Float = f32, E: PathfindingEngine<N> = DirectPathfinder<N>> {
     engine: E,
     obstacle_hub: ObstacleHub<N>,
     dont_drop: DontDrop<Self>,
@@ -130,7 +140,7 @@ impl<N: Float, E: PathfindingEngine<N>> Pathfinder<N, E> {
     }
 }
 
-impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
+impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E>  where RecycledVec<HeightQuery<N>>: Default {
     type Result = ();
 
     async fn run(mut self, context: RuntimeContext) -> Self::Result {
@@ -201,7 +211,7 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
                                 break 'repathfind;
                             }
 
-                            if !traverse_to(
+                            if !self.engine.traverse_to(
                                 from.coords,
                                 to.coords,
                                 self.shape.clone(),
@@ -223,39 +233,3 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E> {
     }
 }
 
-#[inline]
-async fn traverse_to<N: Float>(
-    from: Vector3<N>,
-    to: Vector3<N>,
-    mut shape: Shape<N>,
-    max_height_diff: N,
-    obstacle_hub: &ObstacleHub<N>,
-    resolution: N,
-) -> bool {
-    let mut travel = to - from;
-    let distance = travel.magnitude();
-    travel.unscale_mut(distance);
-
-    let count: usize = (distance / resolution).floor().to_subset_unchecked();
-
-    for i in 1..count {
-        let intermediate: Vector3<N> = from + travel * nalgebra::convert::<_, N>(i);
-        shape.set_origin(intermediate);
-
-        if obstacle_hub
-            .get_height_only_within(&shape, |height| {
-                if height.height.abs() > max_height_diff {
-                    Some(())
-                } else {
-                    None
-                }
-            })
-            .await
-            .is_some()
-        {
-            return false;
-        }
-    }
-
-    true
-}

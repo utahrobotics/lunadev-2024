@@ -2,8 +2,10 @@ use std::iter::Sum;
 
 use nalgebra::RealField;
 use ordered_float::NotNan;
+use sealed::sealed;
 use simba::scalar::{SubsetOf, SupersetOf};
 
+#[sealed]
 pub trait Float:
     RealField
     + Copy
@@ -41,6 +43,7 @@ pub trait Float:
     fn to_not_nan(self) -> Option<NotNan<Self>>;
 }
 
+#[sealed]
 impl Float for f32 {
     const MAX: Self = f32::MAX;
     const MIN: Self = f32::MIN;
@@ -76,6 +79,7 @@ impl Float for f32 {
     }
 }
 
+#[sealed]
 impl Float for f64 {
     const MAX: Self = f64::MAX;
     const MIN: Self = f64::MIN;

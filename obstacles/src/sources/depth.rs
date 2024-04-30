@@ -202,25 +202,14 @@ where
                 min_depth: self.min_depth,
                 matrix: matrix.map(|row| [row[0], row[1], row[2], 0.0]),
             };
-            // let mut guard = self.points_buffer.lock().await;
-            // self.project_depth
-            //     .new_pass(depth.deref(), (), (), &intrinsics)
-            //     .workgroup_size(self.point_count, 1, 1)
-            //     .call((), (), guard.deref_mut(), ())
-            //     .await;
-            let mut points: Box<[_]> = (0..self.point_count).map(|_| [0.0f32; 4]).collect();
+            let mut guard = self.points_buffer.lock().await;
             self.project_depth
                 .new_pass(depth.deref(), (), (), &intrinsics)
                 .workgroup_size(self.point_count, 1, 1)
-                .call((), (), points.deref_mut(), ())
+                .call((), (), guard.deref_mut(), ())
                 .await;
-            // println!("{} {:?}", depth[0], points[0]);
-            self.height_map_compute.new_pass(
-                (),
-                points.deref(),
-                shapes.deref(),
-                indices_buf.deref(),
-            )
+            self.height_map_compute
+                .new_pass((), guard.deref(), shapes.deref(), indices_buf.deref())
         } else {
             self.height_map_compute
                 .new_pass((), (), shapes.deref(), indices_buf.deref())
