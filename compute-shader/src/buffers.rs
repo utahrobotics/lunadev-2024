@@ -352,6 +352,9 @@ impl<T: BufferSized + bytemuck::Pod> BufferSource<[T]> for &[T] {
         stager: &mut StagingBelt,
         device: &wgpu::Device,
     ) {
+        if self.is_empty() {
+            return;
+        }
         let bytes = cast_slice(self);
         stager
             .write_buffer(

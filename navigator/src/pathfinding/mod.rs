@@ -140,7 +140,10 @@ impl<N: Float, E: PathfindingEngine<N>> Pathfinder<N, E> {
     }
 }
 
-impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E>  where RecycledVec<HeightQuery<N>>: Default {
+impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E>
+where
+    RecycledVec<HeightQuery<N>>: Default,
+{
     type Result = ();
 
     async fn run(mut self, context: RuntimeContext) -> Self::Result {
@@ -211,15 +214,17 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E>  where Re
                                 break 'repathfind;
                             }
 
-                            if !self.engine.traverse_to(
-                                from.coords,
-                                to.coords,
-                                self.shape.clone(),
-                                self.max_height_diff,
-                                &self.obstacle_hub,
-                                self.resolution,
-                            )
-                            .await
+                            if !self
+                                .engine
+                                .traverse_to(
+                                    from.coords,
+                                    to.coords,
+                                    self.shape.clone(),
+                                    self.max_height_diff,
+                                    &self.obstacle_hub,
+                                    self.resolution,
+                                )
+                                .await
                             {
                                 break 'repathfind;
                             }
@@ -232,4 +237,3 @@ impl<N: Float, E: PathfindingEngine<N>> AsyncNode for Pathfinder<N, E>  where Re
         }
     }
 }
-
