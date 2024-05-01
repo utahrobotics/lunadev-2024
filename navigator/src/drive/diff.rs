@@ -25,6 +25,7 @@ pub struct DifferentialDriver<N: Float + FloatCore, F: FnMut(N) -> N + Send + 's
     pub full_turn_angle: N,
     pub turn_fn: F,
     dont_drop: DontDrop<Self>,
+    pub skip_distance: N,
 }
 
 impl<N: Float + FloatCore> DifferentialDriver<N, fn(N) -> N> {
@@ -35,6 +36,7 @@ impl<N: Float + FloatCore> DifferentialDriver<N, fn(N) -> N> {
             robot_base,
             refresh_rate: Duration::from_millis(20),
             drive_mode: WatchSubscriber::new(DriveMode::Both),
+            skip_distance: N::from(0.1).unwrap(),
             // 30 degrees
             full_turn_angle: N::frac_pi_6(),
             turn_fn: |frac| nalgebra::convert::<_, N>(-2.0) * frac + N::one(),
@@ -125,8 +127,13 @@ where
                         .unwrap();
 
                     let next = path[i];
-                    let next = Vector2::new(next.x, next.z);
+                    let mut next = Vector2::new(next.x, next.z);
                     let position = Vector2::new(isometry.translation.x, isometry.translation.z);
+
+                    if i < path.len() - 1 && (next - position).magnitude() < self.skip_distance {
+                        let tmp = path[i + 1];
+                        next = Vector2::new(tmp.x, tmp.z);
+                    }
 
                     let mut travel = next - position;
                     let distance = travel.magnitude();

@@ -112,18 +112,28 @@ impl<T: 'static, H, S, O> BufferType<[T], H, S, O> {
     }
 }
 
+pub trait CreateBuffer: ValidBufferType {
+    const HOST_CAN_READ: bool;
+    const HOST_CAN_WRITE: bool;
+    const SHADER_CAN_WRITE: bool;
+
+    fn size(&self) -> u64;
+    fn into_buffer(&self, index: usize, device: &wgpu::Device) -> wgpu::Buffer;
+    fn into_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry;
+}
+
 impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable, O: UniformOrStorage>
-    BufferType<T, H, S, O>
+CreateBuffer for BufferType<T, H, S, O> where Self: ValidBufferType
 {
     const HOST_CAN_READ: bool = H::CAN_READ;
     const HOST_CAN_WRITE: bool = H::CAN_WRITE;
     const SHADER_CAN_WRITE: bool = S::CAN_WRITE;
 
-    pub fn size(&self) -> u64 {
+    fn size(&self) -> u64 {
         self.size.size()
     }
 
-    pub(crate) fn into_buffer(&self, index: usize, device: &wgpu::Device) -> wgpu::Buffer {
+    fn into_buffer(&self, index: usize, device: &wgpu::Device) -> wgpu::Buffer {
         let additional_usage = if Self::HOST_CAN_READ && Self::HOST_CAN_WRITE {
             wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST
         } else if Self::HOST_CAN_WRITE {
@@ -149,7 +159,7 @@ impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable, O: Uni
         }
     }
 
-    pub(crate) fn into_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
+    fn into_layout(&self, binding: u32) -> wgpu::BindGroupLayoutEntry {
         if Self::SHADER_CAN_WRITE {
             wgpu::BindGroupLayoutEntry {
                 binding,

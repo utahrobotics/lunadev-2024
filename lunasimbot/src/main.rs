@@ -63,11 +63,11 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         DirectPathfinder {
             max_frac: 0.15,
             pathfind_shape: Shape::Cylinder {
-                radius: 1.5,
+                radius: 1.0,
                 height: 4.0,
             },
             unsafe_shape: Shape::Cylinder {
-                radius: 1.0,
+                radius: 0.8,
                 height: 4.0,
             },
             max_height_diff: 0.1,
@@ -79,9 +79,11 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     pathfinder.completion_distance = 0.1;
     pathfinder.correction_distance = 0.8;
 
+    let robot_base_ref = robot_base.get_ref();
     let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(200, 200, &context)?;
     tokio::spawn(async move {
         loop {
+            let isometry = robot_base_ref.get_isometry();
             // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let mut heights = vec![0.0; 200 * 200];
             let origin = Vector3::new(0.0, 0.0, -1.0);
@@ -90,7 +92,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 .flat_map(|y| {
                     (-100..100).into_iter().map(move |x| HeightQuery {
                         isometry: Isometry3::from_parts(
-                            (origin + Vector3::new(x as f32 * 0.02, 0.0, y as f32 * 0.02)).into(),
+                            (isometry * Point3::from(origin + Vector3::new(x as f32 * 0.02, 0.0, y as f32 * 0.02))).into(),
                             UnitQuaternion::default(),
                         ),
                         max_points: 32,

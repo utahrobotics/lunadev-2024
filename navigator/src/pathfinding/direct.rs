@@ -13,6 +13,7 @@ struct DirectPathfinderSafefinder<'a, N: Float, F> {
     max_height_diff: N,
     max_frac: N,
     filter: &'a F,
+    global_isometry: Isometry3<N>,
 }
 
 impl<'a, N, F> AStarModule<Node<N>, usize> for DirectPathfinderSafefinder<'a, N, F>
@@ -33,11 +34,13 @@ where
             .into_iter()
             .filter(|p| (self.filter)((*p).into()))
             .map(|next| {
-                let next = Vector3::new(
+                let mut next = Vector3::new(
                     nconvert::<_, N>(next.x) * self.resolution,
-                    current.height,
+                    N::zero(),
                     nconvert::<_, N>(next.y) * self.resolution,
                 );
+                next = self.global_isometry * next;
+                next.y = current.height;
                 HeightQuery {
                     max_points: 32,
                     shape: self.shape,
@@ -80,11 +83,13 @@ where
     }
 
     async fn success(&mut self, current: &Node<N>) -> bool {
-        let next = Vector3::new(
+        let mut next = Vector3::new(
             nconvert::<_, N>(current.position.x) * self.resolution,
-            current.height,
+            N::zero(),
             nconvert::<_, N>(current.position.y) * self.resolution,
         );
+        next = self.global_isometry * next;
+        next.y = current.height;
         self.obstacle_hub
             .safe_by_height(
                 std::iter::once(HeightQuery {
@@ -108,6 +113,7 @@ struct DirectPathfinderModule<'a, N: Float, F> {
     end_node: Node<N>,
     max_frac: N,
     filter: &'a F,
+    global_isometry: Isometry3<N>,
 }
 
 impl<'a, N, F> AStarModule<Node<N>, usize> for DirectPathfinderModule<'a, N, F>
@@ -139,15 +145,17 @@ where
             .filter(|p| (self.filter)((*p).into()));
 
         let queries = successors.clone().map(|next| {
-            let next = Vector3::new(
+            let mut next = Point3::new(
                 nconvert::<_, N>(next.x) * self.resolution,
-                current.height,
+                N::zero(),
                 nconvert::<_, N>(next.y) * self.resolution,
             );
+            next = self.global_isometry * next;
+            next.y = current.height;
             HeightQuery {
                 max_points: 32,
                 shape: self.shape,
-                isometry: Isometry3::from_parts(next.into(), UnitQuaternion::default()),
+                isometry: Isometry3::from_parts(next.into(), self.global_isometry.rotation),
             }
         });
 
@@ -216,7 +224,6 @@ where
 {
     async fn traverse_to(
         &mut self,
-        isometry: Isometry3<N>,
         from: Point3<N>,
         to: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
@@ -225,8 +232,8 @@ where
     where
         RecycledVec<HeightQuery<N>>: Default,
     {
-        let from = isometry.inverse_transform_point(&from).coords;
-        let to = isometry.inverse_transform_point(&to).coords;
+        let from = from.coords;
+        let to = to.coords;
         let mut travel = to - from;
         let distance = travel.magnitude();
         travel.unscale_mut(distance);
@@ -259,13 +266,13 @@ where
     async fn pathfind(
         &mut self,
         from: Isometry3<N>,
-        mut end: Point3<N>,
+        end: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
         context: &RuntimeContext,
     ) -> Option<Vec<Point3<N>>> {
         setup_logging!(context);
-        end = from.inverse_transform_point(&end);
+        let end_local = from.inverse_transform_point(&end);
         let mut pre_path = vec![];
         let mut start_node = Node {
             position: Vector2::<isize>::new(0, 0),
@@ -281,6 +288,7 @@ where
                 max_height_diff: self.max_height_diff,
                 max_frac: self.max_frac,
                 filter: &self.filter,
+                global_isometry: from,
             },
             |_| 0,
         )
@@ -291,10 +299,10 @@ where
         }
         let end_node = Node {
             position: Vector2::new(
-                (end.x / resolution).round().to_isize(),
-                (end.z / resolution).round().to_isize(),
+                (end_local.x / resolution).round().to_isize(),
+                (end_local.z / resolution).round().to_isize(),
             ),
-            height: end.y,
+            height: end_local.y,
         };
 
         let mut successors = DirectPathfinderModule {
@@ -305,6 +313,7 @@ where
             end_node,
             max_frac: self.max_frac,
             filter: &self.filter,
+            global_isometry: from,
         };
 
         let result = astar(&start_node, &mut successors, |current| {
@@ -325,11 +334,13 @@ where
 
         let mut new_path: Vec<Point3<N>> = Vec::with_capacity(path.len());
         let mut path = path.into_iter().map(|p| {
-            Point3::new(
+            let mut new_p = from * Point3::new(
                 nconvert::<_, N>(p.position.x) * resolution,
-                p.height,
+                N::zero(),
                 nconvert::<_, N>(p.position.y) * resolution,
-            )
+            );
+            new_p.y = p.height;
+            new_p
         });
 
         let mut start = path.next().unwrap();
@@ -338,7 +349,7 @@ where
 
         for next in path {
             if self
-                .traverse_to(Isometry3::default(), start, next, &obstacle_hub, resolution)
+                .traverse_to(start, next, &obstacle_hub, resolution)
                 .await
             {
                 last = next;
@@ -350,9 +361,6 @@ where
         }
 
         new_path.push(end);
-        new_path
-            .iter_mut()
-            .for_each(|p| *p = from.transform_point(p));
 
         Some(new_path)
     }
@@ -367,10 +375,7 @@ where
                 std::iter::once(HeightQuery {
                     max_points: 32,
                     shape: self.unsafe_shape,
-                    isometry: Isometry3::from_parts(
-                        isometry.translation,
-                        UnitQuaternion::default(),
-                    ),
+                    isometry,
                 }),
                 isometry.translation.y,
                 self.max_height_diff,

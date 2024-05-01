@@ -11,13 +11,15 @@ struct Shape {
 @group(0) @binding(1) var<storage, read> points: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> shapes: array<Shape>;
 @group(0) @binding(3) var<storage, read_write> height_indices: array<atomic<u32>>;
+@group(0) @binding(4) var<storage, read> indices: array<u32>;
 
 @compute
 @workgroup_size(1, 1, 1)
 fn main(
     @builtin(global_invocation_id) global_invocation_id : vec3<u32>
 ) {
-    let point_data = points[global_invocation_id.x];
+    let point_index = indices[global_invocation_id.x];
+    let point_data = points[point_index];
     if point_data.w == 0.0 {
         return;
     }
