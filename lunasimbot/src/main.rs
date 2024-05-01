@@ -92,7 +92,11 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 .flat_map(|y| {
                     (-100..100).into_iter().map(move |x| HeightQuery {
                         isometry: Isometry3::from_parts(
-                            (isometry * Point3::from(origin + Vector3::new(x as f32 * 0.02, 0.0, y as f32 * 0.02))).into(),
+                            (isometry
+                                * Point3::from(
+                                    origin + Vector3::new(x as f32 * 0.02, 0.0, y as f32 * 0.02),
+                                ))
+                            .into(),
                             UnitQuaternion::default(),
                         ),
                         max_points: 32,
@@ -147,7 +151,8 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         .get_path_pub()
         .accept_subscription(path_sub.create_subscription());
 
-    let driver = DifferentialDriver::new(robot_base.get_ref());
+    let mut driver = DifferentialDriver::new(robot_base.get_ref());
+    driver.skip_distance = 0.5;
     let mut drive_mode_pub = driver.create_drive_mode_sub().into_mono_pub();
     drive_mode_pub.set(DriveMode::ForwardOnly);
     pathfinder

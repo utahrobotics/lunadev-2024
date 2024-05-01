@@ -14,7 +14,7 @@ use compute_shader::{
 };
 use crossbeam::queue::ArrayQueue;
 use nalgebra::UnitVector3;
-use rand::{thread_rng, prelude::SliceRandom};
+use rand::{prelude::SliceRandom, thread_rng};
 use rig::RobotElementRef;
 use unros::{
     anyhow::{self, Context},
@@ -202,10 +202,8 @@ where
         let mut point_indices_buf = self
             .point_indices_queue
             .pop()
-            .unwrap_or_else(||
-                (0..self.point_count).into_iter().collect()
-            );
-        
+            .unwrap_or_else(|| (0..self.point_count).into_iter().collect());
+
         point_indices_buf.shuffle(&mut thread_rng());
 
         let mut pass = if let Some(depth) = self.depth_sub.try_recv() {
@@ -227,15 +225,26 @@ where
                 .workgroup_size(self.point_count, 1, 1)
                 .call((), (), guard.deref_mut(), ())
                 .await;
-            self.height_map_compute
-                .new_pass((), guard.deref(), shapes.deref(), shape_indices_buf.deref(), point_indices_buf.deref())
+            self.height_map_compute.new_pass(
+                (),
+                guard.deref(),
+                shapes.deref(),
+                shape_indices_buf.deref(),
+                point_indices_buf.deref(),
+            )
         } else {
-            self.height_map_compute
-                .new_pass((), (), shapes.deref(), shape_indices_buf.deref(), point_indices_buf.deref())
+            self.height_map_compute.new_pass(
+                (),
+                (),
+                shapes.deref(),
+                shape_indices_buf.deref(),
+                point_indices_buf.deref(),
+            )
         };
         pass.workgroup_size = (self.point_count, shapes.len() as u32, 1);
 
         let indices_mut = shape_indices_buf.deref_mut().split_at_mut(shapes.len()).0;
+        let _ = self.point_indices_queue.push(point_indices_buf);
 
         pass.call(heights_buf.deref_mut(), (), (), indices_mut, ())
             .await;
@@ -258,7 +267,6 @@ where
         let _ = self.heights_queue.push(heights_buf);
         let _ = self.shapes_queue.push(shapes);
         let _ = self.shape_indices_queue.push(shape_indices_buf);
-        let _ = self.point_indices_queue.push(point_indices_buf);
 
         Some(result)
     }

@@ -1,8 +1,6 @@
 use std::sync::RwLock;
 
-use buffers::{
-    BufferDestination, BufferSource, CreateBuffer, ValidBufferType
-};
+use buffers::{BufferDestination, BufferSource, CreateBuffer, ValidBufferType};
 use crossbeam::queue::SegQueue;
 use futures::FutureExt;
 use fxhash::FxHashMap;
@@ -177,11 +175,7 @@ impl<A> Compute<A> {
     }
 }
 
-
-impl<B1,>
-    Compute<(
-        B1,
-    )>
+impl<B1> Compute<(B1,)>
 where
     B1: CreateBuffer,
 {
@@ -194,34 +188,19 @@ where
         Ok(Self::new_inner(
             shader_module_decsriptor,
             device,
-            Box::new([
-                type1.into_buffer(0, device),
-            ]),
-            Box::new([
-                type1.into_layout(0),
-            ]),
-            [type1.size()]
-                .into_iter()
-                .max()
-                .unwrap(),
+            Box::new([type1.into_buffer(0, device)]),
+            Box::new([type1.into_layout(0)]),
+            [type1.size()].into_iter().max().unwrap(),
         ))
     }
 
-    pub fn new_pass(
-        &self,
-        arg1: impl BufferSource<B1::WriteType>,
-    ) -> ComputePass<(
-        B1,
-    )> {
+    pub fn new_pass(&self, arg1: impl BufferSource<B1::WriteType>) -> ComputePass<(B1,)> {
         self.new_pass_inner(|command_encoder, arg_buffers, stager, device| {
             arg1.into_buffer(command_encoder, &arg_buffers[0], stager, device);
         })
     }
 
-    pub async fn write_args(
-        &self,
-        arg1: impl BufferSource<B1::WriteType>,
-    ) {
+    pub async fn write_args(&self, arg1: impl BufferSource<B1::WriteType>) {
         self.write_args_inner(|command_encoder, arg_buffers, stager, device| {
             arg1.into_buffer(command_encoder, &arg_buffers[0], stager, device);
         })
@@ -229,10 +208,7 @@ where
     }
 }
 
-impl<B1, B2>
-    Compute<(
-        B1, B2,
-    )>
+impl<B1, B2> Compute<(B1, B2)>
 where
     B1: CreateBuffer,
     B2: CreateBuffer,
@@ -247,18 +223,9 @@ where
         Ok(Self::new_inner(
             shader_module_decsriptor,
             device,
-            Box::new([
-                type1.into_buffer(0, device),
-                type2.into_buffer(1, device),
-            ]),
-            Box::new([
-                type1.into_layout(0),
-                type2.into_layout(1),
-            ]),
-            [type1.size(), type2.size()]
-                .into_iter()
-                .max()
-                .unwrap(),
+            Box::new([type1.into_buffer(0, device), type2.into_buffer(1, device)]),
+            Box::new([type1.into_layout(0), type2.into_layout(1)]),
+            [type1.size(), type2.size()].into_iter().max().unwrap(),
         ))
     }
 
@@ -266,9 +233,7 @@ where
         &self,
         arg1: impl BufferSource<B1::WriteType>,
         arg2: impl BufferSource<B2::WriteType>,
-    ) -> ComputePass<(
-        B1, B2,
-    )> {
+    ) -> ComputePass<(B1, B2)> {
         self.new_pass_inner(|command_encoder, arg_buffers, stager, device| {
             arg1.into_buffer(command_encoder, &arg_buffers[0], stager, device);
             arg2.into_buffer(command_encoder, &arg_buffers[1], stager, device);
@@ -288,10 +253,7 @@ where
     }
 }
 
-impl<B1, B2, B3>
-    Compute<(
-        B1, B2, B3,
-    )>
+impl<B1, B2, B3> Compute<(B1, B2, B3)>
 where
     B1: CreateBuffer,
     B2: CreateBuffer,
@@ -330,9 +292,7 @@ where
         arg1: impl BufferSource<B1::WriteType>,
         arg2: impl BufferSource<B2::WriteType>,
         arg3: impl BufferSource<B3::WriteType>,
-    ) -> ComputePass<(
-        B1, B2, B3,
-    )> {
+    ) -> ComputePass<(B1, B2, B3)> {
         self.new_pass_inner(|command_encoder, arg_buffers, stager, device| {
             arg1.into_buffer(command_encoder, &arg_buffers[0], stager, device);
             arg2.into_buffer(command_encoder, &arg_buffers[1], stager, device);
@@ -354,10 +314,7 @@ where
         .await;
     }
 }
-impl<B1, B2, B3, B4>
-    Compute<(
-        B1, B2, B3, B4,
-    )>
+impl<B1, B2, B3, B4> Compute<(B1, B2, B3, B4)>
 where
     B1: CreateBuffer,
     B2: CreateBuffer,
@@ -401,9 +358,7 @@ where
         arg2: impl BufferSource<B2::WriteType>,
         arg3: impl BufferSource<B3::WriteType>,
         arg4: impl BufferSource<B4::WriteType>,
-    ) -> ComputePass<(
-        B1, B2, B3, B4,
-    )> {
+    ) -> ComputePass<(B1, B2, B3, B4)> {
         self.new_pass_inner(|command_encoder, arg_buffers, stager, device| {
             arg1.into_buffer(command_encoder, &arg_buffers[0], stager, device);
             arg2.into_buffer(command_encoder, &arg_buffers[1], stager, device);
@@ -428,10 +383,7 @@ where
         .await;
     }
 }
-impl<B1, B2, B3, B4, B5>
-    Compute<(
-        B1, B2, B3, B4, B5,
-    )>
+impl<B1, B2, B3, B4, B5> Compute<(B1, B2, B3, B4, B5)>
 where
     B1: CreateBuffer,
     B2: CreateBuffer,
@@ -466,10 +418,16 @@ where
                 type4.into_layout(3),
                 type5.into_layout(4),
             ]),
-            [type1.size(), type2.size(), type3.size(), type4.size(), type5.size()]
-                .into_iter()
-                .max()
-                .unwrap(),
+            [
+                type1.size(),
+                type2.size(),
+                type3.size(),
+                type4.size(),
+                type5.size(),
+            ]
+            .into_iter()
+            .max()
+            .unwrap(),
         ))
     }
 
@@ -480,9 +438,7 @@ where
         arg3: impl BufferSource<B3::WriteType>,
         arg4: impl BufferSource<B4::WriteType>,
         arg5: impl BufferSource<B5::WriteType>,
-    ) -> ComputePass<(
-        B1, B2, B3, B4, B5
-    )> {
+    ) -> ComputePass<(B1, B2, B3, B4, B5)> {
         self.new_pass_inner(|command_encoder, arg_buffers, stager, device| {
             arg1.into_buffer(command_encoder, &arg_buffers[0], stager, device);
             arg2.into_buffer(command_encoder, &arg_buffers[1], stager, device);
@@ -580,19 +536,14 @@ impl<'a, A> ComputePass<'a, A> {
     }
 }
 
-impl<'a, B1,> ComputePass<'a, (B1,)>
+impl<'a, B1> ComputePass<'a, (B1,)>
 where
     B1: ValidBufferType,
 {
-    pub async fn call(
-        self,
-        mut arg1: impl BufferDestination<B1::ReadType>,
-    ) {
+    pub async fn call(self, mut arg1: impl BufferDestination<B1::ReadType>) {
         let (device, buffers, (state1,)) = self
             .call_inner(|command_encoder, arg_buffers, buffers, device| {
-                (
-                    arg1.enqueue(command_encoder, &arg_buffers[0], &buffers, device),
-                )
+                (arg1.enqueue(command_encoder, &arg_buffers[0], &buffers, device),)
             })
             .await;
 
@@ -682,7 +633,6 @@ where
         arg4.from_buffer(state4, device, buffers).await;
     }
 }
-
 
 impl<'a, B1, B2, B3, B4, B5> ComputePass<'a, (B1, B2, B3, B4, B5)>
 where

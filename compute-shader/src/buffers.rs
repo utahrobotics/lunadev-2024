@@ -123,7 +123,9 @@ pub trait CreateBuffer: ValidBufferType {
 }
 
 impl<T: BufferSized + ?Sized, H: HostReadableWritable, S: ShaderWritable, O: UniformOrStorage>
-CreateBuffer for BufferType<T, H, S, O> where Self: ValidBufferType
+    CreateBuffer for BufferType<T, H, S, O>
+where
+    Self: ValidBufferType,
 {
     const HOST_CAN_READ: bool = H::CAN_READ;
     const HOST_CAN_WRITE: bool = H::CAN_WRITE;

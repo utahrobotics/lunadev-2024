@@ -240,7 +240,7 @@ pub struct WindowConfig<N: Float, FI, FV, FA, FAV> {
 impl<N: Float> Default for DefaultWindowConfig<N> {
     fn default() -> Self {
         Self {
-            bucket_duration: Duration::from_secs(1),
+            bucket_duration: Duration::from_secs(2),
             max_no_observation_duration: Duration::from_millis(100),
             isometry_func: |_| {},
             linear_velocity_func: |_| {},

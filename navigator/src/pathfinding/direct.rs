@@ -14,6 +14,7 @@ struct DirectPathfinderSafefinder<'a, N: Float, F> {
     max_frac: N,
     filter: &'a F,
     global_isometry: Isometry3<N>,
+    start_node: Node<N>,
 }
 
 impl<'a, N, F> AStarModule<Node<N>, usize> for DirectPathfinderSafefinder<'a, N, F>
@@ -83,6 +84,9 @@ where
     }
 
     async fn success(&mut self, current: &Node<N>) -> bool {
+        if current == &self.start_node {
+            return false;
+        }
         let mut next = Vector3::new(
             nconvert::<_, N>(current.position.x) * self.resolution,
             N::zero(),
@@ -272,31 +276,12 @@ where
         context: &RuntimeContext,
     ) -> Option<Vec<Point3<N>>> {
         setup_logging!(context);
-        let end_local = from.inverse_transform_point(&end);
         let mut pre_path = vec![];
         let mut start_node = Node {
             position: Vector2::<isize>::new(0, 0),
             height: N::zero(),
         };
-
-        if let Some((mut path, _)) = astar(
-            &start_node,
-            &mut DirectPathfinderSafefinder {
-                obstacle_hub,
-                resolution,
-                shape: self.pathfind_shape,
-                max_height_diff: self.max_height_diff,
-                max_frac: self.max_frac,
-                filter: &self.filter,
-                global_isometry: from,
-            },
-            |_| 0,
-        )
-        .await
-        {
-            start_node = path.pop().unwrap();
-            pre_path = path;
-        }
+        let end_local = from.inverse_transform_point(&end);
         let end_node = Node {
             position: Vector2::new(
                 (end_local.x / resolution).round().to_isize(),
@@ -305,25 +290,53 @@ where
             height: end_local.y,
         };
 
-        let mut successors = DirectPathfinderModule {
-            obstacle_hub,
-            resolution,
-            shape: self.pathfind_shape,
-            max_height_diff: self.max_height_diff,
-            end_node,
-            max_frac: self.max_frac,
-            filter: &self.filter,
-            global_isometry: from,
+        let mut post_path = loop {
+            let result = astar(
+                &start_node,
+                &mut DirectPathfinderModule {
+                    obstacle_hub,
+                    resolution,
+                    shape: self.pathfind_shape,
+                    max_height_diff: self.max_height_diff,
+                    end_node,
+                    max_frac: self.max_frac,
+                    filter: &self.filter,
+                    global_isometry: from,
+                },
+                |current| {
+                    let diff = current.position - end_node.position;
+                    let diff: Vector2<N> = nconvert(diff);
+                    diff.magnitude().to_usize()
+                },
+            )
+            .await;
+
+            let Some((post_path, _)) = result else {
+                let Some((mut path, _)) = astar(
+                    &start_node,
+                    &mut DirectPathfinderSafefinder {
+                        obstacle_hub,
+                        resolution,
+                        shape: self.pathfind_shape,
+                        max_height_diff: self.max_height_diff,
+                        max_frac: self.max_frac,
+                        filter: &self.filter,
+                        global_isometry: from,
+                        start_node,
+                    },
+                    |_| 0,
+                )
+                .await
+                else {
+                    return None;
+                };
+                start_node = path.pop().unwrap();
+                pre_path = path;
+                continue;
+            };
+
+            break post_path;
         };
-
-        let result = astar(&start_node, &mut successors, |current| {
-            let diff = current.position - end_node.position;
-            let diff: Vector2<N> = nconvert(diff);
-            diff.magnitude().to_usize()
-        })
-        .await;
-
-        let (mut post_path, _distance) = result?;
 
         if post_path.len() == 1 {
             post_path.push(end_node);
@@ -334,11 +347,12 @@ where
 
         let mut new_path: Vec<Point3<N>> = Vec::with_capacity(path.len());
         let mut path = path.into_iter().map(|p| {
-            let mut new_p = from * Point3::new(
-                nconvert::<_, N>(p.position.x) * resolution,
-                N::zero(),
-                nconvert::<_, N>(p.position.y) * resolution,
-            );
+            let mut new_p = from
+                * Point3::new(
+                    nconvert::<_, N>(p.position.x) * resolution,
+                    N::zero(),
+                    nconvert::<_, N>(p.position.y) * resolution,
+                );
             new_p.y = p.height;
             new_p
         });
