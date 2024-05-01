@@ -224,10 +224,72 @@ where
 #[derive(Clone, Copy)]
 pub struct DirectPathfinder<N: Float, F> {
     pub max_frac: N,
-    pub shape: Shape<N>,
+    pub pathfind_shape: Shape<N>,
+    pub unsafe_shape: Shape<N>,
     pub max_height_diff: N,
     pub filter: F,
-    pub traversal_scale: N,
+}
+
+impl<N, F> DirectPathfinder<N, F>
+where
+    RecycledVec<HeightQuery<N>>: Default,
+    N: Float,
+    F: Fn(Point2<isize>) -> bool + Send + Sync + 'static,
+{
+    async fn traverse_to(
+        &mut self,
+        isometry: Isometry3<N>,
+        from: Point3<N>,
+        to: Point3<N>,
+        obstacle_hub: &ObstacleHub<N>,
+        resolution: N,
+    ) -> bool
+    where
+        RecycledVec<HeightQuery<N>>: Default,
+    {
+        let from = isometry.inverse_transform_point(&from).coords;
+        let to = isometry.inverse_transform_point(&to).coords;
+        let mut travel = to - from;
+        let distance = travel.magnitude();
+        travel.unscale_mut(distance);
+
+        let count: usize = (distance / resolution).floor().to_subset_unchecked();
+
+        let queries = (1..count).into_iter().map(|i| {
+            let intermediate: Vector3<N> = from + travel * nconvert::<_, N>(i);
+            HeightQuery {
+                max_points: 32,
+                shape: self.pathfind_shape,
+                isometry: Isometry3::from_parts(intermediate.into(), UnitQuaternion::default()),
+            }
+        });
+
+        obstacle_hub
+            .query_height(queries, |heights, _| {
+                let heights = &heights[0];
+                if heights.is_empty() {
+                    return std::future::ready(None);
+                }
+                let mut height = N::zero();
+                let mut too_high_count = 0usize;
+
+                for &h in heights.iter() {
+                    height += h;
+                    if (h - from.y).abs() > self.max_height_diff {
+                        too_high_count += 1;
+                    }
+                }
+                let count: N = nconvert(heights.len());
+                height /= count;
+                if too_high_count >= (count * self.max_frac).round().to_usize() {
+                    std::future::ready(Some(()))
+                } else {
+                    std::future::ready(None)
+                }
+            })
+            .await
+            .is_none()
+    }
 }
 
 impl<N, F> PathfindingEngine<N> for DirectPathfinder<N, F>
@@ -257,7 +319,7 @@ where
             &mut DirectPathfinderSafefinder {
                 obstacle_hub,
                 resolution,
-                shape: self.shape,
+                shape: self.pathfind_shape,
                 max_height_diff: self.max_height_diff,
                 max_frac: self.max_frac,
                 filter: &self.filter,
@@ -280,7 +342,7 @@ where
         let mut successors = DirectPathfinderModule {
             obstacle_hub,
             resolution,
-            shape: self.shape,
+            shape: self.pathfind_shape,
             max_height_diff: self.max_height_diff,
             end_node,
             max_frac: self.max_frac,
@@ -337,61 +399,46 @@ where
         Some(new_path)
     }
 
-    async fn traverse_to(
+    async fn is_currently_unsafe(
         &mut self,
         isometry: Isometry3<N>,
-        from: Point3<N>,
-        to: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
-        resolution: N,
-    ) -> bool
-    where
-        RecycledVec<HeightQuery<N>>: Default,
-    {
-        let from = isometry.inverse_transform_point(&from).coords;
-        let to = isometry.inverse_transform_point(&to).coords;
-        let mut travel = to - from;
-        let distance = travel.magnitude();
-        travel.unscale_mut(distance);
-
-        let count: usize = (distance / resolution).floor().to_subset_unchecked();
-        let shape = self.shape.scale(self.traversal_scale);
-
-        let queries = (1..count).into_iter().map(|i| {
-            let intermediate: Vector3<N> = from + travel * nconvert::<_, N>(i);
-            HeightQuery {
-                max_points: 32,
-                shape,
-                isometry: Isometry3::from_parts(intermediate.into(), UnitQuaternion::default()),
-            }
-        });
-
+    ) -> bool {
         obstacle_hub
-            .query_height(queries, |heights, _| {
-                let heights = &heights[0];
-                if heights.is_empty() {
-                    return std::future::ready(None);
-                }
-                let mut height = N::zero();
-                let mut count = 0usize;
-                let mut too_high_count = 0usize;
-
-                for &h in heights.iter() {
-                    height += h;
-                    count += 1;
-                    if (h - from.y).abs() > self.max_height_diff {
-                        too_high_count += 1;
+            .query_height(
+                std::iter::once(HeightQuery {
+                    max_points: 32,
+                    shape: self.unsafe_shape,
+                    isometry: Isometry3::from_parts(
+                        isometry.translation,
+                        UnitQuaternion::default(),
+                    ),
+                }),
+                |heights, _| {
+                    let heights = &heights[0];
+                    if heights.is_empty() {
+                        return std::future::ready(None);
                     }
-                }
-                height /= nconvert(count);
-                if too_high_count >= (nconvert::<_, N>(count) * self.max_frac).round().to_usize() {
-                    std::future::ready(Some(()))
-                } else {
-                    std::future::ready(None)
-                }
-            })
+                    let mut height = N::zero();
+                    let mut too_high_count = 0usize;
+
+                    for &h in heights.iter() {
+                        height += h;
+                        if (h - isometry.translation.y).abs() > self.max_height_diff {
+                            too_high_count += 1;
+                        }
+                    }
+                    let count: N = nconvert(heights.len());
+                    height /= count;
+                    if too_high_count >= (count * self.max_frac).round().to_usize() {
+                        std::future::ready(Some(()))
+                    } else {
+                        std::future::ready(None)
+                    }
+                },
+            )
             .await
-            .is_none()
+            .is_some()
     }
 }
 

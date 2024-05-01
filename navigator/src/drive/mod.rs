@@ -3,6 +3,15 @@ use core::{fmt::Debug, ops::Deref};
 use ordered_float::{FloatCore, NotNan};
 use unros::float::Float;
 
+pub mod diff;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriveMode {
+    ForwardOnly,
+    Both,
+    ReverseOnly,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub struct Steering<N: Float + FloatCore = f32> {
     pub left: NotNan<N>,

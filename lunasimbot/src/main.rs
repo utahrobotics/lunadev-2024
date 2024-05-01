@@ -9,8 +9,8 @@ use localization::{
 };
 use nalgebra::{Isometry3, Point2, Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
 use navigator::{
+    drive::{diff::DifferentialDriver, DriveMode},
     pathfinding::{direct::DirectPathfinder, Pathfinder},
-    DifferentialDriver, DriveMode,
 };
 // use navigator::{
 //     pathfinding::{direct::DirectPathfinder, Pathfinder},
@@ -61,13 +61,16 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let mut pathfinder = Pathfinder::new_with_engine(
         0.1,
         DirectPathfinder {
-            max_frac: 0.2,
-            shape: Shape::Cylinder {
-                radius: 0.8333,
+            max_frac: 0.15,
+            pathfind_shape: Shape::Cylinder {
+                radius: 0.8,
                 height: 4.0,
             },
-            traversal_scale: 0.6,
-            max_height_diff: 0.05,
+            unsafe_shape: Shape::Cylinder {
+                radius: 0.6,
+                height: 4.0,
+            },
+            max_height_diff: 0.1,
             filter: |p: Point2<isize>| p.x.abs() <= 50 && p.y.abs() <= 50,
         },
         obstacle_hub.clone(),
