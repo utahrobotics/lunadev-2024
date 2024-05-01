@@ -15,15 +15,21 @@ pub enum Shape<N: Float> {
     Cylinder { radius: N, height: N },
 }
 
-// impl<N: Float> Shape<N> {
-//     pub fn set_origin(&mut self, origin: impl Into<Translation3<N>>) {
-//         match self {
-//             Self::Cylinder { isometry, .. } => {
-//                 isometry.translation = origin.into();
-//             }
-//         }
-//     }
-// }
+impl<N: Float> Shape<N> {
+    pub fn scale_mut(&mut self, scale: N) {
+        match self {
+            Self::Cylinder { radius, height } => {
+                *radius *= scale;
+                *height *= scale;
+            }
+        }
+    }
+
+    pub fn scale(mut self, scale: N) -> Self {
+        self.scale_mut(scale);
+        self
+    }
+}
 
 struct ObstacleHubInner<N: Float> {
     sources: RwLock<Vec<Box<dyn HeightMap<N>>>>,
@@ -94,6 +100,9 @@ impl<N: Float> ObstacleHub<N> {
         RecycledVec<HeightQuery<N>>: Default,
     {
         let shapes: RecycledVec<HeightQuery<N>> = queries.into_iter().collect();
+        if shapes.is_empty() {
+            return None;
+        }
         let shapes = Arc::new(shapes);
         let mut indices_to_remove = Vec::new();
         let result = 'check: {

@@ -31,4 +31,3 @@ nalgebra = { workspace = true }
 simba = { workspace = true }
 ordered-float = { workspace = true }
 minifb = { git = "https://github.com/emoon/rust_minifb.git", rev = "633e6cd4f8f55fd9cbedc461976dde0f408bea35" }
-sealed = { workspace = true }

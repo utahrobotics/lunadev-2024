@@ -1,6 +1,4 @@
-use std::ops::Deref;
-
-use nalgebra::{convert as nconvert, Isometry3, Point3, UnitQuaternion, Vector2, Vector3};
+use nalgebra::{convert as nconvert, Isometry3, Point2, Point3, UnitQuaternion, Vector2, Vector3};
 use obstacles::{utils::RecycledVec, HeightQuery, ObstacleHub, Shape};
 use unros::{float::Float, runtime::RuntimeContext, setup_logging};
 
@@ -8,17 +6,20 @@ use crate::pathfinding::alg::astar;
 
 use super::{alg::AStarModule, PathfindingEngine};
 
-struct DirectPathfinderSafefinder<'a, N: Float> {
+struct DirectPathfinderSafefinder<'a, N: Float, F> {
     obstacle_hub: &'a ObstacleHub<N>,
     resolution: N,
     shape: Shape<N>,
     max_height_diff: N,
     max_frac: N,
+    filter: &'a F,
 }
 
-impl<'a, N: Float> AStarModule<Node<N>, usize> for DirectPathfinderSafefinder<'a, N>
+impl<'a, N, F> AStarModule<Node<N>, usize> for DirectPathfinderSafefinder<'a, N, F>
 where
     RecycledVec<HeightQuery<N>>: Default,
+    N: Float,
+    F: Fn(Point2<isize>) -> bool,
 {
     async fn successors(&mut self, current: Node<N>, mut out: impl FnMut(Node<N>, usize)) {
         let successors = [
@@ -28,33 +29,47 @@ where
             current.position + Vector2::new(-1, 0),
         ];
 
-        let queries = successors.into_iter().map(|next| {
-            let next = Vector3::new(
-                nconvert::<_, N>(next.x) * self.resolution,
-                current.height,
-                nconvert::<_, N>(next.y) * self.resolution,
-            );
-            HeightQuery {
-                max_points: 32,
-                shape: self.shape,
-                isometry: Isometry3::from_parts(next.into(), UnitQuaternion::default()),
-            }
-        });
+        let queries = successors
+            .into_iter()
+            .filter(|p| (self.filter)((*p).into()))
+            .map(|next| {
+                let next = Vector3::new(
+                    nconvert::<_, N>(next.x) * self.resolution,
+                    current.height,
+                    nconvert::<_, N>(next.y) * self.resolution,
+                );
+                HeightQuery {
+                    max_points: 32,
+                    shape: self.shape,
+                    isometry: Isometry3::from_parts(next.into(), UnitQuaternion::default()),
+                }
+            });
 
         self.obstacle_hub
             .query_height(queries, |heights, _| {
-                heights.iter().zip(successors).for_each(|(heights, successor)| {
-                    if heights.is_empty() {
-                        return;
-                    }
-                    out(
-                        Node {
-                            position: successor,
-                            height: heights.iter().copied().sum::<N>() / nconvert(heights.len()),
-                        },
-                        1,
-                    );
-                });
+                heights
+                    .iter()
+                    .zip(successors)
+                    .for_each(|(heights, successor)| {
+                        if heights.is_empty() {
+                            out(
+                                Node {
+                                    position: successor,
+                                    height: current.height,
+                                },
+                                1,
+                            )
+                        } else {
+                            out(
+                                Node {
+                                    position: successor,
+                                    height: heights.iter().copied().sum::<N>()
+                                        / nconvert(heights.len()),
+                                },
+                                1,
+                            )
+                        }
+                    });
                 std::future::ready(Some(()))
             })
             .await;
@@ -104,18 +119,21 @@ where
     }
 }
 
-struct DirectPathfinderModule<'a, N: Float> {
+struct DirectPathfinderModule<'a, N: Float, F> {
     obstacle_hub: &'a ObstacleHub<N>,
     resolution: N,
     shape: Shape<N>,
     max_height_diff: N,
     end_node: Node<N>,
     max_frac: N,
+    filter: &'a F,
 }
 
-impl<'a, N: Float> AStarModule<Node<N>, usize> for DirectPathfinderModule<'a, N>
+impl<'a, N, F> AStarModule<Node<N>, usize> for DirectPathfinderModule<'a, N, F>
 where
     RecycledVec<HeightQuery<N>>: Default,
+    N: Float,
+    F: Fn(Point2<isize>) -> bool,
 {
     async fn successors(&mut self, current: Node<N>, mut out: impl FnMut(Node<N>, usize)) {
         let successors = [
@@ -134,9 +152,12 @@ where
                 None
             }
         };
-        let successors: Box<[_]> = successors.into_iter().chain(end_pos).collect();
+        let successors = successors
+            .into_iter()
+            .chain(end_pos)
+            .filter(|p| (self.filter)((*p).into()));
 
-        let queries = successors.iter().copied().map(|next| {
+        let queries = successors.clone().map(|next| {
             let next = Vector3::new(
                 nconvert::<_, N>(next.x) * self.resolution,
                 current.height,
@@ -151,31 +172,45 @@ where
 
         self.obstacle_hub
             .query_height(queries, |heights, _| {
-                heights.iter().zip(successors.deref()).for_each(|(heights, successor)| {
-                    if heights.is_empty() {
-                        return;
-                    }
-                    let mut height = N::zero();
-                    let mut too_high_count = 0usize;
-
-                    for &h in heights.iter() {
-                        height += h;
-                        if (h - current.height).abs() > self.max_height_diff {
-                            too_high_count += 1;
+                heights
+                    .iter()
+                    .zip(successors.clone())
+                    .for_each(|(heights, successor)| {
+                        if heights.is_empty() {
+                            out(
+                                Node {
+                                    position: successor,
+                                    height: current.height,
+                                },
+                                1,
+                            );
+                            return;
                         }
-                    }
-                    height /= nconvert(heights.len());
-                    if too_high_count >= (nconvert::<_, N>(heights.len()) * self.max_frac).round().to_usize() {
-                        return;
-                    }
-                    out(
-                        Node {
-                            position: *successor,
-                            height,
-                        },
-                        1,
-                    );
-                });
+                        let mut height = N::zero();
+                        let mut too_high_count = 0usize;
+
+                        for &h in heights.iter() {
+                            height += h;
+                            if (h - current.height).abs() > self.max_height_diff {
+                                too_high_count += 1;
+                            }
+                        }
+                        height /= nconvert(heights.len());
+                        if too_high_count
+                            >= (nconvert::<_, N>(heights.len()) * self.max_frac)
+                                .round()
+                                .to_usize()
+                        {
+                            return;
+                        }
+                        out(
+                            Node {
+                                position: successor,
+                                height,
+                            },
+                            1,
+                        );
+                    });
                 std::future::ready(Some(()))
             })
             .await;
@@ -187,32 +222,30 @@ where
 }
 
 #[derive(Clone, Copy)]
-pub struct DirectPathfinder<N: Float> {
+pub struct DirectPathfinder<N: Float, F> {
     pub max_frac: N,
+    pub shape: Shape<N>,
+    pub max_height_diff: N,
+    pub filter: F,
+    pub traversal_scale: N,
 }
 
-impl<N: Float> Default for DirectPathfinder<N> {
-    fn default() -> Self {
-        Self {
-            max_frac: nconvert(0.333),
-        }
-    }
-}
-
-impl<N: Float> PathfindingEngine<N> for DirectPathfinder<N>
+impl<N, F> PathfindingEngine<N> for DirectPathfinder<N, F>
 where
     RecycledVec<HeightQuery<N>>: Default,
+    N: Float,
+    F: Fn(Point2<isize>) -> bool + Send + Sync + 'static,
 {
     async fn pathfind(
         &mut self,
-        end: Point3<N>,
+        from: Isometry3<N>,
+        mut end: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
-        shape: Shape<N>,
-        max_height_diff: N,
         context: &RuntimeContext,
     ) -> Option<Vec<Point3<N>>> {
         setup_logging!(context);
+        end = from.inverse_transform_point(&end);
         let mut pre_path = vec![];
         let mut start_node = Node {
             position: Vector2::<isize>::new(0, 0),
@@ -224,9 +257,10 @@ where
             &mut DirectPathfinderSafefinder {
                 obstacle_hub,
                 resolution,
-                shape,
-                max_height_diff,
+                shape: self.shape,
+                max_height_diff: self.max_height_diff,
                 max_frac: self.max_frac,
+                filter: &self.filter,
             },
             |_| 0,
         )
@@ -246,10 +280,11 @@ where
         let mut successors = DirectPathfinderModule {
             obstacle_hub,
             resolution,
-            shape,
-            max_height_diff,
+            shape: self.shape,
+            max_height_diff: self.max_height_diff,
             end_node,
             max_frac: self.max_frac,
+            filter: &self.filter,
         };
 
         let result = astar(&start_node, &mut successors, |current| {
@@ -283,14 +318,7 @@ where
 
         for next in path {
             if self
-                .traverse_to(
-                    start.coords,
-                    next.coords,
-                    shape.clone(),
-                    max_height_diff,
-                    &obstacle_hub,
-                    resolution,
-                )
+                .traverse_to(Isometry3::default(), start, next, &obstacle_hub, resolution)
                 .await
             {
                 last = next;
@@ -302,33 +330,38 @@ where
         }
 
         new_path.push(end);
+        new_path
+            .iter_mut()
+            .for_each(|p| *p = from.transform_point(p));
 
         Some(new_path)
     }
 
     async fn traverse_to(
         &mut self,
-        from: Vector3<N>,
-        to: Vector3<N>,
-        shape: Shape<N>,
-        max_height_diff: N,
+        isometry: Isometry3<N>,
+        from: Point3<N>,
+        to: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
     ) -> bool
     where
         RecycledVec<HeightQuery<N>>: Default,
     {
+        let from = isometry.inverse_transform_point(&from).coords;
+        let to = isometry.inverse_transform_point(&to).coords;
         let mut travel = to - from;
         let distance = travel.magnitude();
         travel.unscale_mut(distance);
 
         let count: usize = (distance / resolution).floor().to_subset_unchecked();
+        let shape = self.shape.scale(self.traversal_scale);
 
         let queries = (1..count).into_iter().map(|i| {
             let intermediate: Vector3<N> = from + travel * nconvert::<_, N>(i);
             HeightQuery {
                 max_points: 32,
-                shape: shape.clone(),
+                shape,
                 isometry: Isometry3::from_parts(intermediate.into(), UnitQuaternion::default()),
             }
         });
@@ -346,7 +379,7 @@ where
                 for &h in heights.iter() {
                     height += h;
                     count += 1;
-                    if h > max_height_diff {
+                    if (h - from.y).abs() > self.max_height_diff {
                         too_high_count += 1;
                     }
                 }

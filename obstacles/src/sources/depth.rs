@@ -111,9 +111,9 @@ impl<D: Send + IntoDepthData + 'static> DepthMapSource<D> {
                 OpaqueBuffer::new(DynamicSize::<[f32; 4]>::new(rays.len())).await?,
             ),
 
-            heights_queue: ArrayQueue::new(1),
-            shapes_queue: ArrayQueue::new(1),
-            indices_queue: ArrayQueue::new(1),
+            heights_queue: ArrayQueue::new(16),
+            shapes_queue: ArrayQueue::new(16),
+            indices_queue: ArrayQueue::new(16),
 
             project_depth: Arc::new(project_depth),
             height_map_compute: Arc::new(height_map_compute),
@@ -134,6 +134,9 @@ where
         &self,
         queries: Arc<RecycledVec<HeightQuery<f32>>>,
     ) -> Option<RecycledVec<RecycledVec<f32>>> {
+        if queries.is_empty() {
+            return Some(RecycledVec::default());
+        }
         let mut shapes = self
             .shapes_queue
             .pop()
@@ -222,7 +225,7 @@ where
             .await;
 
         let mut result = RecycledVec::default();
-        for (height_count, shape) in indices_buf.iter().copied().zip(&shapes) {
+        for (&height_count, shape) in indices_buf.iter().zip(&shapes) {
             let mut heights = RecycledVec::default();
             // if height_count as usize > heights_buf.split_at(shape.start_index as usize).1.len() {
             //     println!("{} {}", heights_buf.split_at(shape.start_index as usize).1.len(), height_count);

@@ -7,7 +7,7 @@ use localization::{
     frames::{IMUFrame, OrientationFrame, PositionFrame},
     Localizer,
 };
-use nalgebra::{Isometry3, Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
+use nalgebra::{Isometry3, Point2, Point3, Quaternion, UnitQuaternion, UnitVector3, Vector3};
 use navigator::{
     pathfinding::{direct::DirectPathfinder, Pathfinder},
     DifferentialDriver, DriveMode,
@@ -58,16 +58,23 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     depth_signal.accept_subscription(depth_source.create_depth_subscription());
     obstacle_hub.add_source_mut(depth_source).unwrap();
 
-    let pathfinder: Pathfinder = Pathfinder::new_with_engine(
-        Shape::Cylinder {
-            radius: 0.5,
-            height: 1.0,
-        },
+    let mut pathfinder = Pathfinder::new_with_engine(
         0.1,
-        DirectPathfinder::default(),
+        DirectPathfinder {
+            max_frac: 0.2,
+            shape: Shape::Cylinder {
+                radius: 0.8333,
+                height: 4.0,
+            },
+            traversal_scale: 0.6,
+            max_height_diff: 0.05,
+            filter: |p: Point2<isize>| p.x.abs() <= 50 && p.y.abs() <= 50,
+        },
         obstacle_hub.clone(),
         robot_base.get_ref(),
     );
+    pathfinder.completion_distance = 0.1;
+    pathfinder.correction_distance = 0.8;
 
     let mut costmap_display = unros::logging::dump::VideoDataDump::new_display(200, 200, &context)?;
     tokio::spawn(async move {
@@ -85,7 +92,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                         ),
                         max_points: 32,
                         shape: Shape::Cylinder {
-                            radius: 0.1,
+                            radius: 0.5,
                             height: 4.0,
                         },
                     })

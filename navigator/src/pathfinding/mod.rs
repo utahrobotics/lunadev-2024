@@ -7,8 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nalgebra::{convert as nconvert, Isometry3, Point3, UnitQuaternion, Vector3};
-use obstacles::{utils::RecycledVec, HeightQuery, ObstacleHub, Shape};
+use nalgebra::{convert as nconvert, Isometry3, Point3};
+use obstacles::{utils::RecycledVec, HeightQuery, ObstacleHub};
 use rig::RobotBaseRef;
 use unros::{
     float::Float,
@@ -18,8 +18,6 @@ use unros::{
     service::{new_service, Service, ServiceHandle},
     setup_logging, tokio, DontDrop, ShouldNotDrop,
 };
-
-use self::direct::DirectPathfinder;
 
 mod alg;
 pub mod direct;
@@ -71,27 +69,25 @@ pub type NavigationServiceHandle<N> =
 pub trait PathfindingEngine<N: Float>: Send + 'static {
     fn pathfind(
         &mut self,
+        from: Isometry3<N>,
         end: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
-        shape: Shape<N>,
-        max_height_diff: N,
         context: &RuntimeContext,
     ) -> impl Future<Output = Option<Vec<Point3<N>>>> + Send;
 
     fn traverse_to(
         &mut self,
-        from: Vector3<N>,
-        to: Vector3<N>,
-        shape: Shape<N>,
-        max_height_diff: N,
+        isometry: Isometry3<N>,
+        from: Point3<N>,
+        to: Point3<N>,
         obstacle_hub: &ObstacleHub<N>,
         resolution: N,
     ) -> impl Future<Output = bool> + Send;
 }
 
 #[derive(ShouldNotDrop)]
-pub struct Pathfinder<N: Float = f32, E: PathfindingEngine<N> = DirectPathfinder<N>> {
+pub struct Pathfinder<N: Float, E: PathfindingEngine<N>> {
     engine: E,
     obstacle_hub: ObstacleHub<N>,
     dont_drop: DontDrop<Self>,
@@ -99,16 +95,16 @@ pub struct Pathfinder<N: Float = f32, E: PathfindingEngine<N> = DirectPathfinder
     service_handle: NavigationServiceHandle<N>,
     robot_base: RobotBaseRef,
     path_pub: Publisher<Arc<[Point3<N>]>>,
-    completion_distance: N,
+    pub completion_distance: N,
+    pub correction_distance: N,
     pub resolution: N,
-    pub shape: Shape<N>,
-    pub max_height_diff: N,
     pub refresh_rate: Duration,
+    pub max_fail_rate: N,
+    pub repathfinding_window: usize,
 }
 
 impl<N: Float, E: PathfindingEngine<N>> Pathfinder<N, E> {
     pub fn new_with_engine(
-        shape: Shape<N>,
         resolution: N,
         engine: E,
         obstacle_hub: ObstacleHub<N>,
@@ -124,10 +120,11 @@ impl<N: Float, E: PathfindingEngine<N>> Pathfinder<N, E> {
             robot_base,
             path_pub: Publisher::default(),
             completion_distance: nalgebra::convert(0.15),
+            correction_distance: nalgebra::convert(0.15),
             resolution,
-            shape,
-            max_height_diff: nalgebra::convert(0.1),
             refresh_rate: Duration::from_millis(100),
+            repathfinding_window: 25,
+            max_fail_rate: nalgebra::convert(0.5),
         }
     }
 
@@ -166,74 +163,104 @@ where
                 error!("Scheduler of task dropped task init before we could respond");
                 continue;
             };
+            let mut repathfinding_window =
+                vec![false; self.repathfinding_window].into_boxed_slice();
 
             'main: loop {
                 start_time += start_time.elapsed();
 
                 let mut isometry: Isometry3<N> = nconvert(self.robot_base.get_isometry());
-                let mut end_local = isometry.inverse_transform_point(&end);
 
                 if let Some(path) = self
                     .engine
-                    .pathfind(
-                        end_local,
-                        &self.obstacle_hub,
-                        self.resolution,
-                        self.shape.clone(),
-                        self.max_height_diff,
-                        &context,
-                    )
+                    .pathfind(isometry, end, &self.obstacle_hub, self.resolution, &context)
                     .await
                 {
-                    let path: Arc<[Point3<N>]> = path.into_iter().map(|p| isometry * p).collect();
+                    let path: Arc<[Point3<N>]> = path.into();
                     self.path_pub.set(path.clone());
+                    repathfinding_window
+                        .iter_mut()
+                        .for_each(|flag| *flag = false);
+                    let mut repathfinding_i = 0usize;
+                    let max_fails = (self.max_fail_rate * nconvert(self.repathfinding_window))
+                        .round()
+                        .to_usize();
 
                     'repathfind: loop {
+                        if repathfinding_window.iter().filter(|&flag| *flag).count() >= max_fails {
+                            break;
+                        }
+                        tokio::time::sleep(self.refresh_rate).await;
                         isometry = nconvert(self.robot_base.get_isometry());
-                        end_local = isometry.inverse_transform_point(&end);
 
-                        if end_local.coords.magnitude() <= self.completion_distance {
-                            self.path_pub.set(Arc::new([]));
+                        if (end.coords - isometry.translation.vector).magnitude()
+                            <= self.completion_distance
+                        {
                             pending_task.finish(Ok(()));
                             break 'main;
                         }
+                        if let Some(min_offset) = path
+                            .windows(2)
+                            .filter_map(|window| {
+                                let [from, to] = window.try_into().unwrap();
+                                let relative = isometry.translation.vector - from.coords;
+                                let mut travel = to.coords - from.coords;
+                                let distance = travel.magnitude();
+                                travel.unscale_mut(distance);
+
+                                let length_along = relative.dot(&travel);
+                                if length_along < N::zero() || length_along > distance {
+                                    None
+                                } else {
+                                    Some((relative - travel * length_along).magnitude())
+                                }
+                            })
+                            .min_by(|a, b| a.total_cmp(b))
+                        {
+                            if min_offset > self.correction_distance {
+                                error!("Too far from path");
+                                repathfinding_window[repathfinding_i] = true;
+                                repathfinding_i = (repathfinding_i + 1) % self.repathfinding_window;
+                                continue;
+                            }
+                        } else if (isometry.translation.vector - path[0].coords).magnitude()
+                            > self.correction_distance
+                        {
+                            error!("Too far from path");
+                            repathfinding_window[repathfinding_i] = true;
+                            repathfinding_i = (repathfinding_i + 1) % self.repathfinding_window;
+                            continue;
+                        }
                         for window in path.windows(2) {
                             let [from, to] = window.try_into().unwrap();
-                            let relative = isometry.translation.vector - from.coords;
-                            let travel = to.coords - from.coords;
-
-                            let cross = travel.cross(&relative);
-
-                            let rotation_90 = UnitQuaternion::<N>::new(
-                                cross.normalize() * nconvert::<_, N>(std::f64::consts::PI / 2.0),
-                            );
-                            let offset_vec = rotation_90 * travel.normalize();
-                            let offset = offset_vec.dot(&relative);
-
-                            if offset > self.completion_distance {
-                                break 'repathfind;
-                            }
 
                             if !self
                                 .engine
                                 .traverse_to(
-                                    from.coords,
-                                    to.coords,
-                                    self.shape.clone(),
-                                    self.max_height_diff,
+                                    isometry,
+                                    from,
+                                    to,
                                     &self.obstacle_hub,
                                     self.resolution,
                                 )
                                 .await
                             {
-                                break 'repathfind;
+                                error!("Obstacle on path");
+                                repathfinding_window[repathfinding_i] = true;
+                                repathfinding_i = (repathfinding_i + 1) % self.repathfinding_window;
+                                continue 'repathfind;
                             }
                         }
-                        tokio::time::sleep(self.refresh_rate).await;
+                        repathfinding_window[repathfinding_i] = false;
+                        repathfinding_i = (repathfinding_i + 1) % self.repathfinding_window;
                     }
-                };
-                // pending_task.finish(Err(NavigationError::NoPath));
+                    self.path_pub.set(Arc::new([]));
+                } else {
+                    pending_task.finish(Err(NavigationError::NoPath));
+                    break;
+                }
             }
+            self.path_pub.set(Arc::new([]));
         }
     }
 }

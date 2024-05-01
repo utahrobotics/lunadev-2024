@@ -471,7 +471,7 @@ impl<T: BufferSized + bytemuck::Pod> BufferDestination<T> for &mut T {
 }
 
 impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<[T]> for &mut [T] {
-    type State = wgpu::Buffer;
+    type State = Option<wgpu::Buffer>;
 
     fn enqueue(
         &self,
@@ -480,6 +480,9 @@ impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<[T]> for &mut [T] 
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
         device: &wgpu::Device,
     ) -> Self::State {
+        if self.is_empty() {
+            return None;
+        }
         let size = (self.len() * size_of::<T>()) as u64;
         let buffer = {
             let reader = buffers.read().unwrap();
@@ -498,7 +501,7 @@ impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<[T]> for &mut [T] 
 
         command_encoder.copy_buffer_to_buffer(&src_buffer, 0, &buffer, 0, size);
 
-        buffer
+        Some(buffer)
     }
 
     async fn from_buffer(
@@ -507,6 +510,9 @@ impl<T: BufferSized + bytemuck::Pod + Send> BufferDestination<[T]> for &mut [T] 
         device: &wgpu::Device,
         buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
     ) {
+        let Some(buffer) = buffer else {
+            return;
+        };
         {
             let size = (self.len() * size_of::<T>()) as u64;
             let slice = buffer.slice(0..size);
@@ -608,6 +614,9 @@ impl<T: ?Sized + BufferSized + 'static> BufferSource<T> for &OpaqueBuffer {
         _stager: &mut StagingBelt,
         _device: &wgpu::Device,
     ) {
+        if self.size == 0 {
+            return;
+        }
         command_encoder.copy_buffer_to_buffer(
             &self.buffer,
             self.start_offset,
@@ -628,6 +637,9 @@ impl<T: ?Sized + BufferSized + 'static> BufferDestination<T> for &mut OpaqueBuff
         _buffers: &RwLock<FxHashMap<u64, SegQueue<wgpu::Buffer>>>,
         _device: &wgpu::Device,
     ) -> Self::State {
+        if self.size == 0 {
+            return;
+        }
         command_encoder.copy_buffer_to_buffer(
             &src_buffer,
             0,
