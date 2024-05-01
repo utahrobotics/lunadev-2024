@@ -12,3 +12,4 @@ bytemuck = { workspace = true }
 rig = { path = "../rig" }
 async-trait = "0"
 futures = "0"
+bitvec = { workspace = true }

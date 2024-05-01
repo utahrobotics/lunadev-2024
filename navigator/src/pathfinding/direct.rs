@@ -45,34 +45,38 @@ where
                 }
             });
 
-        self.obstacle_hub
-            .query_height(queries, |heights, _| {
-                heights
-                    .iter()
-                    .zip(successors)
-                    .for_each(|(heights, successor)| {
-                        if heights.is_empty() {
-                            out(
-                                Node {
-                                    position: successor,
-                                    height: current.height,
-                                },
-                                1,
-                            )
-                        } else {
-                            out(
-                                Node {
-                                    position: successor,
-                                    height: heights.iter().copied().sum::<N>()
-                                        / nconvert(heights.len()),
-                                },
-                                1,
-                            )
-                        }
-                    });
-                std::future::ready(Some(()))
-            })
-            .await;
+        let mut pending = self.obstacle_hub.query_height(queries).await;
+
+        while let Some(mut vec_of_heights) = pending.next().await {
+            vec_of_heights
+                .drain(..)
+                .zip(successors)
+                .for_each(|(mut heights, successor)| {
+                    let mut height = N::zero();
+                    let mut count = 0usize;
+                    for h in heights.drain(..) {
+                        height += h;
+                        count += 1;
+                    }
+                    if count == 0 {
+                        out(
+                            Node {
+                                position: successor,
+                                height: current.height,
+                            },
+                            1,
+                        );
+                    } else {
+                        out(
+                            Node {
+                                position: successor,
+                                height: height / nconvert(count),
+                            },
+                            1,
+                        );
+                    }
+                });
+        }
     }
 
     async fn success(&mut self, current: &Node<N>) -> bool {
@@ -82,40 +86,17 @@ where
             nconvert::<_, N>(current.position.y) * self.resolution,
         );
         self.obstacle_hub
-            .query_height(
+            .safe_by_height(
                 std::iter::once(HeightQuery {
                     max_points: 32,
                     shape: self.shape,
                     isometry: Isometry3::from_parts(next.into(), UnitQuaternion::default()),
                 }),
-                |heights, _| {
-                    let heights = &heights[0];
-                    if heights.is_empty() {
-                        return std::future::ready(None);
-                    }
-                    let mut height = N::zero();
-                    let mut too_high_count = 0usize;
-
-                    for &h in heights.iter() {
-                        height += h;
-                        if (h - current.height).abs() > self.max_height_diff {
-                            too_high_count += 1;
-                        }
-                    }
-                    height /= nconvert(heights.len());
-                    if too_high_count
-                        >= (nconvert::<_, N>(heights.len()) * self.max_frac)
-                            .round()
-                            .to_usize()
-                    {
-                        std::future::ready(Some(()))
-                    } else {
-                        std::future::ready(None)
-                    }
-                },
+                current.height,
+                self.max_height_diff,
+                self.max_frac,
             )
-            .await
-            .is_none()
+            .await[0]
     }
 }
 
@@ -170,50 +151,47 @@ where
             }
         });
 
-        self.obstacle_hub
-            .query_height(queries, |heights, _| {
-                heights
-                    .iter()
-                    .zip(successors.clone())
-                    .for_each(|(heights, successor)| {
-                        if heights.is_empty() {
-                            out(
-                                Node {
-                                    position: successor,
-                                    height: current.height,
-                                },
-                                1,
-                            );
-                            return;
-                        }
-                        let mut height = N::zero();
-                        let mut too_high_count = 0usize;
+        let mut pending = self.obstacle_hub.query_height(queries).await;
 
-                        for &h in heights.iter() {
-                            height += h;
-                            if (h - current.height).abs() > self.max_height_diff {
-                                too_high_count += 1;
-                            }
+        while let Some((mut vec_of_heights, queries)) = pending.next_with_queries().await {
+            vec_of_heights
+                .drain(..)
+                .zip(queries.iter())
+                .zip(successors.clone())
+                .for_each(|((mut heights, query), successor)| {
+                    let mut height = N::zero();
+                    let mut count = 0usize;
+                    let mut too_high_count = 0usize;
+
+                    for h in heights.drain(..) {
+                        height += h;
+                        count += 1;
+                        if (h - current.height).abs() > self.max_height_diff {
+                            too_high_count += 1;
                         }
-                        height /= nconvert(heights.len());
-                        if too_high_count
-                            >= (nconvert::<_, N>(heights.len()) * self.max_frac)
-                                .round()
-                                .to_usize()
-                        {
-                            return;
-                        }
+                    }
+
+                    if count == 0 {
                         out(
                             Node {
                                 position: successor,
-                                height,
+                                height: current.height,
                             },
                             1,
                         );
-                    });
-                std::future::ready(Some(()))
-            })
-            .await;
+                    } else if nconvert::<_, N>(too_high_count)
+                        <= nconvert::<_, N>(query.max_points) * self.max_frac
+                    {
+                        out(
+                            Node {
+                                position: successor,
+                                height: height / nconvert(count),
+                            },
+                            1,
+                        );
+                    }
+                });
+        }
     }
 
     async fn success(&mut self, node: &Node<N>) -> bool {
@@ -265,30 +243,10 @@ where
         });
 
         obstacle_hub
-            .query_height(queries, |heights, _| {
-                let heights = &heights[0];
-                if heights.is_empty() {
-                    return std::future::ready(None);
-                }
-                let mut height = N::zero();
-                let mut too_high_count = 0usize;
-
-                for &h in heights.iter() {
-                    height += h;
-                    if (h - from.y).abs() > self.max_height_diff {
-                        too_high_count += 1;
-                    }
-                }
-                let count: N = nconvert(heights.len());
-                height /= count;
-                if too_high_count >= (count * self.max_frac).round().to_usize() {
-                    std::future::ready(Some(()))
-                } else {
-                    std::future::ready(None)
-                }
-            })
+            .safe_by_height(queries, from.y, self.max_height_diff, self.max_frac)
             .await
-            .is_none()
+            .into_iter()
+            .all(|safe| safe)
     }
 }
 
@@ -404,8 +362,8 @@ where
         isometry: Isometry3<N>,
         obstacle_hub: &ObstacleHub<N>,
     ) -> bool {
-        obstacle_hub
-            .query_height(
+        !obstacle_hub
+            .safe_by_height(
                 std::iter::once(HeightQuery {
                     max_points: 32,
                     shape: self.unsafe_shape,
@@ -414,31 +372,11 @@ where
                         UnitQuaternion::default(),
                     ),
                 }),
-                |heights, _| {
-                    let heights = &heights[0];
-                    if heights.is_empty() {
-                        return std::future::ready(None);
-                    }
-                    let mut height = N::zero();
-                    let mut too_high_count = 0usize;
-
-                    for &h in heights.iter() {
-                        height += h;
-                        if (h - isometry.translation.y).abs() > self.max_height_diff {
-                            too_high_count += 1;
-                        }
-                    }
-                    let count: N = nconvert(heights.len());
-                    height /= count;
-                    if too_high_count >= (count * self.max_frac).round().to_usize() {
-                        std::future::ready(Some(()))
-                    } else {
-                        std::future::ready(None)
-                    }
-                },
+                isometry.translation.y,
+                self.max_height_diff,
+                self.max_frac,
             )
-            .await
-            .is_some()
+            .await[0]
     }
 }
 

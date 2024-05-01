@@ -63,11 +63,11 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         DirectPathfinder {
             max_frac: 0.15,
             pathfind_shape: Shape::Cylinder {
-                radius: 0.8,
+                radius: 1.5,
                 height: 4.0,
             },
             unsafe_shape: Shape::Cylinder {
-                radius: 0.6,
+                radius: 1.0,
                 height: 4.0,
             },
             max_height_diff: 0.1,
@@ -102,20 +102,19 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 })
                 .collect();
 
-            obstacle_hub
-                .query_height(query.iter().copied(), |heights_vec, _| {
-                    heights_vec
-                        .par_iter()
-                        .map(|x| x.deref())
-                        .zip(&mut heights)
-                        .for_each(|(heights_in_shape, height)| {
-                            let mean = heights_in_shape.iter().copied().sum::<f32>()
-                                / heights_in_shape.len() as f32;
-                            *height = mean;
-                        });
-                    std::future::ready(Some(()))
-                })
-                .await;
+            let mut pending = obstacle_hub.query_height(query.iter().copied()).await;
+
+            if let Some(heights_vec) = pending.next().await {
+                heights_vec
+                    .par_iter()
+                    .map(|x| x.deref())
+                    .zip(&mut heights)
+                    .for_each(|(heights_in_shape, height)| {
+                        let mean = heights_in_shape.iter().copied().sum::<f32>()
+                            / heights_in_shape.len() as f32;
+                        *height = mean;
+                    });
+            }
 
             let max_height = heights
                 .iter()

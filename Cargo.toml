@@ -44,7 +44,7 @@ ffmpeg-sidecar = "1.0"
 interprocess = { git = "https://github.com/kotauskas/interprocess", default-features = false, branch = "main", features = ["tokio"] }
 dst-init = "0.4.0"
 rayon = "1.10.0"
-sealed = "0.5.0"
+bitvec = "1.0.1"
 
 # The following crates need to run at full power
 # in most contexts to be effective.

@@ -1,9 +1,13 @@
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use bitvec::vec::BitVec;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
-use nalgebra::Isometry3;
-use unros::{float::Float, tokio::sync::RwLock};
+use nalgebra::{convert as nconvert, Isometry3};
+use unros::{
+    float::Float,
+    tokio::{runtime::Handle, sync::RwLock},
+};
 use utils::RecycledVec;
 
 pub mod sources;
@@ -32,7 +36,7 @@ impl<N: Float> Shape<N> {
 }
 
 struct ObstacleHubInner<N: Float> {
-    sources: RwLock<Vec<Box<dyn HeightMap<N>>>>,
+    sources: RwLock<Vec<Arc<dyn HeightMap<N>>>>,
 }
 
 pub struct ObstacleHub<N: Float> {
@@ -73,7 +77,7 @@ impl<T> std::fmt::Display for AddSourceMutError<T> {
 
 impl<N: Float> ObstacleHub<N> {
     pub async fn add_source(&self, source: impl HeightMap<N> + 'static) {
-        self.inner.sources.write().await.push(Box::new(source));
+        self.inner.sources.write().await.push(Arc::new(source));
     }
 
     pub fn add_source_mut<T: HeightMap<N> + 'static>(
@@ -82,7 +86,7 @@ impl<N: Float> ObstacleHub<N> {
     ) -> Result<(), AddSourceMutError<T>> {
         match Arc::get_mut(&mut self.inner) {
             Some(inner) => {
-                inner.sources.get_mut().push(Box::new(source));
+                inner.sources.get_mut().push(Arc::new(source));
                 Ok(())
             }
             None => Err(AddSourceMutError(source)),
@@ -91,48 +95,87 @@ impl<N: Float> ObstacleHub<N> {
 }
 
 impl<N: Float> ObstacleHub<N> {
-    pub async fn query_height<T, F: Future<Output = Option<T>>>(
-        &self,
+    pub async fn query_height<'a>(
+        &'a self,
         queries: impl IntoIterator<Item = HeightQuery<N>>,
-        mut filter: impl FnMut(RecycledVec<RecycledVec<N>>, &[HeightQuery<N>]) -> F,
-    ) -> Option<T>
+    ) -> PendingHeightQueries<
+        'a,
+        N,
+        impl Future<
+            Output = (
+                usize,
+                Option<(
+                    RecycledVec<RecycledVec<N>>,
+                    Arc<RecycledVec<HeightQuery<N>>>,
+                )>,
+            ),
+        >,
+    >
     where
         RecycledVec<HeightQuery<N>>: Default,
     {
         let shapes: RecycledVec<HeightQuery<N>> = queries.into_iter().collect();
         if shapes.is_empty() {
-            return None;
+            return PendingHeightQueries {
+                hub: self,
+                futures: FuturesUnordered::new(),
+                indices_to_remove: vec![],
+            };
         }
         let shapes = Arc::new(shapes);
-        let mut indices_to_remove = Vec::new();
-        let result = 'check: {
-            let sources = self.inner.sources.read().await;
-            let mut futures = FuturesUnordered::new();
-            for (i, source) in sources.iter().enumerate() {
-                let fut = source.query_height(shapes.clone());
-                futures.push(async move { (i, fut.await) });
-            }
-            while let Some((i, result)) = futures.next().await {
-                let Some(value) = result else {
-                    indices_to_remove.push(i);
-                    continue;
-                };
-                if let Some(result) = filter(value, shapes.deref().deref()).await {
-                    break 'check Some(result);
+
+        let sources = self.inner.sources.read().await;
+        let futures = FuturesUnordered::new();
+        for (i, source) in sources.iter().cloned().enumerate() {
+            let shapes = shapes.clone();
+            futures.push(async move {
+                (
+                    i,
+                    source
+                        .query_height(shapes.clone())
+                        .await
+                        .map(|value| (value, shapes)),
+                )
+            });
+        }
+
+        PendingHeightQueries {
+            hub: self,
+            futures,
+            indices_to_remove: vec![],
+        }
+    }
+
+    pub async fn safe_by_height(
+        &self,
+        queries: impl IntoIterator<Item = HeightQuery<N>>,
+        current_height: N,
+        max_difference: N,
+        min_fraction: N,
+    ) -> BitVec
+    where
+        RecycledVec<HeightQuery<N>>: Default,
+    {
+        let mut bools = BitVec::new();
+        let mut pending = self.query_height(queries).await;
+
+        'main: while let Some((mut vec_of_heights, queries)) = pending.next_with_queries().await {
+            for (mut heights, query) in vec_of_heights.drain(..).zip(queries.iter()) {
+                let too_high_count = heights
+                    .drain(..)
+                    .filter(|&height| (height - current_height).abs() > max_difference)
+                    .count();
+                if nconvert::<_, N>(too_high_count)
+                    > nconvert::<_, N>(query.max_points) * min_fraction
+                {
+                    bools.push(false);
+                    continue 'main;
                 }
             }
-            None
-        };
+            bools.push(true);
+        }
 
-        if indices_to_remove.is_empty() {
-            return result;
-        }
-        indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
-        let mut sources = self.inner.sources.write().await;
-        for i in indices_to_remove {
-            sources.swap_remove(i);
-        }
-        result
+        bools
     }
 }
 
@@ -149,4 +192,65 @@ pub trait HeightMap<N: Float>: Send + Sync {
         &self,
         queries: Arc<RecycledVec<HeightQuery<N>>>,
     ) -> Option<RecycledVec<RecycledVec<N>>>;
+}
+
+pub struct PendingHeightQueries<'a, N: Float, F> {
+    hub: &'a ObstacleHub<N>,
+    futures: FuturesUnordered<F>,
+    indices_to_remove: Vec<usize>,
+}
+
+impl<
+        'a,
+        N: Float,
+        F: Future<
+            Output = (
+                usize,
+                Option<(
+                    RecycledVec<RecycledVec<N>>,
+                    Arc<RecycledVec<HeightQuery<N>>>,
+                )>,
+            ),
+        >,
+    > PendingHeightQueries<'a, N, F>
+{
+    pub async fn next_with_queries(
+        &mut self,
+    ) -> Option<(
+        RecycledVec<RecycledVec<N>>,
+        Arc<RecycledVec<HeightQuery<N>>>,
+    )> {
+        while let Some((i, option)) = self.futures.next().await {
+            if let Some(value) = option {
+                return Some(value);
+            } else {
+                self.indices_to_remove.push(i);
+            }
+        }
+        None
+    }
+    pub async fn next(&mut self) -> Option<RecycledVec<RecycledVec<N>>> {
+        self.next_with_queries().await.map(|(value, _)| value)
+    }
+}
+
+impl<'a, N: Float, F> Drop for PendingHeightQueries<'a, N, F> {
+    fn drop(&mut self) {
+        if self.indices_to_remove.is_empty() {
+            return;
+        }
+        let Ok(handle) = Handle::try_current() else {
+            return;
+        };
+
+        self.indices_to_remove.sort_unstable_by(|a, b| b.cmp(a));
+        let indices_to_remove = std::mem::take(&mut self.indices_to_remove);
+        let inner = self.hub.inner.clone();
+        handle.spawn(async move {
+            let mut sources = inner.sources.write().await;
+            for i in indices_to_remove {
+                sources.swap_remove(i);
+            }
+        });
+    }
 }
