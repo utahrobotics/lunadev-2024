@@ -114,6 +114,8 @@ where
 
     #[cfg(unix)]
     fn run(mut self, context: RuntimeContext) -> Self::Result {
+        use std::io::Cursor;
+
         setup_logging!(context);
         self.dont_drop.ignore_drop = true;
         let device = self.device.get_mut().unwrap();
@@ -156,7 +158,7 @@ where
                 PixelFormat::Gray(8) => todo!(),
                 PixelFormat::Rgb(8) => todo!(),
                 PixelFormat::Jpeg => {
-                    let decoder = JpegDecoder::new(frame).unwrap();
+                    let decoder = JpegDecoder::new(Cursor::new(frame.to_vec())).unwrap();
                     DynamicImage::from_decoder(decoder)?
                 }
                 _ => unreachable!(),
