@@ -1,5 +1,5 @@
 use base64::prelude::*;
-use navigator::drive::Steering;
+use lunabot_lib::Steering;
 use py_repl::PyRepl;
 use serde::Deserialize;
 use serial::{Bytes, SerialConnection};

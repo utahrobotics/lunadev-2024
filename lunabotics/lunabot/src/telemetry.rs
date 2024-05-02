@@ -9,9 +9,8 @@ use std::{
 
 use image::DynamicImage;
 use lunabot_lib::{
-    make_negotiation, ArmParameters, ControlsPacket, ImportantMessage, VIDEO_HEIGHT, VIDEO_WIDTH,
+    make_negotiation, ArmParameters, ControlsPacket, ImportantMessage, VIDEO_HEIGHT, VIDEO_WIDTH, Steering,
 };
-use navigator::drive::Steering;
 use networking::{
     negotiation::{ChannelNegotiation, Negotiation},
     new_client, ConnectionError, NetworkConnector, NetworkNode,

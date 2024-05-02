@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 networking = { workspace = true }
+ordered-float = { workspace = true }
+simba = { workspace = true }

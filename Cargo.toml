@@ -10,7 +10,8 @@ members = [
     "unros/smach",
     "unros/unros-macros",
     "unros/unros",
-    "unros/camera-info",
+    # "unros/realsense",
+    # "unros/camera-info",
     "unros/networking",
     "unros/obstacles",
 

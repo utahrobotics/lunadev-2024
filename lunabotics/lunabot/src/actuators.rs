@@ -1,4 +1,4 @@
-use lunabot::ArmParameters;
+use lunabot_lib::ArmParameters;
 use serial::SerialConnection;
 use unros::{
     anyhow,
