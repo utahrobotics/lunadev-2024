@@ -5,12 +5,10 @@ members = [
     "lunabot-lib",
     "camera",
     "apriltag",
-    "realsense",
     "localization",
     "serial",
     "navigator",
-    "rig", "tools", "smach",
-    # "costmap",
+    "rig", "smach",
     "lunasimbot", "unros-macros", "unros", "lunabase-lib", "camera-info", "networking", "py-repl"
 , "compute-shader", "obstacles"]
 resolver = "2"

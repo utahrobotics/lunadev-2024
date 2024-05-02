@@ -17,7 +17,6 @@ toml = { workspace = true }
 fxhash = { workspace = true }
 serial = { path = "../serial" }
 # las = "0.8"
-costmap = { path = "../costmap" }
 camera-info = { path = "../camera-info" }
 spin_sleep = { workspace = true }
 image = { workspace = true }
@@ -27,6 +26,3 @@ py-repl = { path = "../py-repl" }
 lunabot-lib = { path = "../lunabot-lib" }
 base64 = "0"
 rodio = "0"
-
-[target.'cfg(unix)'.dependencies]
-realsense = { path = "../realsense" }
