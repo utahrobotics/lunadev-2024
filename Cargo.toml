@@ -1,18 +1,29 @@
 [workspace]
 members = [
-    "unros-core",
-    "lunabot",
-    "lunabot-lib",
-    "camera",
-    "apriltag",
-    "localization",
-    "serial",
-    "navigator",
-    "rig", "smach",
-    "lunasimbot", "unros-macros", "unros", "lunabase-lib", "camera-info", "networking", "py-repl"
-, "compute-shader", "obstacles"]
+    "unros/unros-core",
+    "unros/camera",
+    "unros/apriltag",
+    "unros/localization",
+    "unros/serial",
+    "unros/navigator",
+    "unros/rig",
+    "unros/smach",
+    "unros/unros-macros",
+    "unros/unros",
+    "unros/camera-info",
+    "unros/networking",
+    "unros/obstacles",
+
+    "misc/py-repl",
+    "misc/compute-shader",
+
+    "lunabotics/lunabot",
+    "lunabotics/lunabot-lib",
+    "lunabotics/lunabase-lib",
+    "lunabotics/lunasimbot",
+]
 resolver = "2"
-exclude = ["publishing/", "dump/", "lunabase/", "camera-db/"]
+exclude = ["publishing/", "dump/", "lunabotics/lunabase/", "camera-db/"]
 
 [workspace.dependencies]
 fxhash = "0.2"
@@ -43,6 +54,22 @@ interprocess = { git = "https://github.com/kotauskas/interprocess", default-feat
 dst-init = "0.4.0"
 rayon = "1.10.0"
 bitvec = "1.0.1"
+
+unros_core = { path = "unros/unros-core" }
+camera = { path = "unros/camera" }
+apriltag = { path = "unros/apriltag" }
+localization = { path = "unros/localization" }
+serial = { path = "unros/serial" }
+navigator = { path = "unros/navigator" }
+rig = { path = "unros/rig" }
+smach = { path = "unros/smach" }
+unros_macros = { path = "unros/unros-macros" }
+unros = { path = "unros/unros" }
+camera-info = { path = "unros/camera-info" }
+networking = { path = "unros/networking" }
+obstacles = { path = "unros/obstacles" }
+compute-shader = { path = "misc/compute-shader" }
+py-repl = { path = "misc/py-repl" }
 
 # The following crates need to run at full power
 # in most contexts to be effective.

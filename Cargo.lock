@@ -1965,19 +1965,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "interprocess"
-version = "2.0.0"
-source = "git+https://github.com/kotauskas/interprocess?branch=main#5023981cac9cc3dcc184a461b97061ec359f54d4"
-dependencies = [
- "futures-core",
- "libc",
- "recvmsg",
- "tokio",
- "widestring",
- "windows-sys 0.52.0",
-]
-
-[[package]]
 name = "io-kit-sys"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2362,7 +2349,6 @@ version = "0.1.0"
 dependencies = [
  "fxhash",
  "image 0.25.1",
- "interprocess",
  "localization",
  "nalgebra",
  "navigator",
@@ -3396,12 +3382,6 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
 ]
-
-[[package]]
-name = "recvmsg"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
 
 [[package]]
 name = "redox_syscall"
