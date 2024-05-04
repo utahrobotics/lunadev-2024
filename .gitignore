@@ -16,7 +16,7 @@ dump/
 neura-filter-academy/*=*
 neura-filter-academy/test
 neura-filter-academy/train
-/lunabase/export/
+/lunabotics/lunabase/export/
 tree.txt
 
 *-gitignore

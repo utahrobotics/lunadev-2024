@@ -24,7 +24,7 @@ func _input(event: InputEvent) -> void:
 			return
 		Lunabot.send_steering(
 			Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\"),
-			Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")
+			(Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")) * 0.4
 		)
 	
 	elif event.is_action_pressed(\"Restart\"):
