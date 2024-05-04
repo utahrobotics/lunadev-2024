@@ -324,3 +324,48 @@ impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer, A4: FromPeer> FromP
         ))
     }
 }
+
+impl<A0: FromPeer, A1: FromPeer, A2: FromPeer, A3: FromPeer, A4: FromPeer, A5: FromPeer> FromPeer
+    for (A0, A1, A2, A3, A4, A5)
+{
+    type Ids = (A0::Ids, A1::Ids, A2::Ids, A3::Ids, A4::Ids, A5::Ids);
+    type Product = (
+        A0::Product,
+        A1::Product,
+        A2::Product,
+        A3::Product,
+        A4::Product,
+        A5::Product,
+    );
+
+    fn from_peer(
+        peer: &NetworkPeer,
+        ids: &Self::Ids,
+        pubs: &mut FxHashMap<NonZeroU8, NetworkPublisher>,
+        channel_count: Arc<()>,
+    ) -> Self::Product {
+        (
+            A0::from_peer(peer, &ids.0, pubs, channel_count.clone()),
+            A1::from_peer(peer, &ids.1, pubs, channel_count.clone()),
+            A2::from_peer(peer, &ids.2, pubs, channel_count.clone()),
+            A3::from_peer(peer, &ids.3, pubs, channel_count.clone()),
+            A4::from_peer(peer, &ids.4, pubs, channel_count.clone()),
+            A5::from_peer(peer, &ids.5, pubs, channel_count),
+        )
+    }
+
+    fn get_ids(
+        &self,
+        seed: usize,
+        seen: &mut FxHashMap<NonZeroU8, Cow<'static, str>>,
+    ) -> Result<Self::Ids, NegotiationError> {
+        Ok((
+            self.0.get_ids(seed, seen)?,
+            self.1.get_ids(seed, seen)?,
+            self.2.get_ids(seed, seen)?,
+            self.3.get_ids(seed, seen)?,
+            self.4.get_ids(seed, seen)?,
+            self.5.get_ids(seed, seen)?,
+        ))
+    }
+}

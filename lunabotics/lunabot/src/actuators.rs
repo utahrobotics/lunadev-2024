@@ -1,4 +1,4 @@
-use lunabot_lib::ArmParameters;
+use lunabot_lib::{ArmAction, ArmParameters};
 use serial::SerialConnection;
 use unros::{
     anyhow,
@@ -72,16 +72,18 @@ impl AsyncNode for Arms {
             loop {
                 let params = self.arm_sub.recv().await;
 
-                match params {
-                    ArmParameters::TiltUp => tilt_repl.set("r()\r".into()),
-                    ArmParameters::TiltDown => tilt_repl.set("e()\r".into()),
-                    ArmParameters::Stop => {
-                        tilt_repl.set("s()\r".into());
-                        lift_repl.set("s()\r".into());
-                    }
-                    ArmParameters::LiftArm => lift_repl.set("e()\r".into()),
-                    ArmParameters::LowerArm => lift_repl.set("r()\r".into()),
-                    ArmParameters::SetArm { .. } => todo!(),
+                match params.lift {
+                    ArmAction::Extend => lift_repl.set("e()\r".into()),
+                    ArmAction::Retract => lift_repl.set("r()\r".into()),
+                    ArmAction::Stop => lift_repl.set("s()\r".into()),
+                    ArmAction::SetValue(_) => todo!(),
+                }
+
+                match params.tilt {
+                    ArmAction::Extend => tilt_repl.set("e()\r".into()),
+                    ArmAction::Retract => tilt_repl.set("r()\r".into()),
+                    ArmAction::Stop => tilt_repl.set("s()\r".into()),
+                    ArmAction::SetValue(_) => todo!(),
                 }
             }
         };

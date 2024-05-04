@@ -1,10 +1,10 @@
-use std::{ops::Deref, sync::Arc};
-use simba::scalar::SupersetOf;
 use networking::{
     bitcode::{self, Decode, Encode},
     negotiation::{ChannelNegotiation, Negotiation},
 };
 use ordered_float::{Float, FloatCore, NotNan};
+use simba::scalar::SupersetOf;
+use std::{ops::Deref, sync::Arc};
 
 pub const VIDEO_WIDTH: u32 = 1280;
 pub const VIDEO_HEIGHT: u32 = 720;
@@ -15,6 +15,7 @@ pub fn make_negotiation() -> Negotiation<(
     ChannelNegotiation<u8>,
     ChannelNegotiation<ControlsPacket>,
     ChannelNegotiation<Arc<str>>,
+    ChannelNegotiation<Audio>,
 )> {
     Negotiation::new(
         (
@@ -23,6 +24,7 @@ pub fn make_negotiation() -> Negotiation<(
             ChannelNegotiation::new("odometry"),
             ChannelNegotiation::new("controls"),
             ChannelNegotiation::new("logs"),
+            ChannelNegotiation::new("audio"),
         ),
         46432,
     )
@@ -30,18 +32,25 @@ pub fn make_negotiation() -> Negotiation<(
 }
 
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Debug)]
-pub enum ArmParameters {
-    TiltUp,
-    TiltDown,
+pub struct ArmParameters {
+    pub lift: ArmAction,
+    pub tilt: ArmAction,
+}
+
+#[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Debug)]
+pub enum ArmAction {
+    Extend,
+    Retract,
     Stop,
-    LiftArm,
-    LowerArm,
-    SetArm { tilt_frac: u8, lift_frac: u8 },
+    SetValue(u8),
 }
 
 impl Default for ArmParameters {
     fn default() -> Self {
-        ArmParameters::Stop
+        ArmParameters {
+            lift: ArmAction::Stop,
+            tilt: ArmAction::Stop,
+        }
     }
 }
 
@@ -58,7 +67,6 @@ pub enum ImportantMessage {
     EnableCamera,
     DisableCamera,
 }
-
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub struct Steering<N: Float + FloatCore = f32> {
@@ -93,13 +101,17 @@ impl<N: Float + FloatCore + std::ops::MulAssign + SupersetOf<f32>> Steering<N> {
         let mut right = drive;
 
         if steering.into_inner() > N::zero() {
-            right *=
-                (N::from_subset(&0.5) - steering.into_inner()) * N::from_subset(&2.0);
+            right *= (N::from_subset(&0.5) - steering.into_inner()) * N::from_subset(&2.0);
         } else {
-            left *=
-                (N::from_subset(&0.5) + steering.into_inner()) * N::from_subset(&2.0);
+            left *= (N::from_subset(&0.5) + steering.into_inner()) * N::from_subset(&2.0);
         }
 
         Self { left, right }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
+pub enum Audio {
+    Play,
+    Pause,
 }

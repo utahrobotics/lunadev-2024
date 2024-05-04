@@ -3,7 +3,7 @@ use std::{
     process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -11,12 +11,14 @@ use std::{
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
-use lunabot_lib::{make_negotiation, ArmParameters, ControlsPacket, ImportantMessage};
+use lunabot_lib::{
+    make_negotiation, ArmAction, ArmParameters, Audio, ControlsPacket, ImportantMessage,
+};
 use networking::new_server;
 use unros::{
     anyhow,
     node::SyncNode,
-    pubsub::{MonoPublisher, Subscriber},
+    pubsub::{MonoPublisher, Publisher, Subscriber},
     runtime::{start_unros_runtime, MainRuntimeContext},
     setup_logging, tokio,
 };
@@ -27,6 +29,7 @@ struct LunabotShared {
     echo_controls: AtomicBool,
     connected: AtomicBool,
     enable_camera: AtomicBool,
+    audio_pub: Mutex<Publisher<Audio>>,
 }
 
 #[derive(GodotClass)]
@@ -46,6 +49,7 @@ impl INode for LunabotConn {
             echo_controls: AtomicBool::default(),
             connected: AtomicBool::default(),
             enable_camera: AtomicBool::new(true),
+            audio_pub: Mutex::new(Publisher::default()),
         };
         let shared = Arc::new(shared);
 
@@ -111,7 +115,7 @@ impl INode for LunabotConn {
                     }
                 }
 
-                let (important, camera, _odometry, controls, logs) =
+                let (important, camera, _odometry, controls, logs, audio) =
                     match peer.negotiate(&negotiation).await {
                         Ok(x) => x,
                         Err(e) => {
@@ -145,6 +149,12 @@ impl INode for LunabotConn {
                     MonoPublisher::from(important.create_reliable_subscription());
                 let important_sub = Subscriber::new(8);
                 important.accept_subscription(important_sub.create_subscription());
+
+                shared
+                    .audio_pub
+                    .lock()
+                    .unwrap()
+                    .accept_subscription(audio.create_reliable_subscription());
 
                 let mut last_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
 
@@ -430,7 +440,7 @@ impl LunabotConn {
     fn lift_arm(&self) {
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.arm_params = ArmParameters::LiftArm;
+        controls_packet.arm_params.lift = ArmAction::Extend;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }
@@ -439,7 +449,16 @@ impl LunabotConn {
     fn lower_arm(&self) {
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.arm_params = ArmParameters::LowerArm;
+        controls_packet.arm_params.lift = ArmAction::Retract;
+        shared.controls_data.store(controls_packet);
+        shared.echo_controls.store(true, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn stop_lift_arm(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        let mut controls_packet = shared.controls_data.load();
+        controls_packet.arm_params.lift = ArmAction::Stop;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }
@@ -448,7 +467,7 @@ impl LunabotConn {
     fn tilt_bucket_up(&self) {
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.arm_params = ArmParameters::TiltUp;
+        controls_packet.arm_params.tilt = ArmAction::Extend;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }
@@ -457,7 +476,16 @@ impl LunabotConn {
     fn tilt_bucket_down(&self) {
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.arm_params = ArmParameters::TiltDown;
+        controls_packet.arm_params.tilt = ArmAction::Retract;
+        shared.controls_data.store(controls_packet);
+        shared.echo_controls.store(true, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn stop_tilt_bucket(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        let mut controls_packet = shared.controls_data.load();
+        controls_packet.arm_params.tilt = ArmAction::Stop;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }
@@ -466,7 +494,7 @@ impl LunabotConn {
     fn stop_arm(&self) {
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.arm_params = ArmParameters::Stop;
+        controls_packet.arm_params = ArmParameters::default();
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }
@@ -481,5 +509,17 @@ impl LunabotConn {
     fn disable_camera(&self) {
         let shared = self.shared.as_ref().unwrap();
         shared.enable_camera.store(false, Ordering::Relaxed);
+    }
+
+    #[func]
+    fn play_audio(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.audio_pub.lock().unwrap().set(Audio::Play);
+    }
+
+    #[func]
+    fn pause_audio(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.audio_pub.lock().unwrap().set(Audio::Pause);
     }
 }

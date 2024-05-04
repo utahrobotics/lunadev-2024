@@ -9,7 +9,8 @@ use std::{
 
 use image::DynamicImage;
 use lunabot_lib::{
-    make_negotiation, ArmParameters, ControlsPacket, ImportantMessage, VIDEO_HEIGHT, VIDEO_WIDTH, Steering,
+    make_negotiation, ArmParameters, Audio, ControlsPacket, ImportantMessage, Steering,
+    VIDEO_HEIGHT, VIDEO_WIDTH,
 };
 use networking::{
     negotiation::{ChannelNegotiation, Negotiation},
@@ -31,6 +32,8 @@ use unros::{
     tokio::{self, task::spawn_blocking},
     DontDrop, ShouldNotDrop,
 };
+
+use crate::audio::{pause_buzz, play_buzz};
 
 #[derive(Deserialize)]
 struct TelemetryConfig {
@@ -54,6 +57,7 @@ pub struct Telemetry {
         ChannelNegotiation<u8>,
         ChannelNegotiation<ControlsPacket>,
         ChannelNegotiation<Arc<str>>,
+        ChannelNegotiation<Audio>,
     )>,
     video_addr: SocketAddrV4,
     cam_width: u32,
@@ -193,7 +197,7 @@ impl AsyncNode for Telemetry {
                         Err(ConnectionError::Timeout) => {}
                     };
                 };
-                let (important, camera, _odometry, controls, logs) =
+                let (important, camera, _odometry, controls, logs, audio) =
                     match peer.negotiate(&self.negotiation).await {
                         Ok(x) => x,
                         Err(e) => {
@@ -283,13 +287,37 @@ impl AsyncNode for Telemetry {
                     }
                 };
 
+                let audio_fut = async {
+                    let audio_sub = Subscriber::new(1);
+                    audio.accept_subscription(audio_sub.create_subscription());
+
+                    loop {
+                        let Some(result) = audio_sub.recv_or_closed().await else {
+                            break;
+                        };
+                        let msg = match result {
+                            Ok(x) => x,
+                            Err(e) => {
+                                error!("Error receiving audio msg: {e}");
+                                continue;
+                            }
+                        };
+
+                        match msg {
+                            Audio::Play => play_buzz(),
+                            Audio::Pause => pause_buzz(),
+                        }
+                    }
+                };
+
                 tokio::select! {
                     _ = steering_fut => {}
                     _ = camera_fut => {}
                     _ = important_fut => {}
+                    _ = audio_fut => {}
                 }
                 self.steering_signal.set(Steering::default());
-                self.arm_signal.set(ArmParameters::Stop);
+                self.arm_signal.set(ArmParameters::default());
                 error!("Disconnected from lunabase!");
                 enable_camera.store(false, Ordering::Relaxed);
             }

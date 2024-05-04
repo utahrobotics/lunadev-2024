@@ -1,25 +1,33 @@
-use rodio::source::{SineWave, Source};
+use rodio::source::SineWave;
 use rodio::{OutputStream, Sink};
-use std::time::Duration;
-use unros::{log::error, rayon};
+use std::sync::OnceLock;
+use unros::anyhow::{self, Context};
 
-pub fn play_buzz(freq: f32, duration: f32) {
-    rayon::spawn(move || {
-        let (_stream, stream_handle) = match OutputStream::try_default() {
-            Ok(x) => x,
-            Err(e) => {
-                error!("Failed to play_buzz: {e}");
-                return;
-            }
-        };
-        let sink = Sink::try_new(&stream_handle).unwrap();
+static SINK: OnceLock<Sink> = OnceLock::new();
 
-        // Add a dummy source of the sake of the example.
-        let source = SineWave::new(freq).take_duration(Duration::from_secs_f32(duration));
-        sink.append(source);
+pub fn init_buzz() -> anyhow::Result<()> {
+    let (_stream, stream_handle) =
+        OutputStream::try_default().context("Failed to open audio stream")?;
+    let sink = Sink::try_new(&stream_handle).unwrap();
+    let Ok(()) = SINK.set(sink) else {
+        unreachable!();
+    };
+    let sink = SINK.get().unwrap();
+    let source = SineWave::new(4000.0);
+    sink.append(source);
+    sink.pause();
 
-        // The sound plays in a separate thread. This call will block the current thread until the sink
-        // has finished playing all its queued sounds.
+    std::thread::spawn(|| {
         sink.sleep_until_end();
     });
+
+    Ok(())
+}
+
+pub fn play_buzz() {
+    SINK.get().unwrap().play();
+}
+
+pub fn pause_buzz() {
+    SINK.get().unwrap().pause();
 }

@@ -15,6 +15,8 @@ use unros::{
     setup_logging, ShouldNotDrop,
 };
 
+use crate::audio::init_buzz;
+
 mod actuators;
 mod drive;
 mod serial;
@@ -25,6 +27,8 @@ mod telemetry;
 #[unros::main]
 async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     setup_logging!(context);
+    init_buzz()?;
+
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;
     let _camera_element = elements.remove("camera").unwrap();
