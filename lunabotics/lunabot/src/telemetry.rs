@@ -291,6 +291,9 @@ impl AsyncNode for Telemetry {
                             }
                         };
                         let mut current_camera_index = self.camera_index.load(Ordering::Relaxed);
+                        if self.camera_count == 0 {
+                            continue;
+                        }
 
                         match msg {
                             CameraMessage::NextCamera => {
