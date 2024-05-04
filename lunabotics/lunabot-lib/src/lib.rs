@@ -11,7 +11,7 @@ pub const VIDEO_HEIGHT: u32 = 720;
 
 pub fn make_negotiation() -> Negotiation<(
     ChannelNegotiation<ImportantMessage>,
-    ChannelNegotiation<Arc<str>>,
+    ChannelNegotiation<CameraMessage>,
     ChannelNegotiation<u8>,
     ChannelNegotiation<ControlsPacket>,
     ChannelNegotiation<Arc<str>>,
@@ -114,4 +114,11 @@ impl<N: Float + FloatCore + std::ops::MulAssign + SupersetOf<f32>> Steering<N> {
 pub enum Audio {
     Play,
     Pause,
+}
+
+#[derive(Clone, Encode, Decode, PartialEq, Eq, Debug)]
+pub enum CameraMessage {
+    Sdp(Arc<str>),
+    NextCamera,
+    PreviousCamera,
 }

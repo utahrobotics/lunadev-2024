@@ -12,7 +12,8 @@ use std::{
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
 use lunabot_lib::{
-    make_negotiation, ArmAction, ArmParameters, Audio, ControlsPacket, ImportantMessage,
+    make_negotiation, ArmAction, ArmParameters, Audio, CameraMessage, ControlsPacket,
+    ImportantMessage,
 };
 use networking::new_server;
 use unros::{
@@ -30,6 +31,7 @@ struct LunabotShared {
     connected: AtomicBool,
     enable_camera: AtomicBool,
     audio_pub: Mutex<Publisher<Audio>>,
+    camera_pub: Mutex<Publisher<CameraMessage>>,
 }
 
 #[derive(GodotClass)]
@@ -50,6 +52,7 @@ impl INode for LunabotConn {
             connected: AtomicBool::default(),
             enable_camera: AtomicBool::new(true),
             audio_pub: Mutex::new(Publisher::default()),
+            camera_pub: Mutex::new(Publisher::default()),
         };
         let shared = Arc::new(shared);
 
@@ -139,6 +142,11 @@ impl INode for LunabotConn {
 
                 let camera_sub = Subscriber::new(1);
                 camera.accept_subscription(camera_sub.create_subscription());
+                shared
+                    .camera_pub
+                    .lock()
+                    .unwrap()
+                    .accept_subscription(camera.create_reliable_subscription());
 
                 let mut controls_pub =
                     MonoPublisher::from(controls.create_unreliable_subscription());
@@ -272,11 +280,20 @@ impl INode for LunabotConn {
                             };
                             received!();
 
-                            let sdp = match result {
+                            let msg = match result {
                                 Ok(x) => x,
                                 Err(e) => {
                                     godot_error!("Failed to parse incoming sdp: {e}");
                                     error!("Failed to parse incoming sdp: {e}");
+                                    continue;
+                                }
+                            };
+
+                            let sdp = match msg {
+                                lunabot_lib::CameraMessage::Sdp(x) => x,
+                                msg => {
+                                    godot_error!("Unexpected camera message: {msg:?}");
+                                    error!("Unexpected camera message: {msg:?}");
                                     continue;
                                 }
                             };
@@ -521,5 +538,25 @@ impl LunabotConn {
     fn pause_audio(&self) {
         let shared = self.shared.as_ref().unwrap();
         shared.audio_pub.lock().unwrap().set(Audio::Pause);
+    }
+
+    #[func]
+    fn next_camera(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared
+            .camera_pub
+            .lock()
+            .unwrap()
+            .set(CameraMessage::NextCamera);
+    }
+
+    #[func]
+    fn previous_camera(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared
+            .camera_pub
+            .lock()
+            .unwrap()
+            .set(CameraMessage::PreviousCamera);
     }
 }

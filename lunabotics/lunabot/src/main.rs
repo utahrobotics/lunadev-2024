@@ -1,3 +1,8 @@
+use std::sync::{
+    atomic::{AtomicU8, Ordering},
+    Arc,
+};
+
 // use apriltag::{AprilTagDetector, PoseObservation};
 use camera::discover_all_cameras;
 use fxhash::FxBuildHasher;
@@ -10,9 +15,9 @@ use telemetry::Telemetry;
 use unros::{
     anyhow,
     node::{AsyncNode, SyncNode},
-    pubsub::Subscriber,
+    pubsub::{subs::Subscription, Subscriber},
     runtime::MainRuntimeContext,
-    setup_logging, ShouldNotDrop,
+    setup_logging,
 };
 
 use crate::audio::init_buzz;
@@ -34,25 +39,36 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let _camera_element = elements.remove("camera").unwrap();
     let _robot_base_ref = robot_base.get_ref();
     // let imu01 = elements.remove("imu01").unwrap().get_ref();
+    let camera_index = Arc::new(AtomicU8::new(0));
 
-    let mut cameras: Vec<_> = discover_all_cameras()?
-        .filter_map(|mut x| {
-            if x.get_camera_name().contains("RealSense") {
-                x.ignore_drop();
-                None
-            } else {
-                info!(
-                    "Discovered {} at {}",
-                    x.get_camera_name(),
-                    x.get_camera_uri()
-                );
-                Some(x)
-            }
+    let mut telemetry = Telemetry::new(1280, 720, 20, camera_index.clone()).await?;
+
+    let camera_count = discover_all_cameras()?
+        .filter(|x| !x.get_camera_name().contains("RealSense"))
+        .enumerate()
+        .map(|(i, cam)| {
+            info!(
+                "Discovered {} at {}",
+                cam.get_camera_name(),
+                cam.get_camera_uri()
+            );
+            let camera_index = camera_index.clone();
+            cam.image_received_pub().accept_subscription(
+                telemetry
+                    .create_image_subscription()
+                    .filter_map(move |img| {
+                        if camera_index.load(Ordering::Relaxed) == i as u8 {
+                            Some(img)
+                        } else {
+                            None
+                        }
+                    }),
+            );
+            cam.spawn(context.make_context(format!("teleop-camera-{i}")));
         })
-        .collect();
-    info!("Discovered {} cameras", cameras.len());
-
-    let telemetry = Telemetry::new(1280, 720, 20).await?;
+        .count();
+    info!("Discovered {camera_count} cameras");
+    telemetry.camera_count = camera_count as u8;
 
     let arm_sub = Subscriber::new(8);
     telemetry
@@ -74,32 +90,6 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         }
         Err(e) => {
             error!("{e}");
-        }
-    }
-
-    match cameras
-        .iter()
-        .enumerate()
-        .filter_map(|(i, cam)| {
-            if cam.get_camera_name() == "HD USB CAMERA: HD USB CAMERA" {
-                Some(i)
-            } else {
-                None
-            }
-        })
-        .next()
-    {
-        Some(i) => {
-            let mut teleop_camera = cameras.remove(i);
-            teleop_camera.res_x = 1280;
-            teleop_camera.res_y = 720;
-            teleop_camera
-                .image_received_pub()
-                .accept_subscription(telemetry.create_image_subscription());
-            teleop_camera.spawn(context.make_context("teleop_camera"));
-        }
-        None => {
-            error!("Teleop camera not found");
         }
     }
 

@@ -1,7 +1,7 @@
 use std::{
     net::SocketAddrV4,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -9,8 +9,8 @@ use std::{
 
 use image::DynamicImage;
 use lunabot_lib::{
-    make_negotiation, ArmParameters, Audio, ControlsPacket, ImportantMessage, Steering,
-    VIDEO_HEIGHT, VIDEO_WIDTH,
+    make_negotiation, ArmParameters, Audio, CameraMessage, ControlsPacket, ImportantMessage,
+    Steering, VIDEO_HEIGHT, VIDEO_WIDTH,
 };
 use networking::{
     negotiation::{ChannelNegotiation, Negotiation},
@@ -53,7 +53,7 @@ pub struct Telemetry {
     dont_drop: DontDrop<Self>,
     negotiation: Negotiation<(
         ChannelNegotiation<ImportantMessage>,
-        ChannelNegotiation<Arc<str>>,
+        ChannelNegotiation<CameraMessage>,
         ChannelNegotiation<u8>,
         ChannelNegotiation<ControlsPacket>,
         ChannelNegotiation<Arc<str>>,
@@ -63,10 +63,17 @@ pub struct Telemetry {
     cam_width: u32,
     cam_height: u32,
     cam_fps: usize,
+    camera_index: Arc<AtomicU8>,
+    pub camera_count: u8,
 }
 
 impl Telemetry {
-    pub async fn new(cam_width: u32, cam_height: u32, cam_fps: usize) -> anyhow::Result<Self> {
+    pub async fn new(
+        cam_width: u32,
+        cam_height: u32,
+        cam_fps: usize,
+        camera_index: Arc<AtomicU8>,
+    ) -> anyhow::Result<Self> {
         let config: TelemetryConfig = unros::get_env()?;
         let mut video_addr = config.server_addr;
         video_addr.set_port(video_addr.port() + 1);
@@ -87,6 +94,8 @@ impl Telemetry {
             cam_height,
             video_addr,
             cam_fps,
+            camera_index,
+            camera_count: 0,
         })
     }
 
@@ -268,22 +277,39 @@ impl AsyncNode for Telemetry {
                     let camera_sub = Subscriber::new(1);
                     camera.accept_subscription(camera_sub.create_subscription());
                     camera_pub.accept_subscription(camera.create_reliable_subscription());
-                    camera_pub.set(sdp.clone());
+                    camera_pub.set(CameraMessage::Sdp(sdp.clone()));
 
                     loop {
                         let Some(result) = camera_sub.recv_or_closed().await else {
                             break;
                         };
-                        let _ = match result {
+                        let msg = match result {
                             Ok(x) => x,
                             Err(e) => {
                                 error!("Error receiving camera msg: {e}");
                                 continue;
                             }
                         };
+                        let mut current_camera_index = self.camera_index.load(Ordering::Relaxed);
 
-                        info!("Resending SDP");
-                        camera_pub.set(sdp.clone());
+                        match msg {
+                            CameraMessage::NextCamera => {
+                                current_camera_index =
+                                    (current_camera_index + 1) % self.camera_count;
+                                self.camera_index
+                                    .store(current_camera_index, Ordering::Relaxed);
+                            }
+                            CameraMessage::PreviousCamera => {
+                                current_camera_index = (current_camera_index + self.camera_count
+                                    - 1)
+                                    % self.camera_count;
+                                self.camera_index
+                                    .store(current_camera_index, Ordering::Relaxed);
+                            }
+                            CameraMessage::Sdp(_) => {
+                                error!("Received camera sdp");
+                            }
+                        }
                     }
                 };
 
