@@ -484,7 +484,7 @@ impl LunabotConn {
     fn tilt_bucket_up(&self) {
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.arm_params.tilt = ArmAction::Extend;
+        controls_packet.arm_params.tilt = ArmAction::Retract;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }
@@ -493,7 +493,7 @@ impl LunabotConn {
     fn tilt_bucket_down(&self) {
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.arm_params.tilt = ArmAction::Retract;
+        controls_packet.arm_params.tilt = ArmAction::Extend;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }

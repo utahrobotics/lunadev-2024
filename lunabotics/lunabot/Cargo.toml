@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 unros = { workspace = true }
 camera = { workspace = true }
-localization = { workspace = true }
+# localization = { workspace = true }
 apriltag = { workspace = true }
 networking = { workspace = true }
 rig = { workspace = true }

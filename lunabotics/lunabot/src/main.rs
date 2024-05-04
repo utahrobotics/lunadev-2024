@@ -6,10 +6,10 @@ use std::sync::{
 // use apriltag::{AprilTagDetector, PoseObservation};
 use camera::discover_all_cameras;
 use fxhash::FxBuildHasher;
-use localization::{
-    engines::window::{DefaultWindowConfig, WindowLocalizer},
-    Localizer,
-};
+// use localization::{
+//     engines::window::{DefaultWindowConfig, WindowLocalizer},
+//     Localizer,
+// };
 use rig::Robot;
 use telemetry::Telemetry;
 use unros::{
@@ -80,21 +80,25 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
 
     match serial::connect_to_serial() {
         Ok((arms, drive)) => {
-            telemetry
-                .steering_pub()
-                .accept_subscription(drive.get_steering_sub());
+            if let Some(drive) = drive {
+                telemetry
+                    .steering_pub()
+                    .accept_subscription(drive.get_steering_sub());
+                drive.spawn(context.make_context("drive"));
+            }
 
-            telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
-            drive.spawn(context.make_context("drive"));
-            arms.spawn(context.make_context("arms"));
+            if let Some(arms) = arms {
+                telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
+                arms.spawn(context.make_context("arms"));
+            }
         }
         Err(e) => {
             error!("{e}");
         }
     }
 
-    let localizer: Localizer<f32, WindowLocalizer<f32, _, _, _, _>> =
-        Localizer::new(robot_base, DefaultWindowConfig::default());
+    // let localizer: Localizer<f32, WindowLocalizer<f32, _, _, _, _>> =
+    //     Localizer::new(robot_base, DefaultWindowConfig::default());
 
     // let mut apriltag = AprilTagDetector::new(640.0, 1280, 720, camera_element.get_ref());
     // apriltag.add_tag(Default::default(), Default::default(), 0.134, 0);
@@ -134,7 +138,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     //     .msg_received_pub()
     //     .accept_subscription(localizer.create_imu_sub().set_name("imu01"));
 
-    localizer.spawn(context.make_context("localizer"));
+    // localizer.spawn(context.make_context("localizer"));
     telemetry.spawn(context.make_context("telemetry"));
 
     context.wait_for_exit().await;

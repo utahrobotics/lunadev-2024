@@ -2278,7 +2278,6 @@ dependencies = [
  "camera",
  "fxhash",
  "image 0.25.1",
- "localization",
  "lunabot-lib",
  "nalgebra",
  "networking",
