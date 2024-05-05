@@ -9,7 +9,7 @@ edition = "2021"
 unros = { workspace = true }
 camera = { workspace = true }
 # localization = { workspace = true }
-apriltag = { workspace = true }
+# apriltag = { workspace = true }
 networking = { workspace = true }
 rig = { workspace = true }
 nalgebra = { workspace = true }
@@ -25,3 +25,4 @@ py-repl = { workspace = true }
 lunabot-lib = { path = "../lunabot-lib" }
 base64 = "0"
 rodio = "0"
+ffmpeg-sidecar = { workspace = true }

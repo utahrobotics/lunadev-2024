@@ -18,20 +18,6 @@ pub fn connect_to_serial() -> anyhow::Result<(Option<Arms>, Option<Drive>)> {
         })
         .collect();
 
-    if acm_devices.is_empty() {
-        return Err(anyhow::anyhow!("No ttyACM devices found"));
-    }
-    if acm_devices.len() != 4 {
-        return Err(anyhow::anyhow!(
-            "Expected 4 ttyACM devices, got {}",
-            acm_devices.len()
-        ));
-    }
-
-    if acm_devices.is_empty() {
-        return Err(anyhow::anyhow!("No ttyACM devices found"));
-    }
-
     let mut micro_python_paths = Vec::with_capacity(2);
     let mut vesc_paths = Vec::with_capacity(2);
     for entry in &acm_devices {
@@ -58,7 +44,7 @@ pub fn connect_to_serial() -> anyhow::Result<(Option<Arms>, Option<Drive>)> {
 
     let mut arms = None;
 
-    if micro_python_paths.len() < 2 {
+    if micro_python_paths.len() == 2 {
         arms = Some(Arms::new(
             micro_python_paths[0].to_string_lossy(),
             micro_python_paths[1].to_string_lossy(),
@@ -67,7 +53,7 @@ pub fn connect_to_serial() -> anyhow::Result<(Option<Arms>, Option<Drive>)> {
 
     let mut drive = None;
 
-    if vesc_paths.len() < 2 {
+    if vesc_paths.len() == 2 {
         match Drive::new(
             vesc_paths[0].to_string_lossy(),
             vesc_paths[1].to_string_lossy(),

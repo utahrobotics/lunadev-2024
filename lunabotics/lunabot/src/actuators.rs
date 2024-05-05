@@ -69,6 +69,12 @@ impl AsyncNode for Arms {
                 }
             }
 
+            // lift_repl.set("extend_home()\r".into());
+            // tilt_repl.set("extend_home()\r".into());
+            // loop {
+            //     tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
+            // }
+
             loop {
                 let params = self.arm_sub.recv().await;
 

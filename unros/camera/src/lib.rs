@@ -155,13 +155,13 @@ where
             }
 
             let mut img = match &stream_desc.pixfmt {
-                PixelFormat::Gray(8) => todo!(),
-                PixelFormat::Rgb(8) => todo!(),
+                PixelFormat::Gray(8) => continue,
+                PixelFormat::Rgb(8) => continue,
                 PixelFormat::Jpeg => {
                     let decoder = JpegDecoder::new(Cursor::new(frame.to_vec())).unwrap();
                     DynamicImage::from_decoder(decoder)?
                 }
-                _ => unreachable!(),
+                _ => continue,
             };
 
             img = (self.resizer)(img, self.res_x, self.res_y);

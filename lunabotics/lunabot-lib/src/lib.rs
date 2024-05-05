@@ -119,6 +119,4 @@ pub enum Audio {
 #[derive(Clone, Encode, Decode, PartialEq, Eq, Debug)]
 pub enum CameraMessage {
     Sdp(Arc<str>),
-    NextCamera,
-    PreviousCamera,
 }

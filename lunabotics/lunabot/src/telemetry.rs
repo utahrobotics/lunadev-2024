@@ -1,7 +1,7 @@
 use std::{
     net::SocketAddrV4,
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -63,8 +63,6 @@ pub struct Telemetry {
     cam_width: u32,
     cam_height: u32,
     cam_fps: usize,
-    camera_index: Arc<AtomicU8>,
-    pub camera_count: u8,
 }
 
 impl Telemetry {
@@ -72,7 +70,6 @@ impl Telemetry {
         cam_width: u32,
         cam_height: u32,
         cam_fps: usize,
-        camera_index: Arc<AtomicU8>,
     ) -> anyhow::Result<Self> {
         let config: TelemetryConfig = unros::get_env()?;
         let mut video_addr = config.server_addr;
@@ -94,8 +91,6 @@ impl Telemetry {
             cam_height,
             video_addr,
             cam_fps,
-            camera_index,
-            camera_count: 0,
         })
     }
 
@@ -283,36 +278,13 @@ impl AsyncNode for Telemetry {
                         let Some(result) = camera_sub.recv_or_closed().await else {
                             break;
                         };
-                        let msg = match result {
+                        let _ = match result {
                             Ok(x) => x,
                             Err(e) => {
                                 error!("Error receiving camera msg: {e}");
                                 continue;
                             }
                         };
-                        let mut current_camera_index = self.camera_index.load(Ordering::Relaxed);
-                        if self.camera_count == 0 {
-                            continue;
-                        }
-
-                        match msg {
-                            CameraMessage::NextCamera => {
-                                current_camera_index =
-                                    (current_camera_index + 1) % self.camera_count;
-                                self.camera_index
-                                    .store(current_camera_index, Ordering::Relaxed);
-                            }
-                            CameraMessage::PreviousCamera => {
-                                current_camera_index = (current_camera_index + self.camera_count
-                                    - 1)
-                                    % self.camera_count;
-                                self.camera_index
-                                    .store(current_camera_index, Ordering::Relaxed);
-                            }
-                            CameraMessage::Sdp(_) => {
-                                error!("Received camera sdp");
-                            }
-                        }
                     }
                 };
 

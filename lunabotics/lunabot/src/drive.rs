@@ -37,7 +37,7 @@ impl Drive {
         left_port: impl Into<String>,
         right_port: impl Into<String>,
     ) -> anyhow::Result<Self> {
-        let mut vesc = PyRepl::new("lunabot/src")?;
+        let mut vesc = PyRepl::new("lunabotics/lunabot/src")?;
         let config: DriveConfig = get_env()?;
 
         let msg = vesc.exec("from drive_vesc import *")?;
