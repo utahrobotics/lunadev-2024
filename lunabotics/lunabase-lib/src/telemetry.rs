@@ -192,8 +192,27 @@ impl INode for LunabotConn {
                     }
                     macro_rules! make_ffplay {
                         () => {{
+                            // let mut child = std::process::Command::new("ffplay")
+                            // .args([
+                            //     "-protocol_whitelist",
+                            //     "file,rtp,udp",
+                            //     "-i",
+                            //     "camera.sdp",
+                            //     "-flags",
+                            //     "low_delay",
+                            //     "-avioflags",
+                            //     "direct",
+                            //     "-probesize",
+                            //     "32",
+                            //     "-analyzeduration",
+                            //     "0",
+                            //     "-sync",
+                            //     "ext",
+                            //     "-framedrop",
+                            // ])
                             let mut child = std::process::Command::new("mplayer")
-                                .args(["-monitorpixelaspect", "1", "sdp://camera.sdp"])
+                                .args(["-monitorpixelaspect", "1", "-nocache", "sdp://camera.sdp"])
+                                // .args(["rtp://192.168.0.102:43722"])
                                 .stderr(Stdio::piped())
                                 .spawn()
                                 .expect("Failed to init ffplay process");
