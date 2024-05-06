@@ -192,23 +192,9 @@ impl INode for LunabotConn {
                     }
                     macro_rules! make_ffplay {
                         () => {{
-                            let mut child = std::process::Command::new("ffplay")
+                            let mut child = std::process::Command::new("vlc")
                                 .args([
-                                    "-protocol_whitelist",
-                                    "file,rtp,udp",
-                                    "-i",
                                     "camera.sdp",
-                                    "-flags",
-                                    "low_delay",
-                                    "-avioflags",
-                                    "direct",
-                                    "-probesize",
-                                    "32",
-                                    "-analyzeduration",
-                                    "0",
-                                    "-sync",
-                                    "ext",
-                                    "-framedrop",
                                 ])
                                 .stderr(Stdio::piped())
                                 .spawn()
@@ -291,11 +277,11 @@ impl INode for LunabotConn {
 
                             let sdp = match msg {
                                 lunabot_lib::CameraMessage::Sdp(x) => x,
-                                msg => {
-                                    godot_error!("Unexpected camera message: {msg:?}");
-                                    error!("Unexpected camera message: {msg:?}");
-                                    continue;
-                                }
+                                // msg => {
+                                //     godot_error!("Unexpected camera message: {msg:?}");
+                                //     error!("Unexpected camera message: {msg:?}");
+                                //     continue;
+                                // }
                             };
 
                             std::fs::write("camera.sdp", sdp.as_bytes())
@@ -540,23 +526,23 @@ impl LunabotConn {
         shared.audio_pub.lock().unwrap().set(Audio::Pause);
     }
 
-    #[func]
-    fn next_camera(&self) {
-        let shared = self.shared.as_ref().unwrap();
-        shared
-            .camera_pub
-            .lock()
-            .unwrap()
-            .set(CameraMessage::NextCamera);
-    }
+    // #[func]
+    // fn next_camera(&self) {
+    //     let shared = self.shared.as_ref().unwrap();
+    //     shared
+    //         .camera_pub
+    //         .lock()
+    //         .unwrap()
+    //         .set(CameraMessage::NextCamera);
+    // }
 
-    #[func]
-    fn previous_camera(&self) {
-        let shared = self.shared.as_ref().unwrap();
-        shared
-            .camera_pub
-            .lock()
-            .unwrap()
-            .set(CameraMessage::PreviousCamera);
-    }
+    // #[func]
+    // fn previous_camera(&self) {
+    //     let shared = self.shared.as_ref().unwrap();
+    //     shared
+    //         .camera_pub
+    //         .lock()
+    //         .unwrap()
+    //         .set(CameraMessage::PreviousCamera);
+    // }
 }

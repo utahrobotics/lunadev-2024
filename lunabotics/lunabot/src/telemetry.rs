@@ -1,13 +1,11 @@
 use std::{
-    net::SocketAddrV4,
-    sync::{
+    net::SocketAddrV4, ops::Deref, sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    },
-    time::{Duration, Instant},
+    }, time::{Duration, Instant}
 };
 
-use image::DynamicImage;
+use image::RgbImage;
 use lunabot_lib::{
     make_negotiation, ArmParameters, Audio, CameraMessage, ControlsPacket, ImportantMessage,
     Steering, VIDEO_HEIGHT, VIDEO_WIDTH,
@@ -18,7 +16,6 @@ use networking::{
 };
 use ordered_float::NotNan;
 use serde::Deserialize;
-use spin_sleep::SpinSleeper;
 use unros::{
     anyhow,
     logging::{
@@ -26,14 +23,14 @@ use unros::{
         get_log_pub,
     },
     node::{AsyncNode, SyncNode},
-    pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber},
+    pubsub::{MonoPublisher, Publisher, PublisherRef, Subscriber, WatchSubscriber},
     runtime::RuntimeContext,
     setup_logging,
     tokio::{self, task::spawn_blocking},
     DontDrop, ShouldNotDrop,
 };
 
-use crate::audio::{pause_buzz, play_buzz};
+use crate::{audio::{pause_buzz, play_buzz}, CAMERA_HEIGHT, CAMERA_WIDTH, EMPTY_ROW, MAX_CAMERA_COUNT, ROW_DATA_LENGTH, ROW_LENGTH};
 
 #[derive(Deserialize)]
 struct TelemetryConfig {
@@ -49,7 +46,6 @@ pub struct Telemetry {
     pub camera_delta: Duration,
     steering_signal: Publisher<Steering>,
     arm_signal: Publisher<ArmParameters>,
-    image_subscriptions: Subscriber<Arc<DynamicImage>>,
     dont_drop: DontDrop<Self>,
     negotiation: Negotiation<(
         ChannelNegotiation<ImportantMessage>,
@@ -63,13 +59,13 @@ pub struct Telemetry {
     cam_width: u32,
     cam_height: u32,
     cam_fps: usize,
+    camera_subs: Vec<WatchSubscriber<RgbImage>>
 }
 
 impl Telemetry {
     pub async fn new(
-        cam_width: u32,
-        cam_height: u32,
         cam_fps: usize,
+        camera_subs: Vec<WatchSubscriber<RgbImage>>
     ) -> anyhow::Result<Self> {
         let config: TelemetryConfig = unros::get_env()?;
         let mut video_addr = config.server_addr;
@@ -82,15 +78,15 @@ impl Telemetry {
             network_connector,
             server_addr: config.server_addr,
             steering_signal: Publisher::default(),
-            image_subscriptions: Subscriber::new(1),
             arm_signal: Publisher::default(),
             camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
             dont_drop: DontDrop::new("telemetry"),
             negotiation: make_negotiation(),
-            cam_width,
-            cam_height,
+            cam_width: CAMERA_WIDTH * ROW_LENGTH as u32,
+            cam_height: CAMERA_HEIGHT * MAX_CAMERA_COUNT.div_ceil(ROW_LENGTH) as u32,
             video_addr,
             cam_fps,
+            camera_subs
         })
     }
 
@@ -101,16 +97,13 @@ impl Telemetry {
     pub fn arm_pub(&self) -> PublisherRef<ArmParameters> {
         self.arm_signal.get_ref()
     }
-
-    pub fn create_image_subscription(&self) -> DirectSubscription<Arc<DynamicImage>> {
-        self.image_subscriptions.create_subscription()
-    }
 }
 
 impl AsyncNode for Telemetry {
     type Result = anyhow::Result<()>;
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
+        setup_logging!(context);
         // self.network_node
         //     .get_intrinsics()
         //     .manually_run(context.get_name().clone());
@@ -123,10 +116,7 @@ impl AsyncNode for Telemetry {
 
         let context2 = context.clone();
 
-        let cam_fut = spawn_blocking(move || {
-            setup_logging!(context2);
-            let sleeper = SpinSleeper::default();
-
+        let cam_fut = async {
             loop {
                 let mut video_dump;
                 loop {
@@ -156,12 +146,12 @@ impl AsyncNode for Telemetry {
                                 if context2.is_runtime_exiting() {
                                     return Ok(());
                                 }
-                                sleeper.sleep(self.camera_delta);
+                                tokio::time::sleep(self.camera_delta).await;
                             }
                         }
                         break;
                     }
-                    sleeper.sleep(self.camera_delta);
+                    tokio::time::sleep(self.camera_delta).await;
                 }
                 let mut start_service = Instant::now();
                 loop {
@@ -172,20 +162,31 @@ impl AsyncNode for Telemetry {
                         drop(video_dump);
                         break;
                     }
-                    if let Some(img) = self.image_subscriptions.try_recv() {
-                        video_dump.write_frame(img.clone())?;
+                    let updated = self.camera_subs.iter_mut().any(|sub| WatchSubscriber::try_update(sub));
+                    if updated {
+                        for row in self.camera_subs.chunks(ROW_LENGTH) {
+                            for y in 0..CAMERA_HEIGHT as usize {
+                                for i in 0..ROW_LENGTH {
+                                    let row_data = if let Some(img) = row.get(i) {
+                                        img.deref().split_at(ROW_DATA_LENGTH * y).1.split_at(ROW_DATA_LENGTH).0
+                                    } else {
+                                        &EMPTY_ROW
+                                    };
+                                    if let Err(e) = video_dump.write_raw(row_data).await {
+                                        error!("Failed to write camera data: {e}");
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     let elapsed = start_service.elapsed();
                     start_service += elapsed;
-                    sleeper.sleep(self.camera_delta.saturating_sub(elapsed));
+                    tokio::time::sleep(self.camera_delta.saturating_sub(elapsed)).await;
                 }
             }
-        });
+        };
         let enable_camera = enable_camera2;
-
-        let context2 = context.clone();
-        setup_logging!(context2);
 
         let peer_fut = async {
             loop {
@@ -323,9 +324,10 @@ impl AsyncNode for Telemetry {
                 enable_camera.store(false, Ordering::Relaxed);
             }
         };
+        let context = context.clone();
 
         tokio::select! {
-            res = cam_fut => res.unwrap(),
+            res = cam_fut => res,
             res = peer_fut => res,
             res = spawn_blocking(|| self.network_node.run(context)) => res.unwrap(),
         }

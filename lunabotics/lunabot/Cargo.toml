@@ -25,4 +25,3 @@ py-repl = { workspace = true }
 lunabot-lib = { path = "../lunabot-lib" }
 base64 = "0"
 rodio = "0"
-ffmpeg-sidecar = { workspace = true }

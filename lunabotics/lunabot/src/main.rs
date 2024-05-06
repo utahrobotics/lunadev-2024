@@ -1,21 +1,25 @@
+use std::sync::Arc;
+
+use camera::discover_all_cameras;
 // use apriltag::{AprilTagDetector, PoseObservation};
 use fxhash::FxBuildHasher;
+use image::DynamicImage;
 // use localization::{
 //     engines::window::{DefaultWindowConfig, WindowLocalizer},
 //     Localizer,
 // };
 use rig::Robot;
 use telemetry::Telemetry;
-use unros::{anyhow, node::AsyncNode, runtime::MainRuntimeContext, setup_logging};
+use unros::{anyhow, node::{AsyncNode, SyncNode}, pubsub::{subs::Subscription, Subscriber}, runtime::MainRuntimeContext, setup_logging, ShouldNotDrop};
 
-use crate::{audio::init_buzz, mosaic::setup_teleop_cameras};
+use crate::audio::init_buzz;
 
 mod actuators;
 mod drive;
 mod serial;
 // mod imu;
 mod audio;
-mod mosaic;
+// mod mosaic;
 mod telemetry;
 
 const MAX_CAMERA_COUNT: usize = 5;
@@ -23,6 +27,8 @@ const ROW_LENGTH: usize = 3;
 
 const CAMERA_WIDTH: u32 = 640;
 const CAMERA_HEIGHT: u32 = 360;
+const ROW_DATA_LENGTH: usize = CAMERA_WIDTH as usize * 3;
+const EMPTY_ROW: [u8; ROW_DATA_LENGTH] = [0; ROW_DATA_LENGTH];
 
 #[unros::main]
 async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
@@ -34,16 +40,36 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     let _camera_element = elements.remove("camera").unwrap();
     let _robot_base_ref = robot_base.get_ref();
 
-    let teleop_cam_width = CAMERA_WIDTH * ROW_LENGTH as u32;
-    let teleop_cam_height = CAMERA_HEIGHT * MAX_CAMERA_COUNT.div_ceil(ROW_LENGTH) as u32;
+    let mut camera_subs = vec![];
+
+    for mut cam in discover_all_cameras()?.filter_map(|mut cam| {
+        if cam.get_camera_name().contains("RealSense") {
+            cam.ignore_drop();
+            None
+        } else {
+            Some(cam)
+        }
+    }) {
+        info!(
+            "Discovered {} at {}",
+            cam.get_camera_name(),
+            cam.get_camera_uri()
+        );
+        cam.res_x = CAMERA_WIDTH;
+        cam.res_y = CAMERA_HEIGHT;
+        let subscriber = Subscriber::new(1);
+        cam.image_received_pub().accept_subscription(subscriber.create_subscription().map(|img: Arc<DynamicImage>| img.to_rgb8()));
+        let context = context.make_context(cam.get_camera_name());
+        cam.spawn(context);
+        camera_subs.push(subscriber.into_watch().await);
+    }
 
     let telemetry = Telemetry::new(
-        teleop_cam_width, teleop_cam_height,
         20,
+        camera_subs
     )
     .await?;
 
-    setup_teleop_cameras(teleop_cam_width, teleop_cam_height, &context, addr);
 
     match serial::connect_to_serial() {
         Ok((arms, drive)) => {

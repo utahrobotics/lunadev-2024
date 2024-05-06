@@ -9,14 +9,13 @@
 use std::{
     error::Error,
     fmt::Display,
-    io::{ErrorKind, Write},
+    io::Write,
     net::{SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
 };
 
-use crossbeam::{queue::ArrayQueue, utils::Backoff};
+use crossbeam::{atomic::AtomicCell, utils::Backoff};
 use ffmpeg_sidecar::{child::FfmpegChild, command::FfmpegCommand, event::FfmpegEvent};
 use image::{DynamicImage, EncodableLayout};
 use log::{error, info, warn};
@@ -25,6 +24,7 @@ use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt, BufWriter},
     net::TcpStream,
+    process::ChildStdin,
     sync::mpsc,
 };
 
@@ -168,6 +168,7 @@ pub enum VideoWriteError {
         actual_width: u32,
         actual_height: u32,
     },
+    IOError(std::io::Error),
     /// There is no information attached to the error.
     Unknown,
 }
@@ -177,6 +178,7 @@ impl Display for VideoWriteError {
         match self {
             Self::Unknown => write!(f, "The video writing thread has failed for some reason"),
             Self::IncorrectDimensions { expected_width: expected_x, expected_height: expected_y, actual_width: actual_x, actual_height: actual_y } => write!(f, "Image dimensions are wrong. Expected {expected_x}x{expected_y}, got {actual_x}x{actual_y}"),
+            VideoWriteError::IOError(e) => write!(f, "An IO error occurred while writing the video frame: {e}"),
         }
     }
 }
@@ -186,7 +188,6 @@ impl Error for VideoWriteError {}
 enum VideoDataDumpType {
     Rtp(SocketAddrV4),
     File(PathBuf),
-    Display,
 }
 
 impl std::fmt::Display for VideoDataDumpType {
@@ -196,11 +197,13 @@ impl std::fmt::Display for VideoDataDumpType {
             VideoDataDumpType::File(path) => {
                 write!(f, "{}", path.file_name().unwrap().to_string_lossy())
             }
-            VideoDataDumpType::Display => {
-                write!(f, "Display")
-            }
         }
     }
+}
+
+enum VideoWriter {
+    Queue(Arc<AtomicCell<Option<DynamicImage>>>),
+    Ffmpeg(ChildStdin),
 }
 
 /// A dump for writing images into videos using `ffmpeg`.
@@ -208,10 +211,9 @@ impl std::fmt::Display for VideoDataDumpType {
 /// If `ffmpeg` is not installed, it will be downloaded locally
 /// automatically.
 pub struct VideoDataDump {
-    video_writer: Arc<ArrayQueue<Arc<DynamicImage>>>,
+    video_writer: VideoWriter,
     width: u32,
     height: u32,
-    dump_type: VideoDataDumpType,
     // path: PathBuf,
     // start: Instant,
 }
@@ -304,7 +306,7 @@ a=fmtp:96 packetization-mode=1",
         in_height: u32,
         context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
-        let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
+        let queue_sender = Arc::new(AtomicCell::<Option<DynamicImage>>::new(None));
         let queue_receiver = queue_sender.clone();
 
         let backoff = Backoff::new();
@@ -329,7 +331,7 @@ a=fmtp:96 packetization-mode=1",
             };
             let mut buffer = Vec::with_capacity(in_width as usize * in_height as usize);
             loop {
-                let Some(frame) = queue_receiver.pop() else {
+                let Some(frame) = queue_receiver.take() else {
                     if Arc::strong_count(&queue_receiver) == 1 {
                         break;
                     }
@@ -356,10 +358,9 @@ a=fmtp:96 packetization-mode=1",
         });
 
         Ok(Self {
-            video_writer: queue_sender,
+            video_writer: VideoWriter::Queue(queue_sender),
             width: in_width,
             height: in_height,
-            dump_type: VideoDataDumpType::Display,
         })
     }
 
@@ -410,7 +411,6 @@ a=fmtp:96 packetization-mode=1",
         Self::new(
             in_width,
             in_height,
-            fps,
             VideoDataDumpType::File(pathbuf),
             output,
             context,
@@ -469,7 +469,6 @@ a=fmtp:96 packetization-mode=1",
         Self::new(
             in_width,
             in_height,
-            fps,
             VideoDataDumpType::Rtp(addr),
             output,
             context,
@@ -479,16 +478,10 @@ a=fmtp:96 packetization-mode=1",
     fn new(
         in_width: u32,
         in_height: u32,
-        fps: usize,
         dump_type: VideoDataDumpType,
         mut output: FfmpegChild,
         context: &impl RuntimeContextExt,
     ) -> Result<Self, VideoDumpInitError> {
-        let queue_sender = Arc::new(ArrayQueue::<Arc<DynamicImage>>::new(1));
-        let queue_receiver = queue_sender.clone();
-
-        let mut video_out = output.take_stdin().unwrap();
-
         let events = output
             .iter()
             .map_err(|e| VideoDumpInitError::VideoError(e.to_string()))?;
@@ -508,65 +501,18 @@ a=fmtp:96 packetization-mode=1",
             });
         });
 
-        let dump_type2 = dump_type.clone();
-        let backoff = Backoff::new();
-        let mut last_frame = None;
-        let mut instant = Instant::now();
-        let delta = Duration::from_millis((1000 / fps) as u64);
-
-        context.spawn_persistent_sync(move || loop {
-            let elapsed = instant.elapsed();
-            let frame = match queue_receiver.pop() {
-                Some(x) => {
-                    last_frame = Some(x.clone());
-                    x
-                }
-                None => {
-                    if Arc::strong_count(&queue_receiver) == 1 {
-                        if let Err(e) = video_out.flush() {
-                            error!("Failed to flush {}: {e}", dump_type2);
-                        }
-                        break;
-                    }
-                    backoff.snooze();
-                    if let Some(last_frame) = last_frame.clone() {
-                        if elapsed >= delta {
-                            last_frame
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        continue;
-                    }
-                }
-            };
-
-            instant += elapsed;
-            backoff.reset();
-
-            if let Err(e) = video_out.write_all(frame.to_rgb8().as_bytes()) {
-                if e.kind() == ErrorKind::BrokenPipe {
-                    error!("{} has closed!", dump_type2);
-                    break;
-                } else {
-                    error!(
-                        "Faced the following error while writing video frame to {}: {e}",
-                        dump_type2
-                    );
-                }
-            }
-        });
-
         Ok(Self {
-            video_writer: queue_sender,
+            video_writer: VideoWriter::Ffmpeg(
+                ChildStdin::from_std(output.take_stdin().unwrap())
+                    .expect("Failed to convert stdin to async"),
+            ),
             width: in_width,
             height: in_height,
-            dump_type,
         })
     }
 
     /// Writes an image into this dump.
-    pub fn write_frame(&mut self, frame: Arc<DynamicImage>) -> Result<(), VideoWriteError> {
+    pub async fn write_frame(&mut self, frame: &DynamicImage) -> Result<(), VideoWriteError> {
         if frame.width() != self.width || frame.height() != self.height {
             return Err(VideoWriteError::IncorrectDimensions {
                 expected_width: self.width,
@@ -576,36 +522,41 @@ a=fmtp:96 packetization-mode=1",
             });
         }
 
-        if Arc::strong_count(&self.video_writer) == 1 {
-            return Err(VideoWriteError::Unknown);
-        }
-        match self.video_writer.force_push(frame) {
-            Some(_) => {
-                warn!(
-                    "Overwriting last frame in {} as queue was full!",
-                    self.dump_type
-                );
+        match &mut self.video_writer {
+            VideoWriter::Queue(queue) => {
+                if Arc::strong_count(queue) == 1 {
+                    return Err(VideoWriteError::Unknown);
+                }
+                queue.store(Some(frame.clone()));
                 Ok(())
             }
-            None => Ok(()),
+            VideoWriter::Ffmpeg(child) => {
+                let tmp;
+                let frame_rgb;
+                match frame {
+                    DynamicImage::ImageRgb8(img) => frame_rgb = img,
+                    _ => {
+                        tmp = frame.to_rgb8();
+                        frame_rgb = &tmp;
+                    }
+                }
+                child
+                    .write_all(frame_rgb.as_bytes())
+                    .await
+                    .map_err(VideoWriteError::IOError)
+            }
         }
     }
 
-    pub fn write_frame_quiet(&mut self, frame: Arc<DynamicImage>) -> Result<(), VideoWriteError> {
-        if frame.width() != self.width || frame.height() != self.height {
-            return Err(VideoWriteError::IncorrectDimensions {
-                expected_width: self.width,
-                expected_height: self.height,
-                actual_width: frame.width(),
-                actual_height: frame.height(),
-            });
+    /// Writes an image into this dump.
+    pub async fn write_raw(&mut self, frame: &[u8]) -> Result<(), VideoWriteError> {
+        match &mut self.video_writer {
+            VideoWriter::Queue(_) => unimplemented!(),
+            VideoWriter::Ffmpeg(child) => child
+                .write_all(frame)
+                .await
+                .map_err(VideoWriteError::IOError),
         }
-
-        if Arc::strong_count(&self.video_writer) == 1 {
-            return Err(VideoWriteError::Unknown);
-        }
-        self.video_writer.force_push(frame);
-        Ok(())
     }
 
     // pub async fn init_subtitles(&self) -> Result<SubtitleDump, std::io::Error> {

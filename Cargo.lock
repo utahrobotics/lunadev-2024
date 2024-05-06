@@ -2275,7 +2275,6 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "camera",
- "ffmpeg-sidecar",
  "fxhash",
  "image 0.25.1",
  "lunabot-lib",
