@@ -6,9 +6,6 @@ use ordered_float::{Float, FloatCore, NotNan};
 use simba::scalar::SupersetOf;
 use std::{ops::Deref, sync::Arc};
 
-pub const VIDEO_WIDTH: u32 = 1280;
-pub const VIDEO_HEIGHT: u32 = 720;
-
 pub fn make_negotiation() -> Negotiation<(
     ChannelNegotiation<ImportantMessage>,
     ChannelNegotiation<CameraMessage>,

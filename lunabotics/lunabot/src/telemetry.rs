@@ -1,14 +1,17 @@
 use std::{
-    net::SocketAddrV4, ops::Deref, sync::{
+    net::SocketAddrV4,
+    ops::Deref,
+    sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    }, time::{Duration, Instant}
+    },
+    time::{Duration, Instant},
 };
 
 use image::RgbImage;
 use lunabot_lib::{
     make_negotiation, ArmParameters, Audio, CameraMessage, ControlsPacket, ImportantMessage,
-    Steering, VIDEO_HEIGHT, VIDEO_WIDTH,
+    Steering,
 };
 use networking::{
     negotiation::{ChannelNegotiation, Negotiation},
@@ -30,7 +33,10 @@ use unros::{
     DontDrop, ShouldNotDrop,
 };
 
-use crate::{audio::{pause_buzz, play_buzz}, CAMERA_HEIGHT, CAMERA_WIDTH, EMPTY_ROW, MAX_CAMERA_COUNT, ROW_DATA_LENGTH, ROW_LENGTH};
+use crate::{
+    audio::{pause_buzz, play_buzz},
+    CAMERA_HEIGHT, CAMERA_WIDTH, EMPTY_ROW, MAX_CAMERA_COUNT, ROW_DATA_LENGTH, ROW_LENGTH,
+};
 
 #[derive(Deserialize)]
 struct TelemetryConfig {
@@ -59,14 +65,15 @@ pub struct Telemetry {
     cam_width: u32,
     cam_height: u32,
     cam_fps: usize,
-    camera_subs: Vec<WatchSubscriber<RgbImage>>
+    camera_subs: Vec<WatchSubscriber<RgbImage>>,
 }
 
 impl Telemetry {
     pub async fn new(
         cam_fps: usize,
-        camera_subs: Vec<WatchSubscriber<RgbImage>>
+        camera_subs: Vec<WatchSubscriber<RgbImage>>,
     ) -> anyhow::Result<Self> {
+        assert!(camera_subs.len() < MAX_CAMERA_COUNT, "Too many cameras!");
         let config: TelemetryConfig = unros::get_env()?;
         let mut video_addr = config.server_addr;
         video_addr.set_port(video_addr.port() + 1);
@@ -86,7 +93,7 @@ impl Telemetry {
             cam_height: CAMERA_HEIGHT * MAX_CAMERA_COUNT.div_ceil(ROW_LENGTH) as u32,
             video_addr,
             cam_fps,
-            camera_subs
+            camera_subs,
         })
     }
 
@@ -128,9 +135,9 @@ impl AsyncNode for Telemetry {
                             match VideoDataDump::new_rtp(
                                 self.cam_width,
                                 self.cam_height,
-                                VIDEO_WIDTH,
-                                VIDEO_HEIGHT,
-                                ScalingFilter::FastBilinear,
+                                self.cam_width,
+                                self.cam_height,
+                                ScalingFilter::Neighbor,
                                 self.video_addr,
                                 self.cam_fps,
                                 &context2,
@@ -162,13 +169,20 @@ impl AsyncNode for Telemetry {
                         drop(video_dump);
                         break;
                     }
-                    let updated = self.camera_subs.iter_mut().any(|sub| WatchSubscriber::try_update(sub));
+                    let mut updated = false;
+                    self.camera_subs
+                        .iter_mut()
+                        .for_each(|sub| updated |= WatchSubscriber::try_update(sub));
                     if updated {
                         for row in self.camera_subs.chunks(ROW_LENGTH) {
                             for y in 0..CAMERA_HEIGHT as usize {
                                 for i in 0..ROW_LENGTH {
                                     let row_data = if let Some(img) = row.get(i) {
-                                        img.deref().split_at(ROW_DATA_LENGTH * y).1.split_at(ROW_DATA_LENGTH).0
+                                        img.deref()
+                                            .split_at(ROW_DATA_LENGTH * y)
+                                            .1
+                                            .split_at(ROW_DATA_LENGTH)
+                                            .0
                                     } else {
                                         &EMPTY_ROW
                                     };
@@ -178,7 +192,10 @@ impl AsyncNode for Telemetry {
                                 }
                             }
                         }
-                        for _ in 0..(MAX_CAMERA_COUNT - self.camera_subs.len()) {
+                        for _ in 0..MAX_CAMERA_COUNT
+                            .next_multiple_of(ROW_LENGTH)
+                            .saturating_sub(self.camera_subs.len())
+                        {
                             for _ in 0..CAMERA_HEIGHT as usize {
                                 if let Err(e) = video_dump.write_raw(&EMPTY_ROW).await {
                                     error!("Failed to write camera data: {e}");

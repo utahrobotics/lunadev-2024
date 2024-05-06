@@ -10,5 +10,3 @@
 mod implementation;
 #[cfg(unix)]
 pub use implementation::*;
-
-pub mod iter;

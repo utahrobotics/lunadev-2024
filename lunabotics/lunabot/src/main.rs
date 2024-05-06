@@ -4,13 +4,20 @@ use camera::discover_all_cameras;
 // use apriltag::{AprilTagDetector, PoseObservation};
 use fxhash::FxBuildHasher;
 use image::DynamicImage;
+use realsense::discover_all_realsense;
 // use localization::{
 //     engines::window::{DefaultWindowConfig, WindowLocalizer},
 //     Localizer,
 // };
 use rig::Robot;
 use telemetry::Telemetry;
-use unros::{anyhow, node::{AsyncNode, SyncNode}, pubsub::{subs::Subscription, Subscriber}, runtime::MainRuntimeContext, setup_logging, ShouldNotDrop};
+use unros::{
+    anyhow,
+    node::{AsyncNode, SyncNode},
+    pubsub::{subs::Subscription, Subscriber},
+    runtime::MainRuntimeContext,
+    setup_logging, ShouldNotDrop,
+};
 
 use crate::audio::init_buzz;
 
@@ -58,18 +65,49 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         cam.res_x = CAMERA_WIDTH;
         cam.res_y = CAMERA_HEIGHT;
         let subscriber = Subscriber::new(1);
-        cam.image_received_pub().accept_subscription(subscriber.create_subscription().map(|img: Arc<DynamicImage>| img.to_rgb8()));
+        cam.image_received_pub().accept_subscription(
+            subscriber
+                .create_subscription()
+                .map(|img: Arc<DynamicImage>| img.to_rgb8()),
+        );
         let context = context.make_context(cam.get_camera_name());
         cam.spawn(context);
-        camera_subs.push(subscriber.into_watch().await);
+        camera_subs.push(
+            subscriber
+                .into_watch_or_closed()
+                .await
+                .map_err(|_| anyhow::anyhow!("Camera closed"))?,
+        );
     }
 
-    let telemetry = Telemetry::new(
-        20,
-        camera_subs
-    )
-    .await?;
+    for mut cam in discover_all_realsense()?.filter_map(|mut cam| {
+        if cam.get_name().to_string_lossy().contains("RealSense") {
+            Some(cam)
+        } else {
+            cam.ignore_drop();
+            None
+        }
+    }) {
+        info!("Discovered {:?} at {:?}", cam.get_name(), cam.get_path());
+        cam.res_x = CAMERA_WIDTH;
+        cam.res_y = CAMERA_HEIGHT;
+        let subscriber = Subscriber::new(1);
+        cam.image_received_pub().accept_subscription(
+            subscriber
+                .create_subscription()
+                .map(|img: Arc<DynamicImage>| img.to_rgb8()),
+        );
+        let context = context.make_context(cam.get_name().to_string_lossy());
+        cam.spawn(context);
+        camera_subs.push(
+            subscriber
+                .into_watch_or_closed()
+                .await
+                .map_err(|_| anyhow::anyhow!("Camera closed"))?,
+        );
+    }
 
+    let telemetry = Telemetry::new(20, camera_subs).await?;
 
     match serial::connect_to_serial() {
         Ok((arms, drive)) => {

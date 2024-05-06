@@ -10,7 +10,7 @@ members = [
     "unros/smach",
     "unros/unros-macros",
     "unros/unros",
-    # "unros/realsense",
+    "unros/realsense",
     # "unros/camera-info",
     "unros/networking",
     "unros/obstacles",
@@ -64,7 +64,8 @@ serial = { path = "unros/serial" }
 navigator = { path = "unros/navigator" }
 rig = { path = "unros/rig" }
 smach = { path = "unros/smach" }
-unros_macros = { path = "unros/unros-macros" }
+realsense = { path = "unros/realsense" }
+unros-macros = { path = "unros/unros-macros" }
 unros = { path = "unros/unros" }
 camera-info = { path = "unros/camera-info" }
 networking = { path = "unros/networking" }

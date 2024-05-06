@@ -193,11 +193,7 @@ impl INode for LunabotConn {
                     macro_rules! make_ffplay {
                         () => {{
                             let mut child = std::process::Command::new("mplayer")
-                                .args([
-                                    "-monitorpixelaspect",
-                                    "1",
-                                    "sdp://camera.sdp",
-                                ])
+                                .args(["-monitorpixelaspect", "1", "sdp://camera.sdp"])
                                 .stderr(Stdio::piped())
                                 .spawn()
                                 .expect("Failed to init ffplay process");

@@ -13,6 +13,7 @@ camera = { workspace = true }
 networking = { workspace = true }
 rig = { workspace = true }
 nalgebra = { workspace = true }
+realsense = { workspace = true }
 toml = { workspace = true }
 fxhash = { workspace = true }
 serial = { workspace = true }
