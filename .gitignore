@@ -8,7 +8,8 @@ smooth-diff-drive-academy/
 super_sorted.txt
 publishing/
 
-lunabase/camera.sdp
+lunabotics/lunabase/camera.sdp
+lunabotics/lunabase/camera-ffmpeg.log
 *.zst
 *.pyc
 dump/

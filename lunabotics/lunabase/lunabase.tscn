@@ -1,4 +1,4 @@
-[gd_scene load_steps=17 format=3 uid="uid://daaye0yq685ht"]
+[gd_scene load_steps=15 format=3 uid="uid://daaye0yq685ht"]
 
 [ext_resource type="AudioStream" uid="uid://cephremnedhtp" path="res://addons/kenney_interface_sounds/error_002.wav" id="1_8elqp"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="2_5ukd6"]
@@ -167,22 +167,6 @@ func _input(event: InputEvent) -> void:
 		Lunabot.lower_arm()
 	elif event.is_action_released(\"LowerArm\"):
 		Lunabot.stop_lift_arm()
-"
-
-[sub_resource type="GDScript" id="GDScript_pajth"]
-script/source = "extends Button
-
-
-func _on_pressed() -> void:
-	Lunabot.previous_camera()
-"
-
-[sub_resource type="GDScript" id="GDScript_0pq0d"]
-script/source = "extends Button
-
-
-func _on_pressed() -> void:
-	Lunabot.next_camera()
 "
 
 [sub_resource type="GDScript" id="GDScript_amk46"]
@@ -385,22 +369,6 @@ theme_override_constants/margin_bottom = 10
 [node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
 layout_mode = 2
 
-[node name="HBoxContainer2" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
-layout_mode = 2
-theme_override_constants/separation = 10
-
-[node name="Button" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer2"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "<"
-script = SubResource("GDScript_pajth")
-
-[node name="Button2" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer2"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = ">"
-script = SubResource("GDScript_0pq0d")
-
 [node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 alignment = 1
@@ -454,7 +422,5 @@ stream = ExtResource("2_5ukd6")
 [connection signal="button_up" from="Control/HBoxContainer/HBoxContainer/Lift/Button" to="Control/HBoxContainer/HBoxContainer/Lift/Button" method="_on_button_up"]
 [connection signal="button_down" from="Control/HBoxContainer/HBoxContainer/Lift/Button2" to="Control/HBoxContainer/HBoxContainer/Lift/Button2" method="_on_pressed"]
 [connection signal="button_up" from="Control/HBoxContainer/HBoxContainer/Lift/Button2" to="Control/HBoxContainer/HBoxContainer/Lift/Button2" method="_on_button_up"]
-[connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer2/Button" to="MarginContainer/VBoxContainer/HBoxContainer2/Button" method="_on_pressed"]
-[connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer2/Button2" to="MarginContainer/VBoxContainer/HBoxContainer2/Button2" method="_on_pressed"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer/EnableCamera" to="MarginContainer/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
 [connection signal="mouse_exited" from="MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" to="MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" method="_on_mouse_exited"]

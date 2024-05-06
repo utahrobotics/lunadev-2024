@@ -192,9 +192,11 @@ impl INode for LunabotConn {
                     }
                     macro_rules! make_ffplay {
                         () => {{
-                            let mut child = std::process::Command::new("vlc")
+                            let mut child = std::process::Command::new("mplayer")
                                 .args([
-                                    "camera.sdp",
+                                    "-monitorpixelaspect",
+                                    "1",
+                                    "sdp://camera.sdp",
                                 ])
                                 .stderr(Stdio::piped())
                                 .spawn()
