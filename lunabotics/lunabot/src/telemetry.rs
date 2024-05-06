@@ -178,6 +178,13 @@ impl AsyncNode for Telemetry {
                                 }
                             }
                         }
+                        for _ in 0..(MAX_CAMERA_COUNT - self.camera_subs.len()) {
+                            for _ in 0..CAMERA_HEIGHT as usize {
+                                if let Err(e) = video_dump.write_raw(&EMPTY_ROW).await {
+                                    error!("Failed to write camera data: {e}");
+                                }
+                            }
+                        }
                     }
 
                     let elapsed = start_service.elapsed();
