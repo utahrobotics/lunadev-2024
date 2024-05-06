@@ -192,9 +192,12 @@ impl AsyncNode for Telemetry {
                                 }
                             }
                         }
+                        // println!("{}", MAX_CAMERA_COUNT
+                        // .next_multiple_of(ROW_LENGTH)
+                        // .saturating_sub(self.camera_subs.len()));
                         for _ in 0..MAX_CAMERA_COUNT
                             .next_multiple_of(ROW_LENGTH)
-                            .saturating_sub(self.camera_subs.len())
+                            .saturating_sub(self.camera_subs.len().next_multiple_of(ROW_LENGTH))
                         {
                             for _ in 0..CAMERA_HEIGHT as usize {
                                 if let Err(e) = video_dump.write_raw(&EMPTY_ROW).await {
@@ -206,7 +209,7 @@ impl AsyncNode for Telemetry {
 
                     let elapsed = start_service.elapsed();
                     start_service += elapsed;
-                    tokio::time::sleep(self.camera_delta.saturating_sub(elapsed)).await;
+                    tokio::time::sleep(self.camera_delta).await;
                 }
             }
         };

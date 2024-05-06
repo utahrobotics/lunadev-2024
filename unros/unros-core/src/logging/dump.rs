@@ -441,7 +441,7 @@ a=fmtp:96 packetization-mode=1",
             .pix_fmt("yuv420p")
             .args([
                 "-crf",
-                "35",
+                "38",
                 "-an",
                 "-vf",
                 &format!("fps={fps},scale={out_width}:{out_height}"),
@@ -459,6 +459,8 @@ a=fmtp:96 packetization-mode=1",
                 "direct",
                 "-rtsp_transport",
                 "udp",
+                "-g",
+                "10"
             ])
             // .args(["-sdp_file", "sdp.txt"])
             .format("rtp")
