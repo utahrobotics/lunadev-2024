@@ -5,13 +5,15 @@ def __end_repl__():
 def main():
     __text = ""
     while True:
-        __text += input('') + "\n"
+        try:
+            __text += input('') + "\n"
+        except EOFError:
+            break
+
         try:
             if __text.endswith("__end_repl__()\n"):
                 exec(__text)
                 __text = ""
-        except EOFError:
-            break
         except Exception as e:
             print(e)
             __end_repl__()

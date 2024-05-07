@@ -3,7 +3,10 @@ use std::{
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
 };
 
+#[cfg(unix)]
 const TERMINATOR: &'static [u8] = b">>>END=REPL<<<\n";
+#[cfg(not(unix))]
+const TERMINATOR: &'static [u8] = b">>>END=REPL<<<\r\n";
 
 pub struct PyRepl {
     cmd: Child,
@@ -20,7 +23,7 @@ impl PyRepl {
         //     imports_block.push_str(import);
         //     imports_block.push_str("\n");
         // }
-        let mut cmd = Command::new("python3")
+        let mut cmd = Command::new("python")
             .current_dir(working_dir)
             .arg("-c")
             .arg(include_str!("repl.py"))
@@ -58,6 +61,9 @@ impl PyRepl {
             returned.extend_from_slice(buf.split_at(n).0);
             if returned.ends_with(TERMINATOR) {
                 break;
+            }
+            if let Ok(msg) = std::str::from_utf8(&returned) {
+                println!("{msg:?}");
             }
         }
         returned.drain((returned.len() - TERMINATOR.len()).saturating_sub(1)..);
