@@ -40,11 +40,12 @@ impl Drive {
         let mut vesc = PyRepl::new("lunabotics/lunabot/src")?;
         let config: DriveConfig = get_env()?;
 
+        // let msg = vesc.exec(include_str!("drive_vesc.py"))?;
         let msg = vesc.exec("from drive_vesc import *")?;
         if !msg.trim().is_empty() {
             log::error!("{msg}");
         }
-        let get_values_respose_len: usize = vesc.exec("print(GET_VALUES_MSG_LENGTH)")?.parse()?;
+        let get_values_respose_len: usize = vesc.exec("print(GET_VALUES_MSG_LENGTH)")?.trim().parse()?;
         let get_values_request = BASE64_STANDARD
             .decode(vesc.exec("get_GET_VALUES()")?)?
             .into();

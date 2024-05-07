@@ -131,7 +131,8 @@ where
 
         if self.res_x != 0 {
             stream_desc.width = self.res_x;
-        } else if self.res_y != 0 {
+        }
+        if self.res_y != 0 {
             stream_desc.height = self.res_y;
         }
 

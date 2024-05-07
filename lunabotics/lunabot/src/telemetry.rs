@@ -73,7 +73,7 @@ impl Telemetry {
         cam_fps: usize,
         camera_subs: Vec<WatchSubscriber<RgbImage>>,
     ) -> anyhow::Result<Self> {
-        assert!(camera_subs.len() < MAX_CAMERA_COUNT, "Too many cameras!");
+        assert!(camera_subs.len() <= MAX_CAMERA_COUNT, "Too many cameras!");
         let config: TelemetryConfig = unros::get_env()?;
         let mut video_addr = config.server_addr;
         video_addr.set_port(video_addr.port() + 1);

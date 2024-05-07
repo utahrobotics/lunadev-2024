@@ -3,7 +3,7 @@ use std::{
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
 };
 
-const TERMINATOR: &'static [u8] = b">>>END=REP<<<\n";
+const TERMINATOR: &'static [u8] = b">>>END=REPL<<<\n";
 
 pub struct PyRepl {
     cmd: Child,
@@ -45,7 +45,7 @@ impl PyRepl {
     pub fn exec(&mut self, code: &str) -> anyhow::Result<String> {
         let stdin = self.stdin.as_mut().unwrap();
         stdin.write_all(code.as_bytes())?;
-        stdin.write_all(b"\n")?;
+        stdin.write_all(b"\n__end_repl__()\n")?;
         stdin.flush()?;
 
         let mut returned = vec![];

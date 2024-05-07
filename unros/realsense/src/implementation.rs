@@ -33,6 +33,7 @@ pub struct RealSenseCamera {
     dont_drop: DontDrop<Self>,
     pub res_x: u32,
     pub res_y: u32,
+    pub fps: usize,
 }
 
 impl RealSenseCamera {
@@ -48,6 +49,7 @@ impl RealSenseCamera {
             dont_drop: DontDrop::new(format!("realsense-{path:?}")),
             res_x: 0,
             res_y: 0,
+            fps: 0
         })
     }
 
@@ -96,7 +98,7 @@ impl SyncNode for RealSenseCamera {
                     self.res_x as usize,
                     self.res_y as usize,
                     Rs2Format::Rgb8,
-                    0,
+                    self.fps,
                 )?;
         } else {
             warn!("This Realsense camera is not attached to a USB 3.0 port");
@@ -153,5 +155,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         dont_drop: DontDrop::new("realsense"),
         res_x: 0,
         res_y: 0,
+        fps: 0
     }))
 }

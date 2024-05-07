@@ -40,7 +40,7 @@ const EMPTY_ROW: [u8; ROW_DATA_LENGTH] = [0; ROW_DATA_LENGTH];
 #[unros::main]
 async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     setup_logging!(context);
-    init_buzz()?;
+    init_buzz();
 
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;
@@ -64,6 +64,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         );
         cam.res_x = CAMERA_WIDTH;
         cam.res_y = CAMERA_HEIGHT;
+        cam.fps = 20;
         let subscriber = Subscriber::new(1);
         cam.image_received_pub().accept_subscription(
             subscriber
@@ -91,6 +92,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         info!("Discovered {:?} at {:?}", cam.get_name(), cam.get_path());
         cam.res_x = CAMERA_WIDTH;
         cam.res_y = CAMERA_HEIGHT;
+        // cam.fps = 20;
         let subscriber = Subscriber::new(1);
         cam.image_received_pub().accept_subscription(
             subscriber
