@@ -30,11 +30,11 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed(\"Restart\"):
 		get_tree().change_scene_to_file(scene_file_path)
 	
-	elif event.is_action_pressed(\"NextCamera\"):
-		Lunabot.next_camera()
+	elif event.is_action_pressed(\"PlayAudio\"):
+		Lunabot.play_audio()
 	
-	elif event.is_action_pressed(\"PreviousCamera\"):
-		Lunabot.previous_camera()
+	elif event.is_action_released(\"PlayAudio\"):
+		Lunabot.pause_audio()
 "
 
 [sub_resource type="GDScript" id="GDScript_wemvy"]
