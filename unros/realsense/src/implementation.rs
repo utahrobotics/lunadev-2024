@@ -49,7 +49,7 @@ impl RealSenseCamera {
             dont_drop: DontDrop::new(format!("realsense-{path:?}")),
             res_x: 0,
             res_y: 0,
-            fps: 0
+            fps: 0,
         })
     }
 
@@ -155,6 +155,6 @@ pub fn discover_all_realsense() -> anyhow::Result<impl Iterator<Item = RealSense
         dont_drop: DontDrop::new("realsense"),
         res_x: 0,
         res_y: 0,
-        fps: 0
+        fps: 0,
     }))
 }

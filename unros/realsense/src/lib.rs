@@ -4,7 +4,7 @@
 //! Unfortunately, this crate depends on the RealSense SDK. If you do not have this
 //! SDK, remove this crate from the workspace.
 
-#![feature(iter_array_chunks, exclusive_wrapper)]
+// #![feature(iter_array_chunks, exclusive_wrapper)]
 
 #[cfg(unix)]
 mod implementation;

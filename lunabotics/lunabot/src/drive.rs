@@ -45,7 +45,8 @@ impl Drive {
         if !msg.trim().is_empty() {
             log::error!("{msg}");
         }
-        let get_values_respose_len: usize = vesc.exec("print(GET_VALUES_MSG_LENGTH)")?.trim().parse()?;
+        let get_values_respose_len: usize =
+            vesc.exec("print(GET_VALUES_MSG_LENGTH)")?.trim().parse()?;
         let get_values_request = BASE64_STANDARD
             .decode(vesc.exec("get_GET_VALUES()")?)?
             .into();

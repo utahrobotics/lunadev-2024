@@ -4,6 +4,7 @@ use camera::discover_all_cameras;
 // use apriltag::{AprilTagDetector, PoseObservation};
 use fxhash::FxBuildHasher;
 use image::DynamicImage;
+#[cfg(unix)]
 use realsense::discover_all_realsense;
 // use localization::{
 //     engines::window::{DefaultWindowConfig, WindowLocalizer},
@@ -81,6 +82,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         );
     }
 
+    #[cfg(unix)]
     for mut cam in discover_all_realsense()?.filter_map(|mut cam| {
         if cam.get_name().to_string_lossy().contains("RealSense") {
             Some(cam)
