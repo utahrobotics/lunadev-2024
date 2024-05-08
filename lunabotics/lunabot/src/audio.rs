@@ -1,29 +1,33 @@
+use rodio::cpal::traits::HostTrait;
 use rodio::source::SineWave;
-use rodio::{OutputStream, Sink};
+use rodio::{cpal, DeviceTrait, OutputStream, Sink};
+use unros::log;
 use std::sync::OnceLock;
 
-static SINK: OnceLock<Sink> = OnceLock::new();
+static SINK: OnceLock<Box<[Sink]>> = OnceLock::new();
 
 pub fn init_buzz() {
-    std::thread::spawn(|| {
-        let (_stream, stream_handle) =
-            OutputStream::try_default().expect("Failed to open audio stream");
+    let mut sinks = vec![];
+    for device in cpal::default_host().output_devices().unwrap() {
+        let (stream, stream_handle) =
+            OutputStream::try_from_device(&device).expect("Failed to open audio stream");
+        std::mem::forget(stream);
         let sink = Sink::try_new(&stream_handle).unwrap();
-        let Ok(()) = SINK.set(sink) else {
-            unreachable!();
-        };
-        let sink = SINK.get().unwrap();
         let source = SineWave::new(300.0);
         sink.append(source);
         sink.pause();
-        sink.sleep_until_end();
-    });
+        sinks.push(sink);
+        log::info!("Audio device: {}", device.name().unwrap());
+    }
+    let Ok(()) = SINK.set(sinks.into_boxed_slice()) else {
+        unreachable!();
+    };
 }
 
 pub fn play_buzz() {
-    SINK.get().unwrap().play();
+    SINK.get().unwrap().iter().for_each(Sink::play);
 }
 
 pub fn pause_buzz() {
-    SINK.get().unwrap().pause();
+    SINK.get().unwrap().iter().for_each(Sink::pause);
 }
