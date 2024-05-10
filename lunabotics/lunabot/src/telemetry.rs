@@ -40,7 +40,13 @@ use crate::{
 
 #[derive(Deserialize)]
 struct TelemetryConfig {
+    #[serde(default = "default_server_addr")]
     server_addr: SocketAddrV4,
+}
+
+fn default_server_addr() -> SocketAddrV4 {
+    let addr = std::env::var("SERVER_ADDR").unwrap_or("192.168.0.100:43721".into());
+    addr.parse().expect("SERVER_ADDR must be a valid IP address and port!")
 }
 
 /// A remote connection to `Lunabase`
