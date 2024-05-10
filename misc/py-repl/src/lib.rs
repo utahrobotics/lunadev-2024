@@ -23,7 +23,7 @@ impl PyRepl {
         //     imports_block.push_str(import);
         //     imports_block.push_str("\n");
         // }
-        let mut cmd = Command::new("python")
+        let mut cmd = Command::new("python3")
             .current_dir(working_dir)
             .arg("-c")
             .arg(include_str!("repl.py"))

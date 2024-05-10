@@ -12,7 +12,7 @@ def main():
 
         try:
             if __text.endswith("__end_repl__()\n"):
-                exec(__text)
+                exec(__text, globals())
                 __text = ""
         except Exception as e:
             print(e)
