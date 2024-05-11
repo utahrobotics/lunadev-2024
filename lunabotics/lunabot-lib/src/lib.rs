@@ -40,6 +40,7 @@ pub enum ArmAction {
     Retract,
     Stop,
     SetValue(u8),
+    // Home
 }
 
 impl Default for ArmParameters {
