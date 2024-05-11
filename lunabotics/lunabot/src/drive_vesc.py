@@ -16,7 +16,13 @@ def get_GET_VALUES():
     print(base64.b64encode(_GET_VALUES_BYTES).decode("utf-8"))
 
 
-def decode_get_values(data_b64: str):
+def decode_app_controller_id(data_b64: str):
     data = base64.b64decode(data_b64)
     response, consumed = decode(data)
     print(response.app_controller_id[0])
+
+
+def decode_avg_motor_current(data_b64: str):
+    data = base64.b64decode(data_b64)
+    response, consumed = decode(data)
+    print(response.avg_motor_current)
