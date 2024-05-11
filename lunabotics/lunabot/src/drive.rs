@@ -117,7 +117,16 @@ impl AsyncNode for Drive {
 
             loop {
                 for _ in 0..10 {
-                    let steering = self.steering_sub.recv().await;
+                    let steering;// = self.steering_sub.recv().await;
+
+                    tokio::select! {
+                        tmp = self.steering_sub.recv() => {
+                            steering = tmp;
+                        }
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                            continue;
+                        }
+                    }
 
                     let left_modifier = if self.left_invert { -1.0 } else { 1.0 };
                     let right_modifier = if self.right_invert { -1.0 } else { 1.0 };
@@ -149,41 +158,42 @@ impl AsyncNode for Drive {
                     right_pub.set(right_vesc_msg.into());
                 }
 
-                left_pub.set(self.get_values_request.clone());
-                let mut get_values_buf = Vec::with_capacity(self.get_values_respose_len);
-                let mut read_bytes = 0usize;
+                // left_pub.set(self.get_values_request.clone());
+                // let mut get_values_buf = Vec::with_capacity(self.get_values_respose_len);
+                // let mut read_bytes = 0usize;
     
-                while read_bytes < self.get_values_respose_len {
-                    let bytes = left_sub.recv().await;
-                    let bytes_len = bytes.len();
-                    get_values_buf.extend_from_slice(&bytes);
-                    read_bytes += bytes_len;
-                }
+                // while read_bytes < self.get_values_respose_len {
+                //     let bytes = left_sub.recv().await;
+                //     let bytes_len = bytes.len();
+                //     get_values_buf.extend_from_slice(&bytes);
+                //     read_bytes += bytes_len;
+                // }
     
-                let left_current = self.vesc.exec(&format!(
-                    r#"decode_avg_motor_current("{}")"#,
-                    BASE64_STANDARD.encode(&get_values_buf)
-                ))?;
-                let left_current: u8 = left_current.parse()?;
+                // let left_current = self.vesc.exec(&format!(
+                //     r#"decode_avg_motor_current("{}")"#,
+                //     BASE64_STANDARD.encode(&get_values_buf)
+                // ))?;
+                // println!("{left_current}");
+                // let left_current: u8 = left_current.parse()?;
 
-                right_pub.set(self.get_values_request.clone());
-                get_values_buf.clear();
-                read_bytes = 0;
+                // right_pub.set(self.get_values_request.clone());
+                // get_values_buf.clear();
+                // read_bytes = 0;
     
-                while read_bytes < self.get_values_respose_len {
-                    let bytes = right_sub.recv().await;
-                    let bytes_len = bytes.len();
-                    get_values_buf.extend_from_slice(&bytes);
-                    read_bytes += bytes_len;
-                }
+                // while read_bytes < self.get_values_respose_len {
+                //     let bytes = right_sub.recv().await;
+                //     let bytes_len = bytes.len();
+                //     get_values_buf.extend_from_slice(&bytes);
+                //     read_bytes += bytes_len;
+                // }
     
-                let right_current = self.vesc.exec(&format!(
-                    r#"decode_avg_motor_current("{}")"#,
-                    BASE64_STANDARD.encode(&get_values_buf)
-                ))?;
-                let right_current: u8 = right_current.parse()?;
+                // let right_current = self.vesc.exec(&format!(
+                //     r#"decode_avg_motor_current("{}")"#,
+                //     BASE64_STANDARD.encode(&get_values_buf)
+                // ))?;
+                // let right_current: u8 = right_current.parse()?;
 
-                self.current_pub.set((left_current, right_current));
+                // self.current_pub.set((left_current, right_current));
             }
         };
 

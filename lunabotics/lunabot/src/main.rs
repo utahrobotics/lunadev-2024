@@ -74,12 +74,11 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         );
         let context = context.make_context(cam.get_camera_name());
         cam.spawn(context);
-        camera_subs.push(
-            subscriber
-                .into_watch_or_closed()
-                .await
-                .map_err(|_| anyhow::anyhow!("Camera closed"))?,
-        );
+        if let Ok(sub) = subscriber
+        .into_watch_or_closed()
+        .await {
+            camera_subs.push(sub);
+        }
     }
 
     #[cfg(unix)]
@@ -103,12 +102,11 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         );
         let context = context.make_context(cam.get_name().to_string_lossy());
         cam.spawn(context);
-        camera_subs.push(
-            subscriber
-                .into_watch_or_closed()
-                .await
-                .map_err(|_| anyhow::anyhow!("Camera closed"))?,
-        );
+        if let Ok(sub) = subscriber
+        .into_watch_or_closed()
+        .await {
+            camera_subs.push(sub);
+        }
     }
 
     let telemetry = Telemetry::new(20, camera_subs).await?;

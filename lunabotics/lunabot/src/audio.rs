@@ -10,7 +10,7 @@ pub fn init_buzz() {
         Ok((stream, stream_handle)) => {
             std::mem::forget(stream);
             let sink = Sink::try_new(&stream_handle).unwrap();
-            let source = SineWave::new(300.0);
+            let source = SineWave::new(1000.0);
             sink.append(source);
             sink.pause();
             let Ok(()) = SINK.set(sink) else {
