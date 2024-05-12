@@ -474,8 +474,13 @@ impl LunabotConn {
 
         let shared = self.shared.as_ref().unwrap();
         let mut controls_packet = shared.controls_data.load();
-        controls_packet.drive = (drive * 127.0).round() as i8;
-        controls_packet.steering = (steering * 127.0).round() as i8;
+        let new_drive = (drive * 127.0).round() as i8;
+        let new_steering = (steering * 127.0).round() as i8;
+        if controls_packet.drive == new_drive && controls_packet.steering == new_steering {
+            return;
+        }
+        controls_packet.drive = new_drive;
+        controls_packet.steering = new_steering;
         shared.controls_data.store(controls_packet);
         shared.echo_controls.store(true, Ordering::Relaxed);
     }

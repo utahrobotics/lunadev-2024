@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3 uid="uid://daaye0yq685ht"]
+[gd_scene load_steps=18 format=3 uid="uid://daaye0yq685ht"]
 
 [ext_resource type="AudioStream" uid="uid://cephremnedhtp" path="res://addons/kenney_interface_sounds/error_002.wav" id="1_8elqp"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="2_5ukd6"]
@@ -7,8 +7,12 @@
 script/source = "extends HSplitContainer
 
 
+const LAMBDA := 0.5
+
 var connected := false
 var invert_steering := false
+
+var _drive := 0.0
 
 
 func _ready() -> void:
@@ -20,18 +24,7 @@ func _ready() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventJoypadMotion:
-		if !connected:
-			return
-		var invert := 1.0
-		if invert_steering:
-			invert = -1
-		Lunabot.send_steering(
-			-(Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\")),
-			-(Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")) * 0.4 * invert
-		)
-	
-	elif event.is_action_pressed(\"Restart\"):
+	if event.is_action_pressed(\"Restart\"):
 		get_tree().change_scene_to_file(scene_file_path)
 	
 	elif event.is_action_pressed(\"PlayAudio\"):
@@ -43,6 +36,18 @@ func _input(event: InputEvent) -> void:
 
 func _on_button_pressed() -> void:
 	invert_steering = not invert_steering
+
+
+func _process(delta: float) -> void:
+	var invert := 1.0
+	if invert_steering:
+		invert = -1
+	var new_drive := -(Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\"))
+	_drive = lerp(_drive, new_drive, 1 - exp(-LAMBDA * delta))
+	Lunabot.send_steering(
+		_drive,
+		-(Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")) * 0.4 * invert
+	)
 "
 
 [sub_resource type="GDScript" id="GDScript_wemvy"]
@@ -91,6 +96,27 @@ func _process(delta: float) -> void:
 	var strength := minf(timer, TOO_LONG) / TOO_LONG
 	modulate.g = 1.0 - strength
 	modulate.r = strength
+"
+
+[sub_resource type="GDScript" id="GDScript_hj2mf"]
+script/source = "extends Node2D
+
+
+func _ready() -> void:
+	Lunabot.odometry_received.connect(
+		func(arm_angle: float, _acceleration: Vector3):
+			rotation = - arm_angle
+	)
+"
+
+[sub_resource type="GDScript" id="GDScript_hxrim"]
+script/source = "extends Label
+
+func _ready() -> void:
+	Lunabot.odometry_received.connect(
+		func(arm_angle: float, _acceleration: Vector3):
+			text = str(round(rad_to_deg(arm_angle) * 100) / 100)
+	)
 "
 
 [sub_resource type="GDScript" id="GDScript_6ax4a"]
@@ -329,6 +355,7 @@ size_flags_horizontal = 3
 layout_mode = 2
 
 [node name="Node2D" type="Node2D" parent="Control/VBoxContainer3/Panel/HBoxContainer/VBoxContainer/CenterContainer/Control"]
+script = SubResource("GDScript_hj2mf")
 
 [node name="Polygon2D" type="Polygon2D" parent="Control/VBoxContainer3/Panel/HBoxContainer/VBoxContainer/CenterContainer/Control/Node2D"]
 position = Vector2(-14, 2)
@@ -338,6 +365,7 @@ polygon = PackedVector2Array(-58, -37, 49, -37, 97, 24, -58, 24)
 layout_mode = 2
 text = "0.0"
 horizontal_alignment = 1
+script = SubResource("GDScript_hxrim")
 
 [node name="HBoxContainer" type="HBoxContainer" parent="Control"]
 layout_mode = 1
