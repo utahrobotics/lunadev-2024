@@ -30,7 +30,7 @@ mod audio;
 // mod mosaic;
 mod telemetry;
 
-const MAX_CAMERA_COUNT: usize = 5;
+const MAX_CAMERA_COUNT: usize = 6;
 const ROW_LENGTH: usize = 3;
 
 const CAMERA_WIDTH: u32 = 640;
