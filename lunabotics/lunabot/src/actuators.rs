@@ -13,7 +13,7 @@ use unros::{
 #[derive(Deserialize, Default)]
 struct ArmsConfig {
     #[serde(default)]
-    home: bool
+    home: bool,
 }
 
 #[derive(ShouldNotDrop)]
@@ -23,7 +23,7 @@ pub struct Arms {
     lift_conn: SerialConnection<String, String>,
     odometry_pub: Publisher<Odometry>,
     dont_drop: DontDrop<Self>,
-    config: ArmsConfig
+    config: ArmsConfig,
 }
 
 impl Arms {
@@ -34,9 +34,11 @@ impl Arms {
             tilt_conn: SerialConnection::new(tilt_port, 115200, true).map_to_string(),
             lift_conn: SerialConnection::new(lift_port, 115200, true).map_to_string(),
             odometry_pub: Publisher::default(),
-            config: unros::get_env().map_err(|e| {
-                unros::log::error!("{e}");
-            }).unwrap_or_default()
+            config: unros::get_env()
+                .map_err(|e| {
+                    unros::log::error!("{e}");
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -79,8 +81,12 @@ impl AsyncNode for Arms {
 
         let lift_sub = Subscriber::new(32);
         let tilt_sub = Subscriber::new(32);
-        self.lift_conn.msg_received_pub().accept_subscription(lift_sub.create_subscription());
-        self.tilt_conn.msg_received_pub().accept_subscription(tilt_sub.create_subscription());
+        self.lift_conn
+            .msg_received_pub()
+            .accept_subscription(lift_sub.create_subscription());
+        self.tilt_conn
+            .msg_received_pub()
+            .accept_subscription(tilt_sub.create_subscription());
 
         let arms_fut = async {
             tilt_repl.set("get_info()\r".into());
@@ -262,15 +268,23 @@ impl AsyncNode for Arms {
                     let lift_l = 37.0 + 25.5 / 4500.0 * lift_value;
                     let tilt_l = 37.0 + 25.5 / 4500.0 * tilt_value;
 
-                    let arm_angle = -0.1354 - ((lift_l.powi(2) - 3312.5) / 3148.5).acos() + ((tilt_l.powi(2) - 2530.9) / 1785.6).acos();
+                    let arm_angle = -0.1354 - ((lift_l.powi(2) - 3312.5) / 3148.5).acos()
+                        + ((tilt_l.powi(2) - 2530.9) / 1785.6).acos();
                     let accel = (lift_accel + tilt_accel) / 2.0;
+
+                    let front_elevation = 159.031
+                        + 52.4931 * (0.0001206 * tilt_l.powi(2) + 2.53947 * tilt_l - 24.8994).cos()
+                        + 643.036 * (0.00005467 * lift_l.powi(2) + 2.51201 * lift_l - 8.12657);
+                    let back_elevation = 29.6433
+                        + 66.0333 * (0.000345 * tilt_l.powi(2) + 2.50845 * tilt_l - 24.3035).cos()
+                        + 7.28242 * (0.003568 * lift_l.powi(2) + 2.24195 * lift_l - 3.48055);
+
                     self.odometry_pub.set(Odometry {
                         arm_angle,
-                        acceleration: accel.into()
+                        acceleration: accel.into(),
+                        front_elevation,
+                        back_elevation,
                     });
-
-                    let front_elevation = 159.031 + 52.4931 * (0.0001206 * tilt_l.powi(2) + 2.53947 * tilt_l - 24.8994).cos() + 643.036 * (0.00005467 * lift_l.powi(2) + 2.51201 * lift_l - 8.12657);
-                    let back_elevation = 29.6433 + 66.0333 * (0.000345 * tilt_l.powi(2) + 2.50845 * tilt_l - 24.3035).cos() + 7.28242 * (0.003568 * lift_l.powi(2) + 2.24195 * lift_l - 3.48055);
 
                     println!("{}cm {}cm", front_elevation, back_elevation);
                 }

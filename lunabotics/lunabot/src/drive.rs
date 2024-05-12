@@ -22,7 +22,7 @@ pub struct Drive {
     right_invert: bool,
     get_values_respose_len: usize,
     get_values_request: Bytes,
-    current_pub: Publisher<(u8, u8)>
+    current_pub: Publisher<(u8, u8)>,
 }
 
 #[derive(Deserialize)]
@@ -63,7 +63,7 @@ impl Drive {
             right_conn: SerialConnection::new(right_port, 115200, true),
             get_values_respose_len,
             get_values_request,
-            current_pub: Publisher::default()
+            current_pub: Publisher::default(),
         })
     }
 
@@ -131,7 +131,7 @@ impl AsyncNode for Drive {
 
                     let left_modifier = if self.left_invert { -1.0 } else { 1.0 };
                     let right_modifier = if self.right_invert { -1.0 } else { 1.0 };
-    
+
                     let left_b64 = self.vesc.exec(&format!(
                         r#"encode_duty_cycle({})"#,
                         steering.left * left_modifier
@@ -154,7 +154,7 @@ impl AsyncNode for Drive {
                             continue;
                         }
                     };
-    
+
                     left_pub.set(left_vesc_msg.into());
                     right_pub.set(right_vesc_msg.into());
                 }
@@ -162,7 +162,7 @@ impl AsyncNode for Drive {
                 left_pub.set(self.get_values_request.clone());
                 get_values_buf.clear();
                 read_bytes = 0;
-    
+
                 while read_bytes < self.get_values_respose_len {
                     let bytes = left_sub.recv().await;
                     let bytes_len = bytes.len();
@@ -170,7 +170,7 @@ impl AsyncNode for Drive {
                     read_bytes += bytes_len;
                     println!("{read_bytes}");
                 }
-    
+
                 let left_current = self.vesc.exec(&format!(
                     r#"decode_avg_motor_current("{}")"#,
                     BASE64_STANDARD.encode(&get_values_buf)
@@ -181,14 +181,14 @@ impl AsyncNode for Drive {
                 right_pub.set(self.get_values_request.clone());
                 get_values_buf.clear();
                 read_bytes = 0;
-    
+
                 while read_bytes < self.get_values_respose_len {
                     let bytes = right_sub.recv().await;
                     let bytes_len = bytes.len();
                     get_values_buf.extend_from_slice(&bytes);
                     read_bytes += bytes_len;
                 }
-    
+
                 let right_current = self.vesc.exec(&format!(
                     r#"decode_avg_motor_current("{}")"#,
                     BASE64_STANDARD.encode(&get_values_buf)

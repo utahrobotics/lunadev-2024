@@ -10,11 +10,10 @@ use std::{
 
 use image::RgbImage;
 use lunabot_lib::{
-    make_negotiation, ArmParameters, Audio, CameraMessage, ImportantMessage, LunaNegotiation, Odometry, Steering
+    make_negotiation, ArmParameters, Audio, CameraMessage, ImportantMessage, LunaNegotiation,
+    Odometry, Steering,
 };
-use networking::{
-    new_client, ConnectionError, NetworkConnector, NetworkNode,
-};
+use networking::{new_client, ConnectionError, NetworkConnector, NetworkNode};
 use ordered_float::NotNan;
 use serde::Deserialize;
 use unros::{
@@ -44,7 +43,8 @@ struct TelemetryConfig {
 
 fn default_server_addr() -> SocketAddrV4 {
     let addr = std::env::var("SERVER_ADDR").unwrap_or("192.168.0.100:43721".into());
-    addr.parse().expect("SERVER_ADDR must be a valid IP address and port!")
+    addr.parse()
+        .expect("SERVER_ADDR must be a valid IP address and port!")
 }
 
 /// A remote connection to `Lunabase`

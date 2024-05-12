@@ -74,9 +74,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         );
         let context = context.make_context(cam.get_camera_name());
         cam.spawn(context);
-        if let Ok(sub) = subscriber
-        .into_watch_or_closed()
-        .await {
+        if let Ok(sub) = subscriber.into_watch_or_closed().await {
             camera_subs.push(sub);
         }
     }
@@ -102,9 +100,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         );
         let context = context.make_context(cam.get_name().to_string_lossy());
         cam.spawn(context);
-        if let Ok(sub) = subscriber
-        .into_watch_or_closed()
-        .await {
+        if let Ok(sub) = subscriber.into_watch_or_closed().await {
             camera_subs.push(sub);
         }
     }
@@ -118,10 +114,20 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                     .steering_pub()
                     .accept_subscription(drive.get_steering_sub());
                 let sub = Subscriber::new(4);
-                drive.get_current_pub().accept_subscription(sub.create_subscription());
-                let _ = sub.into_logger(|(left, right)| format!("{left} {right}"), "currents.log", &context).await;
+                drive
+                    .get_current_pub()
+                    .accept_subscription(sub.create_subscription());
+                let _ = sub
+                    .into_logger(
+                        |(left, right)| format!("{left} {right}"),
+                        "currents.log",
+                        &context,
+                    )
+                    .await;
                 let sub = Subscriber::new(4);
-                drive.get_current_pub().accept_subscription(sub.create_subscription());
+                drive
+                    .get_current_pub()
+                    .accept_subscription(sub.create_subscription());
                 drive.spawn(context.make_context("drive"));
                 unros::tokio::spawn(async move {
                     loop {

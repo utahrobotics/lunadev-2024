@@ -159,8 +159,7 @@ impl INode for LunabotConn {
                 important.accept_subscription(important_sub.create_subscription());
 
                 let odometry_sub = Subscriber::new(8);
-                odometry
-                    .accept_subscription(odometry_sub.create_subscription());
+                odometry.accept_subscription(odometry_sub.create_subscription());
 
                 shared
                     .audio_pub
@@ -336,7 +335,7 @@ impl INode for LunabotConn {
                             };
                             received!();
 
-                            let controls = match result {
+                            let odom = match result {
                                 Ok(x) => x,
                                 Err(e) => {
                                     godot_error!("Failed to parse incoming odometry: {e}");
@@ -345,7 +344,12 @@ impl INode for LunabotConn {
                             };
 
                             shared.base_mut_queue.push(Box::new(move |mut base| {
-                                base.emit_signal("odometry_received".into(), &[controls.arm_angle.to_variant(), Vector3::new(controls.acceleration[0], controls.acceleration[1], controls.acceleration[2]).to_variant()]);
+                                base.emit_signal("odometry_received".into(), &[
+                                    odom.arm_angle.to_variant(),
+                                    Vector3::new(odom.acceleration[0], odom.acceleration[1], odom.acceleration[2]).to_variant(),
+                                    odom.front_elevation.to_variant(),
+                                    odom.back_elevation.to_variant(),
+                                ]);
                             }));
                         }
                         _ = tokio::time::sleep(Duration::from_millis(50)) => {}
@@ -433,7 +437,13 @@ impl LunabotConn {
     fn something_received(&self);
 
     #[signal]
-    fn odometry_received(&self, arm_angle: f32, acceleration: Vector3);
+    fn odometry_received(
+        &self,
+        arm_angle: f32,
+        acceleration: Vector3,
+        front_elevation: f32,
+        back_elevation: f32,
+    );
 
     #[signal]
     fn network_statistics(
