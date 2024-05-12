@@ -140,7 +140,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                 .collect();
             let buf = ImageBuffer::<Luma<u8>, _>::from_raw(200, 200, img_data).unwrap();
             let img = DynamicImage::from(buf);
-            if costmap_display.write_frame_quiet(img.into()).is_err() {
+            if costmap_display.write_frame(&img).is_err() {
                 break;
             }
         }

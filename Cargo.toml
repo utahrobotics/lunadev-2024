@@ -21,7 +21,7 @@ members = [
     "lunabotics/lunabot",
     "lunabotics/lunabot-lib",
     "lunabotics/lunabase-lib",
-    "lunabotics/lunasimbot",
+    # "lunabotics/lunasimbot",
 ]
 resolver = "2"
 exclude = ["publishing/", "dump/", "lunabotics/lunabase/", "camera-db/"]

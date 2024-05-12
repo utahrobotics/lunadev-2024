@@ -6,14 +6,18 @@ use ordered_float::{Float, FloatCore, NotNan};
 use simba::scalar::SupersetOf;
 use std::{ops::Deref, sync::Arc};
 
-pub fn make_negotiation() -> Negotiation<(
+
+pub type LunaNegotiation = Negotiation<(
     ChannelNegotiation<ImportantMessage>,
     ChannelNegotiation<CameraMessage>,
-    ChannelNegotiation<u8>,
+    ChannelNegotiation<Odometry>,
     ChannelNegotiation<ControlsPacket>,
     ChannelNegotiation<Arc<str>>,
     ChannelNegotiation<Audio>,
-)> {
+)>;
+
+
+pub fn make_negotiation() -> LunaNegotiation {
     Negotiation::new(
         (
             ChannelNegotiation::new("important"),
@@ -28,6 +32,12 @@ pub fn make_negotiation() -> Negotiation<(
     .unwrap()
 }
 
+#[derive(Clone, Copy, Encode, Decode, PartialEq, Debug)]
+pub struct Odometry {
+    pub arm_angle: f32,
+    pub gravity: [f32; 3]
+}
+
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Debug)]
 pub struct ArmParameters {
     pub lift: ArmAction,
@@ -40,7 +50,7 @@ pub enum ArmAction {
     Retract,
     Stop,
     SetValue(u8),
-    // Home
+    Home
 }
 
 impl Default for ArmParameters {

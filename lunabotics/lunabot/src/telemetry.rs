@@ -10,11 +10,9 @@ use std::{
 
 use image::RgbImage;
 use lunabot_lib::{
-    make_negotiation, ArmParameters, Audio, CameraMessage, ControlsPacket, ImportantMessage,
-    Steering,
+    make_negotiation, ArmParameters, Audio, CameraMessage, ImportantMessage, LunaNegotiation, Steering
 };
 use networking::{
-    negotiation::{ChannelNegotiation, Negotiation},
     new_client, ConnectionError, NetworkConnector, NetworkNode,
 };
 use ordered_float::NotNan;
@@ -59,14 +57,7 @@ pub struct Telemetry {
     steering_signal: Publisher<Steering>,
     arm_signal: Publisher<ArmParameters>,
     dont_drop: DontDrop<Self>,
-    negotiation: Negotiation<(
-        ChannelNegotiation<ImportantMessage>,
-        ChannelNegotiation<CameraMessage>,
-        ChannelNegotiation<u8>,
-        ChannelNegotiation<ControlsPacket>,
-        ChannelNegotiation<Arc<str>>,
-        ChannelNegotiation<Audio>,
-    )>,
+    negotiation: LunaNegotiation,
     video_addr: SocketAddrV4,
     cam_width: u32,
     cam_height: u32,
