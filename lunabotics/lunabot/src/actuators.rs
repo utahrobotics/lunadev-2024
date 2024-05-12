@@ -285,12 +285,8 @@ impl AsyncNode for Arms {
                     arm_angle += std::f32::consts::PI / 12.0;
                     let accel = (lift_accel + tilt_accel) / 2.0;
 
-                    let front_elevation = 159.031
-                        + 52.4931 * (0.0001206 * tilt_l.powi(2) + 2.53947 * tilt_l - 24.8994).cos()
-                        + 643.036 * (0.00005467 * lift_l.powi(2) + 2.51201 * lift_l - 8.12657);
-                    let back_elevation = 29.6433
-                        + 66.0333 * (0.000345 * tilt_l.powi(2) + 2.50845 * tilt_l - 24.3035).cos()
-                        + 7.28242 * (0.003568 * lift_l.powi(2) + 2.24195 * lift_l - 3.48055);
+                    let front_elevation = 3.2796 - 1.06145 * tilt_l + 0.00656571 * tilt_l.powi(2) + 0.54728 * lift_l + 0.03588 * lift_l.powi(2) - 0.029068 * tilt_l * lift_l;
+                    let back_elevation = -10.404 - 0.148417 * tilt_l + 0.0250286 * tilt_l.powi(2) + -1.12599 * lift_l + 0.0211143 * lift_l.powi(2) - 0.008524 * tilt_l * lift_l;
 
                     self.odometry_pub.set(Odometry {
                         arm_angle,
