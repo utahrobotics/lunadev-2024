@@ -167,6 +167,7 @@ impl AsyncNode for Drive {
                 //     let bytes_len = bytes.len();
                 //     get_values_buf.extend_from_slice(&bytes);
                 //     read_bytes += bytes_len;
+                //     println!("{read_bytes}");
                 // }
     
                 // let left_current = self.vesc.exec(&format!(

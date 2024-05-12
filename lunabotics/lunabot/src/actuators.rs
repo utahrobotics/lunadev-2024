@@ -1,4 +1,5 @@
 use lunabot_lib::{ArmAction, ArmParameters};
+use serde::Deserialize;
 use serial::SerialConnection;
 use unros::{
     anyhow,
@@ -8,14 +9,20 @@ use unros::{
     setup_logging, tokio, DontDrop, ShouldNotDrop,
 };
 
+#[derive(Deserialize, Default)]
+struct ArmsConfig {
+    #[serde(default)]
+    home: bool
+}
+
 #[derive(ShouldNotDrop)]
 pub struct Arms {
     arm_sub: Subscriber<ArmParameters>,
     tilt_conn: SerialConnection<String, String>,
     lift_conn: SerialConnection<String, String>,
-    tilt_value: Publisher<f32>,
-    lift_value: Publisher<f32>,
+    angle_value: Publisher<f32>,
     dont_drop: DontDrop<Self>,
+    config: ArmsConfig
 }
 
 impl Arms {
@@ -25,8 +32,10 @@ impl Arms {
             dont_drop: DontDrop::new("arms"),
             tilt_conn: SerialConnection::new(tilt_port, 115200, true).map_to_string(),
             lift_conn: SerialConnection::new(lift_port, 115200, true).map_to_string(),
-            tilt_value: Publisher::default(),
-            lift_value: Publisher::default()
+            angle_value: Publisher::default(),
+            config: unros::get_env().map_err(|e| {
+                unros::log::error!("{e}");
+            }).unwrap_or_default()
         }
     }
 
@@ -92,60 +101,73 @@ impl AsyncNode for Arms {
                 }
             }
 
-            // lift_repl.set("extend_home()\r".into());
-            // tilt_repl.set("extend_home()\r".into());
-            // tokio::time::sleep(std::time::Duration::from_secs(21000)).await;
+            if self.config.home {
+                lift_repl.set("extend_home()\r".into());
+                tilt_repl.set("extend_home()\r".into());
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
 
             tokio::spawn(async move {
                 let mut lift_buf = String::new();
-                let mut sum = 0isize;
-                let mut count = 0usize;
-                loop {
-                    lift_buf += &lift_sub.recv().await;
-                    if let Some(index) = lift_buf.find('\n') {
-                        let line = lift_buf.split_at(index).0;
-                        if !line.starts_with("Motor") {
-                            lift_buf.drain(0..index + 1);
-                            continue;
-                        }
+                let mut lift_sum = 0isize;
+                let mut lift_count = 0usize;
+                let mut lift_value = 0f32;
 
-                        let value: isize = line.split_at(9).1.trim().parse().unwrap();
-                        sum += value;
-                        count += 1;
-                        lift_buf.drain(0..index + 1);
-                        if count == 2 {
-                            self.lift_value.set(sum as f32 / 9000.0);
-                            sum = 0;
-                            count = 0;
-                        }
-
-                    }
-                }
-            });
-
-            tokio::spawn(async move {
                 let mut tilt_buf = String::new();
-                let mut sum = 0isize;
-                let mut count = 0usize;
+                let mut tilt_sum = 0isize;
+                let mut tilt_count = 0usize;
+                let mut tilt_value = 0f32;
+
                 loop {
-                    tilt_buf += &tilt_sub.recv().await;
-                    if let Some(index) = tilt_buf.find('\n') {
-                        let line = tilt_buf.split_at(index).0;
-                        if !line.starts_with("Motor") {
-                            tilt_buf.drain(0..index + 1);
-                            continue;
+                    tokio::select! {
+                        lift_msg = lift_sub.recv() => {
+                            lift_buf += &lift_msg;
+                            if let Some(index) = lift_buf.find('\n') {
+                                let line = lift_buf.split_at(index).0;
+                                if !line.starts_with("Motor") {
+                                    lift_buf.drain(0..index + 1);
+                                    continue;
+                                }
+        
+                                let value: isize = line.split_at(9).1.trim().parse().unwrap();
+                                lift_sum += value;
+                                lift_count += 1;
+                                lift_buf.drain(0..index + 1);
+                                if lift_count == 2 {
+                                    lift_value = lift_sum as f32 / 2.0;
+                                    lift_sum = 0;
+                                    lift_count = 0;
+                                }
+                            }
                         }
-                        
-                        let value: isize = line.split_at(9).1.trim().parse().unwrap();
-                        sum += value;
-                        count += 1;
-                        tilt_buf.drain(0..index + 1);
-                        if count == 2 {
-                            self.tilt_value.set(sum as f32 / 9000.0);
-                            sum = 0;
-                            count = 0;
+                        tilt_msg = tilt_sub.recv() => {
+                            tilt_buf += &tilt_msg;
+                            if let Some(index) = tilt_buf.find('\n') {
+                                let line = tilt_buf.split_at(index).0;
+                                if !line.starts_with("Motor") {
+                                    tilt_buf.drain(0..index + 1);
+                                    continue;
+                                }
+                                
+                                let value: isize = line.split_at(9).1.trim().parse().unwrap();
+                                tilt_sum += value;
+                                tilt_count += 1;
+                                tilt_buf.drain(0..index + 1);
+                                if tilt_count == 2 {
+                                    tilt_value = tilt_sum as f32 / 2.0;
+                                    tilt_sum = 0;
+                                    tilt_count = 0;
+                                }
+                            }
                         }
                     }
+
+                    let lift_l = 37.0 + 25.5 / 4500.0 * lift_value;
+                    let tilt_l = 37.0 + 25.5 / 4500.0 * tilt_value;
+
+                    let angle = -0.1354 - ((lift_l.powi(2) - 3312.5) / 3148.5).acos() + ((tilt_l.powi(2) - 2530.9) / 1785.6).acos();
+                    self.angle_value.set(angle);
+                    println!("{}", angle / std::f32::consts::PI * 180.0 + 15.0);
                 }
             });
 
