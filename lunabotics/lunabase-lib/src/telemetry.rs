@@ -118,7 +118,7 @@ impl INode for LunabotConn {
                     }
                 }
 
-                let (important, camera, _odometry, controls, logs, audio) =
+                let (important, camera, odometry, controls, logs, audio) =
                     match peer.negotiate(&negotiation).await {
                         Ok(x) => x,
                         Err(e) => {
@@ -157,6 +157,10 @@ impl INode for LunabotConn {
                     MonoPublisher::from(important.create_reliable_subscription());
                 let important_sub = Subscriber::new(8);
                 important.accept_subscription(important_sub.create_subscription());
+
+                let odometry_sub = Subscriber::new(8);
+                odometry
+                    .accept_subscription(odometry_sub.create_subscription());
 
                 shared
                     .audio_pub
@@ -324,6 +328,26 @@ impl INode for LunabotConn {
 
                             shared.echo_controls.store(controls != shared.controls_data.load(), Ordering::Relaxed);
                         }
+                        result = odometry_sub.recv_or_closed() => {
+                            let Some(result) = result else {
+                                godot_error!("odometry_sub closed");
+                                error!("odometry_sub closed");
+                                break;
+                            };
+                            received!();
+
+                            let controls = match result {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    godot_error!("Failed to parse incoming odometry: {e}");
+                                    continue;
+                                }
+                            };
+
+                            shared.base_mut_queue.push(Box::new(move |mut base| {
+                                base.emit_signal("odometry_received".into(), &[controls.arm_angle.to_variant(), Vector3::new(controls.acceleration[0], controls.acceleration[1], controls.acceleration[2]).to_variant()]);
+                            }));
+                        }
                         _ = tokio::time::sleep(Duration::from_millis(50)) => {}
                     }
 
@@ -409,7 +433,7 @@ impl LunabotConn {
     fn something_received(&self);
 
     #[signal]
-    fn odometry_received(&self, position: Vector2);
+    fn odometry_received(&self, arm_angle: f32, acceleration: Vector3);
 
     #[signal]
     fn network_statistics(

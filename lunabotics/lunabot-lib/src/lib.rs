@@ -35,7 +35,7 @@ pub fn make_negotiation() -> LunaNegotiation {
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Debug)]
 pub struct Odometry {
     pub arm_angle: f32,
-    pub gravity: [f32; 3]
+    pub acceleration: [f32; 3]
 }
 
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Debug)]

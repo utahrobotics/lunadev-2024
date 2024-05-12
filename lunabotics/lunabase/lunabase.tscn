@@ -292,6 +292,7 @@ layout_mode = 2
 layout_mode = 1
 anchors_preset = -1
 anchor_right = 1.0
+anchor_bottom = 0.65
 offset_left = 10.0
 offset_top = 10.0
 
@@ -307,6 +308,36 @@ layout_mode = 2
 size_flags_horizontal = 0
 text = "Last Received:"
 script = SubResource("GDScript_yu1su")
+
+[node name="Panel" type="PanelContainer" parent="Control/VBoxContainer3"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Control/VBoxContainer3/Panel"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Control/VBoxContainer3/Panel/HBoxContainer"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+
+[node name="CenterContainer" type="CenterContainer" parent="Control/VBoxContainer3/Panel/HBoxContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Control" type="Control" parent="Control/VBoxContainer3/Panel/HBoxContainer/VBoxContainer/CenterContainer"]
+layout_mode = 2
+
+[node name="Node2D" type="Node2D" parent="Control/VBoxContainer3/Panel/HBoxContainer/VBoxContainer/CenterContainer/Control"]
+
+[node name="Polygon2D" type="Polygon2D" parent="Control/VBoxContainer3/Panel/HBoxContainer/VBoxContainer/CenterContainer/Control/Node2D"]
+position = Vector2(-14, 2)
+polygon = PackedVector2Array(-58, -37, 49, -37, 97, 24, -58, 24)
+
+[node name="Label" type="Label" parent="Control/VBoxContainer3/Panel/HBoxContainer/VBoxContainer"]
+layout_mode = 2
+text = "0.0"
+horizontal_alignment = 1
 
 [node name="HBoxContainer" type="HBoxContainer" parent="Control"]
 layout_mode = 1
