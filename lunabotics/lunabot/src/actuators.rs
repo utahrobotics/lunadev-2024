@@ -268,7 +268,11 @@ impl AsyncNode for Arms {
                         arm_angle,
                         acceleration: accel.into()
                     });
-                    // println!("{}", angle / std::f32::consts::PI * 180.0 + 15.0);
+
+                    let front_elevation = 159.031 + 52.4931 * (0.0001206 * tilt_l.powi(2) + 2.53947 * tilt_l - 24.8994).cos() + 643.036 * (0.00005467 * lift_l.powi(2) + 2.51201 * lift_l - 8.12657);
+                    let back_elevation = 29.6433 + 66.0333 * (0.000345 * tilt_l.powi(2) + 2.50845 * tilt_l - 24.3035).cos() + 7.28242 * (0.003568 * lift_l.powi(2) + 2.24195 * lift_l - 3.48055);
+
+                    println!("{}cm {}cm", front_elevation, back_elevation);
                 }
             });
 
