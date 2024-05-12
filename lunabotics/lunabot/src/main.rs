@@ -109,7 +109,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         }
     }
 
-    let telemetry = Telemetry::new(20, camera_subs).await?;
+    let mut telemetry = Telemetry::new(20, camera_subs).await?;
 
     match serial::connect_to_serial() {
         Ok((arms, drive)) => {
@@ -133,6 +133,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
 
             if let Some(arms) = arms {
                 telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
+                telemetry.odometry_sub(arms.get_odometry_pub());
                 arms.spawn(context.make_context("arms"));
             }
         }

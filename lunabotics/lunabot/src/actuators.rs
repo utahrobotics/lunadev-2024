@@ -1,11 +1,11 @@
-use lunabot_lib::{ArmAction, ArmParameters};
+use lunabot_lib::{ArmAction, ArmParameters, Odometry};
 use nalgebra::Vector3;
 use serde::Deserialize;
 use serial::SerialConnection;
 use unros::{
     anyhow,
     node::AsyncNode,
-    pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, Subscriber},
+    pubsub::{subs::DirectSubscription, MonoPublisher, Publisher, PublisherRef, Subscriber},
     runtime::RuntimeContext,
     setup_logging, tokio, DontDrop, ShouldNotDrop,
 };
@@ -21,8 +21,7 @@ pub struct Arms {
     arm_sub: Subscriber<ArmParameters>,
     tilt_conn: SerialConnection<String, String>,
     lift_conn: SerialConnection<String, String>,
-    angle_value: Publisher<f32>,
-    accelerometer: Publisher<Vector3<f32>>,
+    odometry_pub: Publisher<Odometry>,
     dont_drop: DontDrop<Self>,
     config: ArmsConfig
 }
@@ -34,8 +33,7 @@ impl Arms {
             dont_drop: DontDrop::new("arms"),
             tilt_conn: SerialConnection::new(tilt_port, 115200, true).map_to_string(),
             lift_conn: SerialConnection::new(lift_port, 115200, true).map_to_string(),
-            angle_value: Publisher::default(),
-            accelerometer: Publisher::default(),
+            odometry_pub: Publisher::default(),
             config: unros::get_env().map_err(|e| {
                 unros::log::error!("{e}");
             }).unwrap_or_default()
@@ -44,6 +42,10 @@ impl Arms {
 
     pub fn get_arm_sub(&self) -> DirectSubscription<ArmParameters> {
         self.arm_sub.create_subscription()
+    }
+
+    pub fn get_odometry_pub(&self) -> PublisherRef<Odometry> {
+        self.odometry_pub.get_ref()
     }
 }
 
@@ -260,9 +262,12 @@ impl AsyncNode for Arms {
                     let lift_l = 37.0 + 25.5 / 4500.0 * lift_value;
                     let tilt_l = 37.0 + 25.5 / 4500.0 * tilt_value;
 
-                    let angle = -0.1354 - ((lift_l.powi(2) - 3312.5) / 3148.5).acos() + ((tilt_l.powi(2) - 2530.9) / 1785.6).acos();
-                    self.angle_value.set(angle);
-                    self.accelerometer.set((lift_accel + tilt_accel) / 2.0);
+                    let arm_angle = -0.1354 - ((lift_l.powi(2) - 3312.5) / 3148.5).acos() + ((tilt_l.powi(2) - 2530.9) / 1785.6).acos();
+                    let accel = (lift_accel + tilt_accel) / 2.0;
+                    self.odometry_pub.set(Odometry {
+                        arm_angle,
+                        acceleration: accel.into()
+                    });
                     // println!("{}", angle / std::f32::consts::PI * 180.0 + 15.0);
                 }
             });

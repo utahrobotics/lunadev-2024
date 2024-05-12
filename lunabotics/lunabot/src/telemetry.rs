@@ -10,7 +10,7 @@ use std::{
 
 use image::RgbImage;
 use lunabot_lib::{
-    make_negotiation, ArmParameters, Audio, CameraMessage, ImportantMessage, LunaNegotiation, Steering
+    make_negotiation, ArmParameters, Audio, CameraMessage, ImportantMessage, LunaNegotiation, Odometry, Steering
 };
 use networking::{
     new_client, ConnectionError, NetworkConnector, NetworkNode,
@@ -63,6 +63,7 @@ pub struct Telemetry {
     cam_height: u32,
     cam_fps: usize,
     camera_subs: Vec<WatchSubscriber<RgbImage>>,
+    odometry_sub: Option<PublisherRef<Odometry>>,
 }
 
 impl Telemetry {
@@ -91,6 +92,7 @@ impl Telemetry {
             video_addr,
             cam_fps,
             camera_subs,
+            odometry_sub: None,
         })
     }
 
@@ -100,6 +102,10 @@ impl Telemetry {
 
     pub fn arm_pub(&self) -> PublisherRef<ArmParameters> {
         self.arm_signal.get_ref()
+    }
+
+    pub fn odometry_sub(&mut self, pubref: PublisherRef<Odometry>) {
+        self.odometry_sub = Some(pubref);
     }
 }
 
@@ -226,7 +232,7 @@ impl AsyncNode for Telemetry {
                         Err(ConnectionError::Timeout) => {}
                     };
                 };
-                let (important, camera, _odometry, controls, logs, audio) =
+                let (important, camera, odometry, controls, logs, audio) =
                     match peer.negotiate(&self.negotiation).await {
                         Ok(x) => x,
                         Err(e) => {
@@ -237,6 +243,10 @@ impl AsyncNode for Telemetry {
                 enable_camera.store(true, Ordering::Relaxed);
                 info!("Connected to lunabase!");
                 get_log_pub().accept_subscription(logs.create_reliable_subscription());
+
+                if let Some(odometry_sub) = self.odometry_sub.clone() {
+                    odometry_sub.accept_subscription(odometry.create_unreliable_subscription());
+                }
 
                 let important_fut = async {
                     let mut _important_pub =
