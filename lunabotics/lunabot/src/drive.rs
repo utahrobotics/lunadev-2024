@@ -84,12 +84,12 @@ impl AsyncNode for Drive {
         self.dont_drop.ignore_drop = true;
 
         let mut left_pub = MonoPublisher::from(self.left_conn.message_to_send_sub());
-        let left_sub = Subscriber::new(8);
+        let mut left_sub = Subscriber::new(8);
         self.left_conn
             .msg_received_pub()
             .accept_subscription(left_sub.create_subscription());
         let mut right_pub = MonoPublisher::from(self.right_conn.message_to_send_sub());
-        let right_sub = Subscriber::new(8);
+        let mut right_sub = Subscriber::new(8);
         self.right_conn
             .msg_received_pub()
             .accept_subscription(right_sub.create_subscription());
@@ -113,11 +113,12 @@ impl AsyncNode for Drive {
 
             if app_controller_id == "4" {
                 std::mem::swap(&mut left_pub, &mut right_pub);
+                std::mem::swap(&mut left_sub, &mut right_sub);
             }
 
             loop {
                 for _ in 0..10 {
-                    let steering;// = self.steering_sub.recv().await;
+                    let steering;
 
                     tokio::select! {
                         tmp = self.steering_sub.recv() => {
@@ -158,43 +159,43 @@ impl AsyncNode for Drive {
                     right_pub.set(right_vesc_msg.into());
                 }
 
-                // left_pub.set(self.get_values_request.clone());
-                // let mut get_values_buf = Vec::with_capacity(self.get_values_respose_len);
-                // let mut read_bytes = 0usize;
+                left_pub.set(self.get_values_request.clone());
+                get_values_buf.clear();
+                read_bytes = 0;
     
-                // while read_bytes < self.get_values_respose_len {
-                //     let bytes = left_sub.recv().await;
-                //     let bytes_len = bytes.len();
-                //     get_values_buf.extend_from_slice(&bytes);
-                //     read_bytes += bytes_len;
-                //     println!("{read_bytes}");
-                // }
+                while read_bytes < self.get_values_respose_len {
+                    let bytes = left_sub.recv().await;
+                    let bytes_len = bytes.len();
+                    get_values_buf.extend_from_slice(&bytes);
+                    read_bytes += bytes_len;
+                    println!("{read_bytes}");
+                }
     
-                // let left_current = self.vesc.exec(&format!(
-                //     r#"decode_avg_motor_current("{}")"#,
-                //     BASE64_STANDARD.encode(&get_values_buf)
-                // ))?;
-                // println!("{left_current}");
-                // let left_current: u8 = left_current.parse()?;
+                let left_current = self.vesc.exec(&format!(
+                    r#"decode_avg_motor_current("{}")"#,
+                    BASE64_STANDARD.encode(&get_values_buf)
+                ))?;
+                println!("{left_current}");
+                let left_current: u8 = left_current.parse()?;
 
-                // right_pub.set(self.get_values_request.clone());
-                // get_values_buf.clear();
-                // read_bytes = 0;
+                right_pub.set(self.get_values_request.clone());
+                get_values_buf.clear();
+                read_bytes = 0;
     
-                // while read_bytes < self.get_values_respose_len {
-                //     let bytes = right_sub.recv().await;
-                //     let bytes_len = bytes.len();
-                //     get_values_buf.extend_from_slice(&bytes);
-                //     read_bytes += bytes_len;
-                // }
+                while read_bytes < self.get_values_respose_len {
+                    let bytes = right_sub.recv().await;
+                    let bytes_len = bytes.len();
+                    get_values_buf.extend_from_slice(&bytes);
+                    read_bytes += bytes_len;
+                }
     
-                // let right_current = self.vesc.exec(&format!(
-                //     r#"decode_avg_motor_current("{}")"#,
-                //     BASE64_STANDARD.encode(&get_values_buf)
-                // ))?;
-                // let right_current: u8 = right_current.parse()?;
+                let right_current = self.vesc.exec(&format!(
+                    r#"decode_avg_motor_current("{}")"#,
+                    BASE64_STANDARD.encode(&get_values_buf)
+                ))?;
+                let right_current: u8 = right_current.parse()?;
 
-                // self.current_pub.set((left_current, right_current));
+                self.current_pub.set((left_current, right_current));
             }
         };
 
