@@ -22,7 +22,7 @@ pub struct Drive {
     right_invert: bool,
     get_values_respose_len: usize,
     get_values_request: Bytes,
-    current_pub: Publisher<(u8, u8)>,
+    current_pub: Publisher<(f32, f32)>,
 }
 
 #[derive(Deserialize)]
@@ -71,7 +71,7 @@ impl Drive {
         self.steering_sub.create_subscription()
     }
 
-    pub fn get_current_pub(&self) -> PublisherRef<(u8, u8)> {
+    pub fn get_current_pub(&self) -> PublisherRef<(f32, f32)> {
         self.current_pub.get_ref()
     }
 }
@@ -159,43 +159,41 @@ impl AsyncNode for Drive {
                     right_pub.set(right_vesc_msg.into());
                 }
 
-                left_pub.set(self.get_values_request.clone());
-                get_values_buf.clear();
-                read_bytes = 0;
+                // left_pub.set(self.get_values_request.clone());
+                // get_values_buf.clear();
+                // read_bytes = 0;
 
-                while read_bytes < self.get_values_respose_len {
-                    let bytes = left_sub.recv().await;
-                    let bytes_len = bytes.len();
-                    get_values_buf.extend_from_slice(&bytes);
-                    read_bytes += bytes_len;
-                    println!("{read_bytes}");
-                }
+                // while read_bytes < self.get_values_respose_len {
+                //     let bytes = left_sub.recv().await;
+                //     let bytes_len = bytes.len();
+                //     get_values_buf.extend_from_slice(&bytes);
+                //     read_bytes += bytes_len;
+                // }
 
-                let left_current = self.vesc.exec(&format!(
-                    r#"decode_avg_motor_current("{}")"#,
-                    BASE64_STANDARD.encode(&get_values_buf)
-                ))?;
-                println!("{left_current}");
-                let left_current: u8 = left_current.parse()?;
+                // let left_current = self.vesc.exec(&format!(
+                //     r#"decode_avg_motor_current("{}")"#,
+                //     BASE64_STANDARD.encode(&get_values_buf)
+                // ))?;
+                // let left_current: f32 = left_current.parse()?;
 
-                right_pub.set(self.get_values_request.clone());
-                get_values_buf.clear();
-                read_bytes = 0;
+                // right_pub.set(self.get_values_request.clone());
+                // get_values_buf.clear();
+                // read_bytes = 0;
 
-                while read_bytes < self.get_values_respose_len {
-                    let bytes = right_sub.recv().await;
-                    let bytes_len = bytes.len();
-                    get_values_buf.extend_from_slice(&bytes);
-                    read_bytes += bytes_len;
-                }
+                // while read_bytes < self.get_values_respose_len {
+                //     let bytes = right_sub.recv().await;
+                //     let bytes_len = bytes.len();
+                //     get_values_buf.extend_from_slice(&bytes);
+                //     read_bytes += bytes_len;
+                // }
 
-                let right_current = self.vesc.exec(&format!(
-                    r#"decode_avg_motor_current("{}")"#,
-                    BASE64_STANDARD.encode(&get_values_buf)
-                ))?;
-                let right_current: u8 = right_current.parse()?;
+                // let right_current = self.vesc.exec(&format!(
+                //     r#"decode_avg_motor_current("{}")"#,
+                //     BASE64_STANDARD.encode(&get_values_buf)
+                // ))?;
+                // let right_current: f32 = right_current.parse()?;
 
-                self.current_pub.set((left_current, right_current));
+                // self.current_pub.set((left_current, right_current));
             }
         };
 

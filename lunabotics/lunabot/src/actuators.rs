@@ -58,26 +58,22 @@ impl AsyncNode for Arms {
         setup_logging!(context);
 
         self.dont_drop.ignore_drop = true;
-        let tilt_repl = MonoPublisher::from(self.tilt_conn.message_to_send_sub());
-        let tilt_repl_sub = Subscriber::new(8);
-        self.tilt_conn
-            .msg_received_pub()
-            .accept_subscription(tilt_repl_sub.create_subscription());
-        let lift_repl = MonoPublisher::from(self.lift_conn.message_to_send_sub());
+        let mut tilt_repl = MonoPublisher::from(self.tilt_conn.message_to_send_sub());
+        let mut lift_repl = MonoPublisher::from(self.lift_conn.message_to_send_sub());
 
-        struct DropRepl(MonoPublisher<String, DirectSubscription<String>>);
+        // struct DropRepl(MonoPublisher<String, DirectSubscription<String>>);
 
-        impl Drop for DropRepl {
-            fn drop(&mut self) {
-                self.0.set("store_pos()\r".into());
-            }
-        }
+        // impl Drop for DropRepl {
+        //     fn drop(&mut self) {
+        //         self.0.set("store_pos()\r".into());
+        //     }
+        // }
 
-        let mut tilt_repl = DropRepl(tilt_repl);
-        let mut tilt_repl = &mut tilt_repl.0;
+        // let mut tilt_repl = DropRepl(tilt_repl);
+        // let mut tilt_repl = &mut tilt_repl.0;
 
-        let mut lift_repl = DropRepl(lift_repl);
-        let mut lift_repl = &mut lift_repl.0;
+        // let mut lift_repl = DropRepl(lift_repl);
+        // let mut lift_repl = &mut lift_repl.0;
 
         let lift_sub = Subscriber::new(32);
         let tilt_sub = Subscriber::new(32);
@@ -93,7 +89,7 @@ impl AsyncNode for Arms {
             let mut info = String::new();
 
             loop {
-                let tmp = tilt_repl_sub.recv().await;
+                let tmp = tilt_sub.recv().await;
                 info.push_str(&tmp);
 
                 if info.len() < 15 {
@@ -133,8 +129,15 @@ impl AsyncNode for Arms {
                         lift_msg = lift_sub.recv() => {
                             lift_buf += &lift_msg;
                             if let Some(index) = lift_buf.find('\n') {
-                                let line = lift_buf.split_at(index).0;
-                                let mut split = line.split(' ');
+                                let mut line = lift_buf.split_at(index).0;
+                                if line.contains("()") {
+                                    lift_buf.drain(0..index + 1);
+                                    continue;
+                                }
+                                if line.starts_with(">>> ") {
+                                    line = line.split_at(4).1;
+                                }
+                                let mut split = line.trim().split(' ');
 
                                 let Some(next) = split.next() else {
                                     unros::log::error!("Unexpected response from lift: {}", line);
@@ -158,6 +161,7 @@ impl AsyncNode for Arms {
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
+                                lift_value = (value1 + value2) as f32 / 2.0;
 
                                 let Some(next) = split.next() else {
                                     unros::log::error!("Unexpected response from lift: {}", line);
@@ -196,14 +200,21 @@ impl AsyncNode for Arms {
                                 };
 
                                 lift_accel = Vector3::new(x, y, z);
-                                lift_value = (value1 + value2) as f32 / 2.0;
+                                lift_buf.drain(0..index + 1);
                             }
                         }
                         tilt_msg = tilt_sub.recv() => {
                             tilt_buf += &tilt_msg;
                             if let Some(index) = tilt_buf.find('\n') {
-                                let line = tilt_buf.split_at(index).0;
-                                let mut split = line.split(' ');
+                                let mut line = tilt_buf.split_at(index).0;
+                                if line.contains("()") {
+                                    tilt_buf.drain(0..index + 1);
+                                    continue;
+                                }
+                                if line.starts_with(">>> ") {
+                                    line = line.split_at(4).1;
+                                }
+                                let mut split = line.trim().split(' ');
 
                                 let Some(next) = split.next() else {
                                     unros::log::error!("Unexpected response from tilt: {}", line);
@@ -227,40 +238,41 @@ impl AsyncNode for Arms {
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
+                                tilt_value = (value1 + value2) as f32 / 2.0;
 
                                 let mut result: Result<f32, _> = next.parse();
                                 let Ok(x) = result else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
-                                    lift_buf.drain(0..index + 1);
+                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
-                                    lift_buf.drain(0..index + 1);
+                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 result = next.parse();
                                 let Ok(y) = result else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
-                                    lift_buf.drain(0..index + 1);
+                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
-                                    lift_buf.drain(0..index + 1);
+                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 result = next.parse();
                                 let Ok(z) = result else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
-                                    lift_buf.drain(0..index + 1);
+                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
 
                                 tilt_accel = Vector3::new(x, y, z);
-                                tilt_value = (value1 + value2) as f32 / 2.0;
+                                tilt_buf.drain(0..index + 1);
                             }
                         }
                     }
@@ -268,8 +280,9 @@ impl AsyncNode for Arms {
                     let lift_l = 37.0 + 25.5 / 4500.0 * lift_value;
                     let tilt_l = 37.0 + 25.5 / 4500.0 * tilt_value;
 
-                    let arm_angle = -0.1354 - ((lift_l.powi(2) - 3312.5) / 3148.5).acos()
+                    let mut arm_angle = -0.1354 - ((lift_l.powi(2) - 3312.5) / 3148.5).acos()
                         + ((tilt_l.powi(2) - 2530.9) / 1785.6).acos();
+                    arm_angle += std::f32::consts::PI / 12.0;
                     let accel = (lift_accel + tilt_accel) / 2.0;
 
                     let front_elevation = 159.031
@@ -285,8 +298,6 @@ impl AsyncNode for Arms {
                         front_elevation,
                         back_elevation,
                     });
-
-                    println!("{}cm {}cm", front_elevation, back_elevation);
                 }
             });
 
