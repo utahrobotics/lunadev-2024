@@ -8,6 +8,7 @@ script/source = "extends HSplitContainer
 
 
 var connected := false
+var invert_steering := false
 
 
 func _ready() -> void:
@@ -22,9 +23,12 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadMotion:
 		if !connected:
 			return
+		var invert := 1.0
+		if invert_steering:
+			invert = -1
 		Lunabot.send_steering(
-			Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\"),
-			(Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")) * 0.4
+			-(Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\")),
+			-(Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")) * 0.4 * invert
 		)
 	
 	elif event.is_action_pressed(\"Restart\"):
@@ -35,6 +39,10 @@ func _input(event: InputEvent) -> void:
 	
 	elif event.is_action_released(\"PlayAudio\"):
 		Lunabot.pause_audio()
+
+
+func _on_button_pressed() -> void:
+	invert_steering = not invert_steering
 "
 
 [sub_resource type="GDScript" id="GDScript_wemvy"]
@@ -403,6 +411,10 @@ layout_mode = 2
 size_flags_vertical = 3
 alignment = 2
 
+[node name="Button" type="Button" parent="MarginContainer/VBoxContainer/VBoxContainer"]
+layout_mode = 2
+text = "Invert Steering"
+
 [node name="AspectRatioContainer" type="AspectRatioContainer" parent="MarginContainer/VBoxContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
@@ -444,4 +456,5 @@ stream = ExtResource("2_5ukd6")
 [connection signal="button_down" from="Control/HBoxContainer/HBoxContainer/Lift/Button2" to="Control/HBoxContainer/HBoxContainer/Lift/Button2" method="_on_pressed"]
 [connection signal="button_up" from="Control/HBoxContainer/HBoxContainer/Lift/Button2" to="Control/HBoxContainer/HBoxContainer/Lift/Button2" method="_on_button_up"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer/EnableCamera" to="MarginContainer/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/VBoxContainer/Button" to="." method="_on_button_pressed"]
 [connection signal="mouse_exited" from="MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" to="MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" method="_on_mouse_exited"]

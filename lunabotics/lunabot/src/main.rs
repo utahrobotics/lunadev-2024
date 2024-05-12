@@ -119,6 +119,9 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                     .accept_subscription(drive.get_steering_sub());
                 let sub = Subscriber::new(4);
                 drive.get_current_pub().accept_subscription(sub.create_subscription());
+                sub.into_logger(|(left, right)| format!("{left} {right}"), "currents.log", &context);
+                let sub = Subscriber::new(4);
+                drive.get_current_pub().accept_subscription(sub.create_subscription());
                 drive.spawn(context.make_context("drive"));
                 unros::tokio::spawn(async move {
                     loop {
