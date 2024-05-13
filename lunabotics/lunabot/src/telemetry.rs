@@ -3,7 +3,7 @@ use std::{
     ops::Deref,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Exclusive,
     },
     time::{Duration, Instant},
 };
@@ -126,6 +126,9 @@ impl AsyncNode for Telemetry {
 
         let context2 = context.clone();
 
+        let (swap_sender, swap_receiver) = std::sync::mpsc::channel();
+        let mut swap_receiver = Exclusive::new(swap_receiver);
+
         let cam_fut = async {
             loop {
                 let mut video_dump;
@@ -171,6 +174,9 @@ impl AsyncNode for Telemetry {
                     if !enable_camera.load(Ordering::Relaxed) {
                         drop(video_dump);
                         break;
+                    }
+                    while let Ok((first, second)) = swap_receiver.get_mut().try_recv() {
+                        self.camera_subs.swap(first, second);
                     }
                     let mut updated = false;
                     self.camera_subs
@@ -322,7 +328,10 @@ impl AsyncNode for Telemetry {
                         };
 
                         match msg {
-                            
+                            CameraMessage::Sdp(_) => {},
+                            CameraMessage::Swap(first, second) => {
+                                let _ = swap_sender.send((first, second));
+                            }
                         }
                     }
                 };

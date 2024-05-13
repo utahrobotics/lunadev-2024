@@ -1,3 +1,5 @@
+#![feature(exclusive_wrapper)]
+
 use std::sync::Arc;
 
 use camera::discover_all_cameras;
