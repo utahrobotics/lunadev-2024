@@ -14,6 +14,8 @@ var invert_steering := false
 
 var _drive := 0.0
 
+@onready var turbo_button: CheckButton = $MarginContainer/VBoxContainer/VBoxContainer/Button2;
+
 
 func _ready() -> void:
 	connected = Lunabot.is_lunabot_connected()
@@ -43,7 +45,10 @@ func _process(delta: float) -> void:
 	if invert_steering:
 		invert = -1
 	var new_drive := -(Input.get_action_strength(\"DriveForward\") - Input.get_action_strength(\"DriveBackward\"))
-	_drive = lerp(_drive, new_drive, 1 - exp(-LAMBDA * delta))
+	if turbo_button.button_pressed or Input.is_action_pressed(\"Turbo\"):
+		_drive = new_drive
+	else:
+		_drive = lerp(_drive, new_drive, 1 - exp(-LAMBDA * delta))
 	Lunabot.send_steering(
 		_drive,
 		-(Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")) * 0.4 * invert
@@ -116,7 +121,7 @@ script/source = "extends Label
 func _ready() -> void:
 	Lunabot.odometry_received.connect(
 		func(_arm_angle: float, _acceleration: Vector3, front_elevation: float, _back_elevation: float):
-			text = str(round(front_elevation * 100) / 100)
+			text = str(round(front_elevation)) + \"cm\"
 	)
 
 
@@ -131,7 +136,7 @@ script/source = "extends Label
 func _ready() -> void:
 	Lunabot.odometry_received.connect(
 		func(_arm_angle: float, _acceleration: Vector3, _front_elevation: float, back_elevation: float):
-			text = str(round(back_elevation * 100) / 100)
+			text = str(round(back_elevation)) + \"cm\"
 	)
 
 
@@ -145,7 +150,7 @@ script/source = "extends Label
 func _ready() -> void:
 	Lunabot.odometry_received.connect(
 		func(arm_angle: float, _acceleration: Vector3, _front_elevation: float, _back_elevation: float):
-			text = str(round(rad_to_deg(arm_angle) * 100) / 100)
+			text = str(round(rad_to_deg(arm_angle))) + \"°\"
 	)
 
 
@@ -536,6 +541,10 @@ alignment = 2
 layout_mode = 2
 text = "Invert Steering"
 
+[node name="Button2" type="CheckButton" parent="MarginContainer/VBoxContainer/VBoxContainer"]
+layout_mode = 2
+text = "Turbo"
+
 [node name="AspectRatioContainer" type="AspectRatioContainer" parent="MarginContainer/VBoxContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
@@ -578,4 +587,5 @@ stream = ExtResource("2_5ukd6")
 [connection signal="button_up" from="Control/HBoxContainer/HBoxContainer/Lift/Button2" to="Control/HBoxContainer/HBoxContainer/Lift/Button2" method="_on_button_up"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer/EnableCamera" to="MarginContainer/VBoxContainer/HBoxContainer/EnableCamera" method="_on_pressed"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/VBoxContainer/Button" to="." method="_on_button_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/VBoxContainer/Button2" to="." method="_on_button_pressed"]
 [connection signal="mouse_exited" from="MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" to="MarginContainer/VBoxContainer/VBoxContainer/AspectRatioContainer/TextureRect" method="_on_mouse_exited"]
