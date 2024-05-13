@@ -7,7 +7,7 @@
 script/source = "extends HSplitContainer
 
 
-const LAMBDA := 0.5
+const LAMBDA := 2.0
 
 var connected := false
 var invert_steering := false
