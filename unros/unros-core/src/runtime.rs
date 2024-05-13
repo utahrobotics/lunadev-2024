@@ -91,7 +91,7 @@ impl RuntimeContext {
         }
     }
 
-    pub async fn wait_for_exit(self) {
+    pub async fn wait_for_exit(&self) {
         let _ = self.inner.exiting.clone().changed().await;
     }
 }

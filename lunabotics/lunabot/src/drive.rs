@@ -140,23 +140,18 @@ impl AsyncNode for Drive {
                         r#"encode_duty_cycle({})"#,
                         steering.right * right_modifier
                     ))?;
-                    let left_vesc_msg = match BASE64_STANDARD.decode(left_b64.trim()) {
-                        Ok(x) => x,
+                    match BASE64_STANDARD.decode(left_b64.trim()) {
+                        Ok(x) => left_pub.set(x.into()),
                         Err(e) => {
-                            error!("Failed to decode left vesc message: {e}");
-                            continue;
+                            error!("Failed to decode left vesc message: {}: {e}", left_b64.trim());
                         }
-                    };
-                    let right_vesc_msg = match BASE64_STANDARD.decode(right_b64.trim()) {
-                        Ok(x) => x,
+                    }
+                    match BASE64_STANDARD.decode(right_b64.trim()) {
+                        Ok(x) => right_pub.set(x.into()),
                         Err(e) => {
-                            error!("Failed to decode right vesc message: {e}");
-                            continue;
+                            error!("Failed to decode right vesc message: {}: {e}", right_b64.trim());
                         }
-                    };
-
-                    left_pub.set(left_vesc_msg.into());
-                    right_pub.set(right_vesc_msg.into());
+                    }
                 }
 
                 // left_pub.set(self.get_values_request.clone());

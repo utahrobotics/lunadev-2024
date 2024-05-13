@@ -53,6 +53,7 @@ impl Arms {
 
 impl AsyncNode for Arms {
     type Result = anyhow::Result<()>;
+    const PERSISTENT: bool = true;
 
     async fn run(mut self, context: RuntimeContext) -> anyhow::Result<()> {
         setup_logging!(context);
@@ -65,7 +66,8 @@ impl AsyncNode for Arms {
 
         // impl Drop for DropRepl {
         //     fn drop(&mut self) {
-        //         self.0.set("store_pos()\r".into());
+        //         println!("a");
+        //         self.0.set("reset()\r".into());
         //     }
         // }
 
@@ -110,9 +112,11 @@ impl AsyncNode for Arms {
 
             if self.config.home {
                 lift_repl.set("extend_home()\r".into());
-                tilt_repl.set("extend_home()\r".into());
+                tilt_repl.set("retract_home()\r".into());
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
+
+            let context2 = context.clone();
 
             tokio::spawn(async move {
                 let mut lift_buf = String::new();
@@ -298,7 +302,15 @@ impl AsyncNode for Arms {
             });
 
             loop {
-                let params = self.arm_sub.recv().await;
+                let params = tokio::select! {
+                    params = self.arm_sub.recv() => params,
+                    _ = context2.wait_for_exit() => {
+                        lift_repl.set("reset()\r".into());
+                        tilt_repl.set("reset()\r".into());
+                        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                        break Ok(());
+                    }
+                };
 
                 match params.lift {
                     ArmAction::Extend => lift_repl.set("e()\r".into()),
@@ -326,9 +338,9 @@ impl AsyncNode for Arms {
         //     .manually_run("lift-arm".into());
 
         tokio::select! {
-            res = arms_fut => res,
             res = self.tilt_conn.run(context.clone()) => res,
-            res = self.lift_conn.run(context.clone()) => res
+            res = self.lift_conn.run(context.clone()) => res,
+            res = arms_fut => res,
         }
     }
 }
