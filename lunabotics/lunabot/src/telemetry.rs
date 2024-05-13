@@ -313,13 +313,17 @@ impl AsyncNode for Telemetry {
                         let Some(result) = camera_sub.recv_or_closed().await else {
                             break;
                         };
-                        let _ = match result {
+                        let msg = match result {
                             Ok(x) => x,
                             Err(e) => {
                                 error!("Error receiving camera msg: {e}");
                                 continue;
                             }
                         };
+
+                        match msg {
+                            
+                        }
                     }
                 };
 

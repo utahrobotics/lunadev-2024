@@ -297,6 +297,7 @@ impl INode for LunabotConn {
 
                             let sdp = match msg {
                                 lunabot_lib::CameraMessage::Sdp(x) => x,
+                                lunabot_lib::CameraMessage::Swap(_, _) => continue,
                                 // msg => {
                                 //     godot_error!("Unexpected camera message: {msg:?}");
                                 //     error!("Unexpected camera message: {msg:?}");
