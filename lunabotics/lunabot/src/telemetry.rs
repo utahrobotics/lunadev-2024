@@ -10,8 +10,7 @@ use std::{
 
 use image::RgbImage;
 use lunabot_lib::{
-    make_negotiation, ArmParameters, Audio, CameraMessage, ImportantMessage, LunaNegotiation,
-    Odometry, Steering,
+    make_negotiation, ArmParameters, Audio, AutonomyAction, CameraMessage, ImportantMessage, LunaNegotiation, Odometry, Steering
 };
 use networking::{new_client, ConnectionError, NetworkConnector, NetworkNode};
 use ordered_float::NotNan;
@@ -56,6 +55,7 @@ pub struct Telemetry {
     pub camera_delta: Duration,
     steering_signal: Publisher<Steering>,
     arm_signal: Publisher<ArmParameters>,
+    autonomy_signal: Publisher<AutonomyAction>,
     dont_drop: DontDrop<Self>,
     negotiation: LunaNegotiation,
     video_addr: SocketAddrV4,
@@ -84,6 +84,7 @@ impl Telemetry {
             server_addr: config.server_addr,
             steering_signal: Publisher::default(),
             arm_signal: Publisher::default(),
+            autonomy_signal: Publisher::default(),
             camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
             dont_drop: DontDrop::new("telemetry"),
             negotiation: make_negotiation(),
@@ -278,6 +279,7 @@ impl AsyncNode for Telemetry {
                             ImportantMessage::DisableCamera => {
                                 enable_camera.store(false, Ordering::Relaxed)
                             }
+                            ImportantMessage::Autonomy(action) => {self.autonomy_signal.set(action);}
                         }
                     }
                 };

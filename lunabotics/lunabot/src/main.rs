@@ -31,6 +31,7 @@ mod serial;
 mod audio;
 // mod mosaic;
 mod telemetry;
+mod autonomy;
 
 const MAX_CAMERA_COUNT: usize = 6;
 const ROW_LENGTH: usize = 3;

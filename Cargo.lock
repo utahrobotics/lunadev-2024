@@ -2290,6 +2290,7 @@ dependencies = [
  "rodio",
  "serde",
  "serial",
+ "smach",
  "spin_sleep",
  "toml",
  "unros",

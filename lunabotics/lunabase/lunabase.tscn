@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3 uid="uid://daaye0yq685ht"]
+[gd_scene load_steps=23 format=3 uid="uid://daaye0yq685ht"]
 
 [ext_resource type="AudioStream" uid="uid://cephremnedhtp" path="res://addons/kenney_interface_sounds/error_002.wav" id="1_8elqp"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="2_5ukd6"]
@@ -49,6 +49,9 @@ func _process(delta: float) -> void:
 		_drive = new_drive
 	else:
 		_drive = lerp(_drive, new_drive, 1 - exp(-LAMBDA * delta))
+	var scaled_drive := _drive
+	if Input.is_action_pressed(\"Crawler\"):
+		_drive *= 0.2
 	Lunabot.send_steering(
 		_drive,
 		-(Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")) * 0.4 * invert
@@ -156,6 +159,22 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	rotation = - get_parent().rotation
+"
+
+[sub_resource type="GDScript" id="GDScript_5rh6e"]
+script/source = "extends Button
+
+
+func _on_pressed() -> void:
+	Lunabot.dig_autonomy()
+"
+
+[sub_resource type="GDScript" id="GDScript_c7wbp"]
+script/source = "extends Button
+
+
+func _on_pressed() -> void:
+	Lunabot.dump_autonomy()
 "
 
 [sub_resource type="GDScript" id="GDScript_6ax4a"]
@@ -279,6 +298,40 @@ func _on_pressed() -> void:
 		Lunabot.enable_camera()
 		camera_enabled = true
 		text = \"Disable Camera\"
+"
+
+[sub_resource type="GDScript" id="GDScript_byehu"]
+script/source = "extends GridContainer
+
+
+var _first_selected := false
+var _first_index := 0
+var _first_button: Button
+
+
+func _ready():
+	for i in range(6):
+		var button := Button.new()
+		button.text = str(i + 1)
+		button.toggle_mode = true
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		
+		button.toggled.connect(
+			func(pressed: bool):
+				if _first_selected:
+					_first_selected = false
+					_first_button.button_pressed = false
+					button.button_pressed = false
+					if pressed:
+						Lunabot.swap_camera(_first_index, i)
+					else:
+						_first_selected = false
+				elif pressed:
+					_first_selected = true
+					_first_index = i
+					_first_button = button
+		)
+		add_child(button)
 "
 
 [sub_resource type="Gradient" id="Gradient_j05cb"]
@@ -448,6 +501,18 @@ alignment = 2
 layout_mode = 2
 theme_override_constants/separation = 10
 
+[node name="Button2" type="Button" parent="Control/HBoxContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 4
+text = "DIG"
+script = SubResource("GDScript_5rh6e")
+
+[node name="Button3" type="Button" parent="Control/HBoxContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 4
+text = "DUMP"
+script = SubResource("GDScript_c7wbp")
+
 [node name="Button" type="Button" parent="Control/HBoxContainer/HBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 4
@@ -545,6 +610,16 @@ text = "Invert Steering"
 layout_mode = 2
 text = "Turbo"
 
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/VBoxContainer"]
+layout_mode = 2
+text = "Swap Cameras"
+horizontal_alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/VBoxContainer"]
+layout_mode = 2
+columns = 3
+script = SubResource("GDScript_byehu")
+
 [node name="AspectRatioContainer" type="AspectRatioContainer" parent="MarginContainer/VBoxContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
@@ -574,6 +649,8 @@ stream = ExtResource("1_8elqp")
 [node name="Connected" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("2_5ukd6")
 
+[connection signal="pressed" from="Control/HBoxContainer/HBoxContainer/Button2" to="Control/HBoxContainer/HBoxContainer/Button2" method="_on_pressed"]
+[connection signal="pressed" from="Control/HBoxContainer/HBoxContainer/Button3" to="Control/HBoxContainer/HBoxContainer/Button3" method="_on_pressed"]
 [connection signal="button_down" from="Control/HBoxContainer/HBoxContainer/Button" to="Control/HBoxContainer/HBoxContainer/Button" method="_on_button_down"]
 [connection signal="button_up" from="Control/HBoxContainer/HBoxContainer/Button" to="Control/HBoxContainer/HBoxContainer/Button" method="_on_button_up"]
 [connection signal="pressed" from="Control/HBoxContainer/HBoxContainer/VBoxContainer/Button" to="Control/HBoxContainer/HBoxContainer/VBoxContainer/Button" method="_on_pressed"]
