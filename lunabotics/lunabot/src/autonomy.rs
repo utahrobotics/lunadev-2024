@@ -106,7 +106,7 @@ impl AsyncNode for Autonomy {
                                 tilt: ArmAction::SetValue(100),
                             });
                             for _ in 0..10 {
-                                state.steering_pub.set(Steering { left: NotNan::new(1.0).unwrap(), right: NotNan::new(1.0).unwrap() });
+                                state.steering_pub.set(Steering { left: NotNan::new(-1.0).unwrap(), right: NotNan::new(-1.0).unwrap() });
                                 tokio::select! {
                                     () = tokio::time::sleep(Duration::from_millis(250)) => {}
                                     _ = state.action_sub.recv() => return StateResult::new(state, None),
@@ -116,7 +116,7 @@ impl AsyncNode for Autonomy {
                         });
 
                     let (raise_bucket, raise_bucket_trans) = State::new(|mut state: Autonomy| async move {
-                        state.steering_pub.set(Steering { left: NotNan::new(0.1).unwrap(), right: NotNan::new(0.1).unwrap() });
+                        state.steering_pub.set(Steering { left: NotNan::new(-0.1).unwrap(), right: NotNan::new(-0.1).unwrap() });
                         state.arm_pub.set(ArmParameters {
                             lift: ArmAction::SetValue(70),
                             tilt: ArmAction::SetValue(u8::MAX),
@@ -156,8 +156,8 @@ impl AsyncNode for Autonomy {
                 AutonomyAction::Dump => {
                     let (drive_forward, drive_forward_trans) =
                         State::new(|state: Autonomy| async move {
-                            for _ in 0..10 {
-                                state.steering_pub.set(Steering { left: NotNan::new(0.5).unwrap(), right: NotNan::new(0.5).unwrap() });
+                            for _ in 0..20 {
+                                state.steering_pub.set(Steering { left: NotNan::new(-0.5).unwrap(), right: NotNan::new(-0.5).unwrap() });
                                 tokio::select! {
                                     () = tokio::time::sleep(Duration::from_millis(200)) => {}
                                     _ = state.action_sub.recv() => return StateResult::new(state, None),
@@ -167,8 +167,9 @@ impl AsyncNode for Autonomy {
                         });
 
                     let (lower_bucket, lower_bucket_trans) = State::new(|mut state: Autonomy| async move {
+                        state.steering_pub.set(Steering { left: NotNan::new(0.0).unwrap(), right: NotNan::new(0.0).unwrap() });
                         state.arm_pub.set(ArmParameters {
-                            lift: ArmAction::SetValue(70),
+                            lift: ArmAction::SetValue(200),
                             tilt: ArmAction::SetValue(u8::MAX),
                         });
                         loop {

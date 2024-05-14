@@ -1,6 +1,0 @@
-# Configuration for lunabot
-server_addr = "192.168.0.101:43721"
-# server_addr = "192.168.0.100:43721"
-# server_addr = "127.0.0.1:43721"
-# server_addr = "10.8.0.6:43721"
-# home = true

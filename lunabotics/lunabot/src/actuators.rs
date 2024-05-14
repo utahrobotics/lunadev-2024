@@ -321,9 +321,12 @@ impl AsyncNode for Arms {
                 let params = tokio::select! {
                     params = self.arm_sub.recv() => params,
                     _ = context2.wait_for_exit() => {
+                        lift_repl.set("s()\r".into());
+                        tilt_repl.set("s()\r".into());
+                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                         lift_repl.set("reset()\r".into());
                         tilt_repl.set("reset()\r".into());
-                        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
                         break Ok(());
                     }
                 };
