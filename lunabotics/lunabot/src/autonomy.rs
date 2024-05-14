@@ -53,8 +53,8 @@ impl AsyncNode for Autonomy {
                 AutonomyAction::Dig => {
                     let (prep_bucket, prep_bucket_trans) = State::new(|mut state: Autonomy| async move {
                         state.arm_pub.set(ArmParameters {
-                            lift: ArmAction::SetValue(150),
-                            tilt: ArmAction::SetValue(u8::MAX),
+                            lift: ArmAction::SetValue(200),
+                            tilt: ArmAction::SetValue(190),
                         });
                         loop {
                             tokio::select! {
@@ -77,8 +77,8 @@ impl AsyncNode for Autonomy {
                     let (lower_bucket, lower_bucket_trans) =
                         State::new(|mut state: Autonomy| async move {
                             state.arm_pub.set(ArmParameters {
-                                lift: ArmAction::SetValue(20),
-                                tilt: ArmAction::SetValue(u8::MAX),
+                                lift: ArmAction::SetValue(120),
+                                tilt: ArmAction::SetValue(190),
                             });
                             loop {
                                 tokio::select! {
@@ -102,13 +102,13 @@ impl AsyncNode for Autonomy {
                     let (drive_forward, drive_forward_trans) =
                         State::new(|state: Autonomy| async move {
                             state.arm_pub.set(ArmParameters {
-                                lift: ArmAction::SetValue(30),
-                                tilt: ArmAction::SetValue(100),
+                                lift: ArmAction::SetValue(130),
+                                tilt: ArmAction::SetValue(160),
                             });
                             for _ in 0..10 {
                                 state.steering_pub.set(Steering { left: NotNan::new(-1.0).unwrap(), right: NotNan::new(-1.0).unwrap() });
                                 tokio::select! {
-                                    () = tokio::time::sleep(Duration::from_millis(250)) => {}
+                                    () = tokio::time::sleep(Duration::from_millis(75)) => {}
                                     _ = state.action_sub.recv() => return StateResult::new(state, None),
                                 }
                             }
@@ -116,10 +116,10 @@ impl AsyncNode for Autonomy {
                         });
 
                     let (raise_bucket, raise_bucket_trans) = State::new(|mut state: Autonomy| async move {
-                        state.steering_pub.set(Steering { left: NotNan::new(-0.1).unwrap(), right: NotNan::new(-0.1).unwrap() });
+                        state.steering_pub.set(Steering { left: NotNan::new(0.0).unwrap(), right: NotNan::new(0.0).unwrap() });
                         state.arm_pub.set(ArmParameters {
-                            lift: ArmAction::SetValue(70),
-                            tilt: ArmAction::SetValue(u8::MAX),
+                            lift: ArmAction::SetValue(240),
+                            tilt: ArmAction::SetValue(100),
                         });
                         loop {
                             tokio::select! {
@@ -156,7 +156,11 @@ impl AsyncNode for Autonomy {
                 AutonomyAction::Dump => {
                     let (drive_forward, drive_forward_trans) =
                         State::new(|state: Autonomy| async move {
-                            for _ in 0..20 {
+                            state.arm_pub.set(ArmParameters {
+                                lift: ArmAction::SetValue(220),
+                                tilt: ArmAction::SetValue(150),
+                            });
+                            for _ in 0..10 {
                                 state.steering_pub.set(Steering { left: NotNan::new(-0.5).unwrap(), right: NotNan::new(-0.5).unwrap() });
                                 tokio::select! {
                                     () = tokio::time::sleep(Duration::from_millis(200)) => {}
@@ -166,33 +170,49 @@ impl AsyncNode for Autonomy {
                             StateResult::new(state, Some(()))
                         });
 
-                    let (lower_bucket, lower_bucket_trans) = State::new(|mut state: Autonomy| async move {
-                        state.steering_pub.set(Steering { left: NotNan::new(0.0).unwrap(), right: NotNan::new(0.0).unwrap() });
-                        state.arm_pub.set(ArmParameters {
-                            lift: ArmAction::SetValue(200),
-                            tilt: ArmAction::SetValue(u8::MAX),
-                        });
-                        loop {
-                            tokio::select! {
-                                _ = async {
-                                    WatchSubscriber::try_update(&mut state.arm_values_sub);
-                                    let last_value = *state.arm_values_sub.deref();
-                                    loop {
-                                        WatchSubscriber::update(&mut state.arm_values_sub).await;
-                                        if last_value != *state.arm_values_sub.deref() {
-                                            break;
+                        let (lower_bucket, lower_bucket_trans) = State::new(|mut state: Autonomy| async move {
+                            state.steering_pub.set(Steering { left: NotNan::new(0.0).unwrap(), right: NotNan::new(0.0).unwrap() });
+                            state.arm_pub.set(ArmParameters {
+                                lift: ArmAction::SetValue(220),
+                                tilt: ArmAction::SetValue(u8::MAX),
+                            });
+                            loop {
+                                tokio::select! {
+                                    _ = async {
+                                        WatchSubscriber::try_update(&mut state.arm_values_sub);
+                                        let last_value = *state.arm_values_sub.deref();
+                                        loop {
+                                            WatchSubscriber::update(&mut state.arm_values_sub).await;
+                                            if last_value != *state.arm_values_sub.deref() {
+                                                break;
+                                            }
                                         }
-                                    }
-                                } => {}
-                                () = tokio::time::sleep(Duration::from_millis(1000)) => break,
-                                _ = state.action_sub.recv() => return StateResult::from(state),
+                                    } => {}
+                                    () = tokio::time::sleep(Duration::from_millis(1000)) => break,
+                                    _ = state.action_sub.recv() => return StateResult::new(state, None),
+                                }
+                            }
+                            tokio::select! {
+                                () = tokio::time::sleep(Duration::from_millis(2000)) => {}
+                                _ = state.action_sub.recv() => return StateResult::new(state, None),
+                            }
+                            StateResult::new(state, Some(()))
+                        });
+
+                    let (reverse_dump, reverse_dump_trans) = State::new(|state: Autonomy| async move {
+                        for _ in 0..3 {
+                            state.steering_pub.set(Steering { left: NotNan::new(1.0).unwrap(), right: NotNan::new(1.0).unwrap() });
+                            tokio::select! {
+                                () = tokio::time::sleep(Duration::from_millis(250)) => {}
+                                _ = state.action_sub.recv() => break,
                             }
                         }
                         StateResult::from(state)
                     });
             
                     drive_forward_trans.set_transition(move |ret| ret.map(|_| lower_bucket.clone()));
-                    lower_bucket_trans.set_transition(move |_| None);
+                    lower_bucket_trans.set_transition(move |ret| ret.map(|_| reverse_dump.clone()));
+                    reverse_dump_trans.set_transition(move |_| None);
 
                     self = drive_forward.start(self).await;
 

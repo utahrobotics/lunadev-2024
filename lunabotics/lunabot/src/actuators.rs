@@ -22,6 +22,10 @@ pub(crate) struct ArmValues {
 struct ArmsConfig {
     #[serde(default)]
     home: bool,
+    #[serde(default)]
+    hard_reset: bool,
+    #[serde(default)]
+    soft_reset: bool
 }
 
 #[derive(ShouldNotDrop)]
@@ -120,7 +124,8 @@ impl AsyncNode for Arms {
                     std::mem::swap(&mut tilt_repl, &mut lift_repl);
                     break;
                 } else {
-                    return Err(anyhow::anyhow!("Unexpected response from arm: {}", info));
+                    unros::log::error!("Unexpected response from tilt: {}", info);
+                    break;
                 }
             }
 
@@ -148,7 +153,7 @@ impl AsyncNode for Arms {
                             lift_buf += &lift_msg;
                             if let Some(index) = lift_buf.find('\n') {
                                 let mut line = lift_buf.split_at(index).0;
-                                if line.contains("()") {
+                                if line.contains("(") || line == "retracted\r" || line == "extended\r" {
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 }
@@ -225,7 +230,7 @@ impl AsyncNode for Arms {
                             tilt_buf += &tilt_msg;
                             if let Some(index) = tilt_buf.find('\n') {
                                 let mut line = tilt_buf.split_at(index).0;
-                                if line.contains("()") {
+                                if line.contains("(") || line == "retracted\r" || line == "extended\r" {
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 }
@@ -321,12 +326,19 @@ impl AsyncNode for Arms {
                 let params = tokio::select! {
                     params = self.arm_sub.recv() => params,
                     _ = context2.wait_for_exit() => {
-                        lift_repl.set("s()\r".into());
-                        tilt_repl.set("s()\r".into());
-                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                        lift_repl.set("reset()\r".into());
-                        tilt_repl.set("reset()\r".into());
-                        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                        if self.config.soft_reset || self.config.hard_reset {
+                            lift_repl.set("s()\r".into());
+                            tilt_repl.set("s()\r".into());
+                            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                            if self.config.soft_reset {
+                                lift_repl.set("\u{4}\r".into());
+                                tilt_repl.set("\u{4}\r".into());
+                            } else {
+                                lift_repl.set("reset()\r".into());
+                                tilt_repl.set("reset()\r".into());
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                        }
                         break Ok(());
                     }
                 };

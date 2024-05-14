@@ -36,7 +36,8 @@ pub fn connect_to_serial() -> anyhow::Result<(Option<Arms>, Option<Drive>)> {
             }
             micro_python_paths.push(path);
         } else if vesc_paths.len() >= 2 {
-            return Err(anyhow::anyhow!("More than two VESC devices found"));
+            continue;
+            // return Err(anyhow::anyhow!("More than two VESC devices found"));
         } else {
             vesc_paths.push(path);
         }
