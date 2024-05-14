@@ -363,6 +363,7 @@ func _exit_tree() -> void:
 	var file := FileAccess.open(\"swaps.dat\", FileAccess.WRITE)
 	for swap in _swaps:
 		file.store_var(swap)
+	file.close()
 "
 
 [sub_resource type="Gradient" id="Gradient_j05cb"]
