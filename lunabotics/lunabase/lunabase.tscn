@@ -314,8 +314,26 @@ var _first_selected := false
 var _first_index := 0
 var _first_button: Button
 
+var _swaps: Array[Vector2i] = []
+
 
 func _ready():
+	if FileAccess.file_exists(\"swaps.dat\"):
+		var file := FileAccess.open(\"swaps.dat\", FileAccess.READ)
+		while true:
+			var value = file.get_var()
+			if value is Vector2i:
+				_swaps.push_back(value as Vector2i)
+			else:
+				push_error(\"swaps.dat is invalid!\")
+				DirAccess.open(\".\").remove(\"swaps.dat\")
+	
+	Lunabot.connected.connect(
+		func():
+			for swap in _swaps:
+				Lunabot.swap_camera(swap.x, swap.y)
+	)
+	
 	for i in range(6):
 		var button := Button.new()
 		button.text = str(i + 1)
@@ -338,6 +356,12 @@ func _ready():
 					_first_button = button
 		)
 		add_child(button)
+
+
+func _exit_tree() -> void:
+	var file := FileAccess.open(\"swaps.dat\", FileAccess.WRITE)
+	for swap in _swaps:
+		file.store_var(swap)
 "
 
 [sub_resource type="Gradient" id="Gradient_j05cb"]

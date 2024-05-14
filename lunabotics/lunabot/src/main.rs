@@ -119,6 +119,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                     autonomy.get_steering_pub().accept_subscription(drive.get_steering_sub());
                     arms.get_arm_values_pub().accept_subscription(autonomy.create_arm_values_sub());
                     telemetry.autonomy_pub().accept_subscription(autonomy.create_autonomy_sub());
+                    autonomy.spawn(context.make_context("autonomy"));
                 }
             }
             if let Some(drive) = drive {
