@@ -3,7 +3,7 @@ use std::{ops::Deref, time::Duration};
 use lunabot_lib::{ArmAction, ArmParameters, AutonomyAction, Steering};
 use ordered_float::NotNan;
 use smach::{State, StateResult};
-use unros::{node::AsyncNode, pubsub::{Publisher, Subscriber, WatchSubscriber}, runtime::RuntimeContext, setup_logging, tokio};
+use unros::{node::AsyncNode, pubsub::{subs::DirectSubscription, Publisher, PublisherRef, Subscriber, WatchSubscriber}, runtime::RuntimeContext, setup_logging, tokio};
 
 use crate::actuators::ArmValues;
 
@@ -13,8 +13,32 @@ pub struct Autonomy {
     steering_pub: Publisher<Steering>,
     arm_values_sub: WatchSubscriber<ArmValues>,
     action_sub: Subscriber<AutonomyAction>,
-    arm_control_sub: Subscriber<ArmParameters>,
-    steering_sub: Subscriber<Steering>,
+}
+
+
+impl Default for Autonomy {
+    fn default() -> Self {
+        Self { arm_pub: Default::default(), steering_pub: Default::default(), arm_values_sub: WatchSubscriber::new(ArmValues::default()), action_sub: Subscriber::new(8) }
+    }
+}
+
+
+impl Autonomy {
+    pub fn get_arm_pub(&self) -> PublisherRef<ArmParameters> {
+        self.arm_pub.get_ref()
+    }
+
+    pub fn get_steering_pub(&self) -> PublisherRef<Steering> {
+        self.steering_pub.get_ref()
+    }
+    
+    pub fn create_arm_values_sub(&self) -> DirectSubscription<ArmValues> {
+        self.arm_values_sub.create_subscription()
+    }
+    
+    pub fn create_autonomy_sub(&self) -> DirectSubscription<AutonomyAction> {
+        self.action_sub.create_subscription()
+    }
 }
 
 
@@ -45,8 +69,7 @@ impl AsyncNode for Autonomy {
                                     }
                                 } => {}
                                 () = tokio::time::sleep(Duration::from_millis(1000)) => break,
-                                _ = state.arm_control_sub.recv() => break,
-                                _ = state.steering_sub.recv() => break,
+                                _ = state.action_sub.recv() => return StateResult::new(state, None),
                             }
                         }
                         StateResult::new(state, Some(()))
@@ -70,8 +93,7 @@ impl AsyncNode for Autonomy {
                                         }
                                     } => {}
                                     () = tokio::time::sleep(Duration::from_millis(1000)) => break,
-                                    _ = state.arm_control_sub.recv() => break,
-                                    _ = state.steering_sub.recv() => break,
+                                    _ = state.action_sub.recv() => return StateResult::new(state, None),
                                 }
                             }
                             StateResult::new(state, Some(()))
@@ -87,8 +109,7 @@ impl AsyncNode for Autonomy {
                                 state.steering_pub.set(Steering { left: NotNan::new(1.0).unwrap(), right: NotNan::new(1.0).unwrap() });
                                 tokio::select! {
                                     () = tokio::time::sleep(Duration::from_millis(250)) => {}
-                                    _ = state.arm_control_sub.recv() => break,
-                                    _ = state.steering_sub.recv() => break,
+                                    _ = state.action_sub.recv() => return StateResult::new(state, None),
                                 }
                             }
                             StateResult::new(state, Some(()))
@@ -113,6 +134,7 @@ impl AsyncNode for Autonomy {
                                     }
                                 } => {}
                                 () = tokio::time::sleep(Duration::from_millis(1000)) => break,
+                                _ = state.action_sub.recv() => return StateResult::from(state),
                             }
                         }
                         StateResult::from(state)
@@ -138,8 +160,7 @@ impl AsyncNode for Autonomy {
                                 state.steering_pub.set(Steering { left: NotNan::new(0.5).unwrap(), right: NotNan::new(0.5).unwrap() });
                                 tokio::select! {
                                     () = tokio::time::sleep(Duration::from_millis(200)) => {}
-                                    _ = state.arm_control_sub.recv() => break,
-                                    _ = state.steering_sub.recv() => break,
+                                    _ = state.action_sub.recv() => return StateResult::new(state, None),
                                 }
                             }
                             StateResult::new(state, Some(()))
@@ -163,6 +184,7 @@ impl AsyncNode for Autonomy {
                                     }
                                 } => {}
                                 () = tokio::time::sleep(Duration::from_millis(1000)) => break,
+                                _ = state.action_sub.recv() => return StateResult::from(state),
                             }
                         }
                         StateResult::from(state)
@@ -179,6 +201,7 @@ impl AsyncNode for Autonomy {
                     });
                     self.steering_pub.set(Steering { left: NotNan::new(0.0).unwrap(), right: NotNan::new(0.0).unwrap() });
                 }
+                AutonomyAction::Stop => {}
             }
         }
     }

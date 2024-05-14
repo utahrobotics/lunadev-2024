@@ -101,6 +101,10 @@ impl Telemetry {
         self.steering_signal.get_ref()
     }
 
+    pub fn autonomy_pub(&self) -> PublisherRef<AutonomyAction> {
+        self.autonomy_signal.get_ref()
+    }
+
     pub fn arm_pub(&self) -> PublisherRef<ArmParameters> {
         self.arm_signal.get_ref()
     }

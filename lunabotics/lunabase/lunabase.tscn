@@ -195,6 +195,12 @@ script/source = "extends Button
 
 func _on_pressed() -> void:
 	Lunabot.stop_arm()
+	Lunabot.stop_autonomy()
+
+
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed(\"StopAll\"):
+		_on_pressed()
 "
 
 [sub_resource type="GDScript" id="GDScript_qhq06"]

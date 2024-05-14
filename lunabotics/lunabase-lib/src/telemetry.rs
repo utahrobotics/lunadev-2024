@@ -617,6 +617,12 @@ impl LunabotConn {
         shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Dump));
     }
 
+    #[func]
+    fn stop_autonomy(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Stop));
+    }
+
     // #[func]
     // fn next_camera(&self) {
     //     let shared = self.shared.as_ref().unwrap();

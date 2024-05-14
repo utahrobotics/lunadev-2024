@@ -11,7 +11,7 @@ use unros::{
 };
 
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Default)]
 pub(crate) struct ArmValues {
     pub tilt_value: f32,
     pub lift_value: f32
@@ -58,6 +58,10 @@ impl Arms {
 
     pub fn get_odometry_pub(&self) -> PublisherRef<Odometry> {
         self.odometry_pub.get_ref()
+    }
+
+    pub fn get_arm_values_pub(&self) -> PublisherRef<ArmValues> {
+        self.arm_values_pub.get_ref()
     }
 }
 

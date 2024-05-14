@@ -73,7 +73,8 @@ pub struct ControlsPacket {
 #[derive(Clone, Copy, Encode, Decode, Debug, Eq, PartialEq)]
 pub enum AutonomyAction {
     Dig,
-    Dump
+    Dump,
+    Stop
 }
 
 #[derive(Debug, Eq, PartialEq, Encode, Decode, Clone, Copy)]
