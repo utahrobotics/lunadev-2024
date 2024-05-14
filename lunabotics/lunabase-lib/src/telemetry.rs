@@ -12,8 +12,7 @@ use std::{
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
 use lunabot_lib::{
-    make_negotiation, ArmAction, ArmParameters, Audio, CameraMessage, ControlsPacket,
-    ImportantMessage,
+    make_negotiation, ArmAction, ArmParameters, Audio, AutonomyAction, CameraMessage, ControlsPacket, ImportantMessage
 };
 use networking::new_server;
 use unros::{
@@ -32,6 +31,7 @@ struct LunabotShared {
     enable_camera: AtomicBool,
     audio_pub: Mutex<Publisher<Audio>>,
     camera_pub: Mutex<Publisher<CameraMessage>>,
+    important_pub: Mutex<Publisher<ImportantMessage>>,
 }
 
 #[derive(GodotClass)]
@@ -53,6 +53,7 @@ impl INode for LunabotConn {
             enable_camera: AtomicBool::new(true),
             audio_pub: Mutex::new(Publisher::default()),
             camera_pub: Mutex::new(Publisher::default()),
+            important_pub: Mutex::new(Publisher::default())
         };
         let shared = Arc::new(shared);
 
@@ -153,8 +154,11 @@ impl INode for LunabotConn {
                 let controls_sub = Subscriber::new(1);
                 controls.accept_subscription(controls_sub.create_subscription());
 
-                let mut important_pub =
-                    MonoPublisher::from(important.create_reliable_subscription());
+                shared
+                    .important_pub
+                    .lock()
+                    .unwrap()
+                    .accept_subscription(important.create_reliable_subscription());
                 let important_sub = Subscriber::new(8);
                 important.accept_subscription(important_sub.create_subscription());
 
@@ -378,13 +382,13 @@ impl INode for LunabotConn {
                     if current_enable_camera != last_enable_camera {
                         last_enable_camera = current_enable_camera;
                         if current_enable_camera {
-                            important_pub.set(ImportantMessage::EnableCamera);
+                            shared.important_pub.lock().unwrap().set(ImportantMessage::EnableCamera);
 
                             if ffplay_stderr.is_none() {
                                 make_ffplay!();
                             }
                         } else {
-                            important_pub.set(ImportantMessage::DisableCamera);
+                            shared.important_pub.lock().unwrap().set(ImportantMessage::DisableCamera);
                         }
                     }
                 }
@@ -581,6 +585,42 @@ impl LunabotConn {
     fn pause_audio(&self) {
         let shared = self.shared.as_ref().unwrap();
         shared.audio_pub.lock().unwrap().set(Audio::Pause);
+    }
+
+    #[func]
+    fn swap_camera(&self, first: i64, second: i64) {
+        if first < 0 {
+            godot_error!("first must be non-negative");
+            return;
+        }
+        if second < 0 {
+            godot_error!("second must be non-negative");
+            return;
+        }
+        let shared = self.shared.as_ref().unwrap();
+        shared
+            .camera_pub
+            .lock()
+            .unwrap()
+            .set(CameraMessage::Swap(first as usize, second as usize));
+    }
+
+    #[func]
+    fn dig_autonomy(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Dig));
+    }
+
+    #[func]
+    fn dump_autonomy(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Dump));
+    }
+
+    #[func]
+    fn stop_autonomy(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Stop));
     }
 
     // #[func]

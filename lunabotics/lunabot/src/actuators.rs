@@ -10,6 +10,14 @@ use unros::{
     setup_logging, tokio, DontDrop, ShouldNotDrop,
 };
 
+
+#[derive(Clone, Copy, PartialEq, Default)]
+pub(crate) struct ArmValues {
+    pub tilt_value: f32,
+    pub lift_value: f32
+}
+
+
 #[derive(Deserialize, Default)]
 struct ArmsConfig {
     #[serde(default)]
@@ -22,6 +30,7 @@ pub struct Arms {
     tilt_conn: SerialConnection<String, String>,
     lift_conn: SerialConnection<String, String>,
     odometry_pub: Publisher<Odometry>,
+    arm_values_pub: Publisher<ArmValues>,
     dont_drop: DontDrop<Self>,
     config: ArmsConfig,
 }
@@ -34,6 +43,7 @@ impl Arms {
             tilt_conn: SerialConnection::new(tilt_port, 115200, true).map_to_string(),
             lift_conn: SerialConnection::new(lift_port, 115200, true).map_to_string(),
             odometry_pub: Publisher::default(),
+            arm_values_pub: Publisher::default(),
             config: unros::get_env()
                 .map_err(|e| {
                     unros::log::error!("{e}");
@@ -48,6 +58,10 @@ impl Arms {
 
     pub fn get_odometry_pub(&self) -> PublisherRef<Odometry> {
         self.odometry_pub.get_ref()
+    }
+
+    pub fn get_arm_values_pub(&self) -> PublisherRef<ArmValues> {
+        self.arm_values_pub.get_ref()
     }
 }
 
@@ -298,6 +312,8 @@ impl AsyncNode for Arms {
                         front_elevation,
                         back_elevation,
                     });
+
+                    self.arm_values_pub.set(ArmValues { tilt_value, lift_value });
                 }
             });
 
@@ -317,7 +333,7 @@ impl AsyncNode for Arms {
                     ArmAction::Retract => lift_repl.set("r()\r".into()),
                     ArmAction::Stop => lift_repl.set("s()\r".into()),
                     ArmAction::Home => lift_repl.set("extend_home()\r".into()),
-                    ArmAction::SetValue(_) => todo!(),
+                    ArmAction::SetValue(val) => lift_repl.set(format!("set_pos({})\r", (val as f32 / u8::MAX as f32 * 4500.0).round() as usize)),
                 }
 
                 match params.tilt {
@@ -325,7 +341,7 @@ impl AsyncNode for Arms {
                     ArmAction::Retract => tilt_repl.set("r()\r".into()),
                     ArmAction::Stop => tilt_repl.set("s()\r".into()),
                     ArmAction::Home => tilt_repl.set("extend_home()\r".into()),
-                    ArmAction::SetValue(_) => todo!(),
+                    ArmAction::SetValue(val) => tilt_repl.set(format!("set_pos({})\r", (val as f32 / u8::MAX as f32 * 4500.0).round() as usize)),
                 }
             }
         };

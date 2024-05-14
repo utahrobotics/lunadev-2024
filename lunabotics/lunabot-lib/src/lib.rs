@@ -69,11 +69,20 @@ pub struct ControlsPacket {
     pub arm_params: ArmParameters,
 }
 
+
+#[derive(Clone, Copy, Encode, Decode, Debug, Eq, PartialEq)]
+pub enum AutonomyAction {
+    Dig,
+    Dump,
+    Stop
+}
+
 #[derive(Debug, Eq, PartialEq, Encode, Decode, Clone, Copy)]
 #[repr(u8)]
 pub enum ImportantMessage {
     EnableCamera,
     DisableCamera,
+    Autonomy(AutonomyAction)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]

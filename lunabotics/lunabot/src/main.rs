@@ -22,7 +22,7 @@ use unros::{
     setup_logging, ShouldNotDrop,
 };
 
-use crate::audio::init_buzz;
+use crate::{audio::init_buzz, autonomy::Autonomy};
 
 mod actuators;
 mod drive;
@@ -31,6 +31,7 @@ mod serial;
 mod audio;
 // mod mosaic;
 mod telemetry;
+mod autonomy;
 
 const MAX_CAMERA_COUNT: usize = 6;
 const ROW_LENGTH: usize = 3;
@@ -111,6 +112,16 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
 
     match serial::connect_to_serial() {
         Ok((arms, drive)) => {
+            if let Some(drive) = &drive {
+                if let Some(arms) = &arms {
+                    let autonomy = Autonomy::default();
+                    autonomy.get_arm_pub().accept_subscription(arms.get_arm_sub());
+                    autonomy.get_steering_pub().accept_subscription(drive.get_steering_sub());
+                    arms.get_arm_values_pub().accept_subscription(autonomy.create_arm_values_sub());
+                    telemetry.autonomy_pub().accept_subscription(autonomy.create_autonomy_sub());
+                    autonomy.spawn(context.make_context("autonomy"));
+                }
+            }
             if let Some(drive) = drive {
                 telemetry
                     .steering_pub()
@@ -131,12 +142,12 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
                     .get_current_pub()
                     .accept_subscription(sub.create_subscription());
                 drive.spawn(context.make_context("drive"));
-                unros::tokio::spawn(async move {
-                    loop {
-                        let (left_current, right_current) = sub.recv().await;
-                        unros::log::info!("{left_current} {right_current}");
-                    }
-                });
+                // unros::tokio::spawn(async move {
+                //     loop {
+                //         let (left_current, right_current) = sub.recv().await;
+                //         unros::log::info!("{left_current} {right_current}");
+                //     }
+                // });
             }
 
             if let Some(arms) = arms {
