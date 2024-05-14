@@ -176,7 +176,9 @@ impl AsyncNode for Telemetry {
                         break;
                     }
                     while let Ok((first, second)) = swap_receiver.get_mut().try_recv() {
-                        self.camera_subs.swap(first, second);
+                        if first < self.camera_subs.len() && second < self.camera_subs.len() {
+                            self.camera_subs.swap(first, second);
+                        }
                     }
                     let mut updated = false;
                     self.camera_subs
