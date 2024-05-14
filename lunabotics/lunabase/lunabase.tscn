@@ -51,9 +51,9 @@ func _process(delta: float) -> void:
 		_drive = lerp(_drive, new_drive, 1 - exp(-LAMBDA * delta))
 	var scaled_drive := _drive
 	if Input.is_action_pressed(\"Crawler\"):
-		_drive *= 0.2
+		_drive = 0.2 * signf(_drive)
 	Lunabot.send_steering(
-		_drive,
+		scaled_drive,
 		-(Input.get_action_strength(\"SteerRight\") - Input.get_action_strength(\"SteerLeft\")) * 0.4 * invert
 	)
 "
@@ -320,13 +320,14 @@ var _swaps: Array[Vector2i] = []
 func _ready():
 	if FileAccess.file_exists(\"swaps.dat\"):
 		var file := FileAccess.open(\"swaps.dat\", FileAccess.READ)
-		while true:
+		while file.get_position() < file.get_length():
 			var value = file.get_var()
 			if value is Vector2i:
 				_swaps.push_back(value as Vector2i)
 			else:
 				push_error(\"swaps.dat is invalid!\")
 				DirAccess.open(\".\").remove(\"swaps.dat\")
+				break
 	
 	Lunabot.connected.connect(
 		func():
