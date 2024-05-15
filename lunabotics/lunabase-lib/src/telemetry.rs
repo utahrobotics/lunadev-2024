@@ -16,11 +16,7 @@ use lunabot_lib::{
 };
 use networking::new_server;
 use unros::{
-    anyhow,
-    node::SyncNode,
-    pubsub::{MonoPublisher, Publisher, Subscriber},
-    runtime::{start_unros_runtime, MainRuntimeContext},
-    setup_logging, tokio,
+    anyhow, logging::rate::RateLogger, node::SyncNode, pubsub::{MonoPublisher, Publisher, Subscriber}, runtime::{start_unros_runtime, MainRuntimeContext}, setup_logging, tokio
 };
 
 use crate::audio::{init_audio, MIC_PLAYBACK};
@@ -196,6 +192,7 @@ impl INode for LunabotConn {
                     };
                 }
 
+                let mut rate = RateLogger::default();
                 loop {
                     macro_rules! received {
                         () => {{
@@ -355,7 +352,9 @@ impl INode for LunabotConn {
                                 break;
                             };
                             if let Ok(frame) = result {
-                                MIC_PLAYBACK.cell.store(frame);
+                                // godot_print!("{frame}");
+                                rate.increment();
+                                MIC_PLAYBACK.cell.store(frame * 4.0);
                             }
                         }
                         _ = tokio::time::sleep(Duration::from_millis(50)) => {}

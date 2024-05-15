@@ -34,7 +34,7 @@ impl<'a> Source for &'a MicPlayback {
 
     #[inline]
     fn sample_rate(&self) -> u32 {
-        48000
+        24000
     }
 
     #[inline]
