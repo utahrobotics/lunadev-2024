@@ -124,7 +124,7 @@ impl AsyncNode for Arms {
                     std::mem::swap(&mut tilt_repl, &mut lift_repl);
                     break;
                 } else {
-                    unros::log::error!("Unexpected response from tilt: {}", info);
+                    unros::log::error!("Unexpected response from tilt: {:?}", info);
                     break;
                 }
             }
@@ -141,77 +141,90 @@ impl AsyncNode for Arms {
                 let mut lift_accel = Vector3::default();
                 let mut tilt_accel = Vector3::default();
 
+                macro_rules! checker {
+                    ($line: ident, $line_buf: ident, $index: ident) => {{
+                        if $line == "\r" || $line.contains("(") {
+                            $line_buf.drain(0..$index + 1);
+                            continue;
+                        }
+                        match $line {
+                            "retracted\r" | "extended\r" | "MPY: soft reboot\r" | "MicroPython v1.22.2 on 2024-02-22; Raspberry Pi Pico W with RP2040\r" => {
+                                $line_buf.drain(0..$index + 1);
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }}
+                }
+
                 loop {
                     tokio::select! {
                         lift_msg = lift_sub.recv() => {
                             lift_buf += &lift_msg;
                             if let Some(index) = lift_buf.find('\n') {
                                 let mut line = lift_buf.split_at(index).0;
-                                if line.contains("(") || line == "retracted\r" || line == "extended\r" {
-                                    lift_buf.drain(0..index + 1);
-                                    continue;
-                                }
+                                checker!(line, lift_buf, index);
                                 if line.starts_with(">>> ") {
                                     line = line.split_at(4).1;
                                 }
                                 let mut split = line.trim().split(' ');
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 let mut result: Result<isize, _> = next.parse();
                                 let Ok(value1) = result else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 result = next.parse();
                                 let Ok(value2) = result else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 lift_value = (value1 + value2) as f32 / 2.0;
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 let mut result: Result<f32, _> = next.parse();
                                 let Ok(x) = result else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 result = next.parse();
                                 let Ok(y) = result else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 result = next.parse();
                                 let Ok(z) = result else {
-                                    unros::log::error!("Unexpected response from lift: {}", line);
+                                    unros::log::error!("Unexpected response from lift: {:?}", line);
                                     lift_buf.drain(0..index + 1);
                                     continue;
                                 };
@@ -224,34 +237,31 @@ impl AsyncNode for Arms {
                             tilt_buf += &tilt_msg;
                             if let Some(index) = tilt_buf.find('\n') {
                                 let mut line = tilt_buf.split_at(index).0;
-                                if line.contains("(") || line == "retracted\r" || line == "extended\r" {
-                                    tilt_buf.drain(0..index + 1);
-                                    continue;
-                                }
+                                checker!(line, tilt_buf, index);
                                 if line.starts_with(">>> ") {
                                     line = line.split_at(4).1;
                                 }
                                 let mut split = line.trim().split(' ');
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 let mut result: Result<isize, _> = next.parse();
                                 let Ok(value1) = result else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 result = next.parse();
                                 let Ok(value2) = result else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
@@ -259,31 +269,31 @@ impl AsyncNode for Arms {
 
                                 let mut result: Result<f32, _> = next.parse();
                                 let Ok(x) = result else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 result = next.parse();
                                 let Ok(y) = result else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
 
                                 let Some(next) = split.next() else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
                                 result = next.parse();
                                 let Ok(z) = result else {
-                                    unros::log::error!("Unexpected response from tilt: {}", line);
+                                    unros::log::error!("Unexpected response from tilt: {:?}", line);
                                     tilt_buf.drain(0..index + 1);
                                     continue;
                                 };
@@ -352,6 +362,7 @@ impl AsyncNode for Arms {
                                 tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                                 lift_repl.set("\u{4}\r".into());
                                 tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                                info!("Lift Reset");
                             }
                             ExecutiveArmAction::None => {}
                         }
@@ -363,6 +374,7 @@ impl AsyncNode for Arms {
                                 tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                                 tilt_repl.set("\u{4}\r".into());
                                 tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                                info!("Tilt Reset");
                             }
                             ExecutiveArmAction::None => {}
                         }

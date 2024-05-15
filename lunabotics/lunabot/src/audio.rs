@@ -36,12 +36,12 @@ pub fn init_audio() {
                             };
                         }
                         Err(e) => {
-                            info!("Failed to decode music.mp3: {e}");
+                            warn!("Failed to decode music.mp3: {e}");
                         }
                     };
                 }
                 Err(e) => {
-                    info!("Failed to load music.mp3: {e}");
+                    warn!("Failed to load music.mp3: {e}");
                 }
             }
 

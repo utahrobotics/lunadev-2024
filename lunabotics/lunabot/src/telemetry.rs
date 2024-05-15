@@ -21,7 +21,7 @@ use unros::{
     logging::
         dump::{ScalingFilter, VideoDataDump},
     node::{AsyncNode, SyncNode},
-    pubsub::{MonoPublisher, Publisher, PublisherRef, Subscriber, WatchSubscriber},
+    pubsub::{MonoPublisher, Publisher, PublisherRef, Subscriber, WatchSubscriber, subs::Subscription},
     runtime::RuntimeContext,
     setup_logging,
     tokio::{self, task::spawn_blocking},
@@ -262,7 +262,17 @@ impl AsyncNode for Telemetry {
                 info!("Connected to lunabase!");
 
                 if let Some(odometry_sub) = self.odometry_sub.clone() {
-                    odometry_sub.accept_subscription(odometry.create_unreliable_subscription());
+                    let mut i = 0usize;
+                    odometry_sub.accept_subscription(odometry.create_unreliable_subscription().filter_map(
+                        move |x| {
+                            i = (i + 1) % 6;
+                            if i == 1 {
+                                Some(x)
+                            } else {
+                                None
+                            }
+                        }
+                    ));
                 }
 
                 let important_fut = async {
