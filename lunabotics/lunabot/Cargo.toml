@@ -26,4 +26,5 @@ ordered-float = { workspace = true }
 py-repl = { workspace = true }
 lunabot-lib = { path = "../lunabot-lib" }
 base64 = "0"
-rodio = "0"
+rodio = "0.18.0"
+cpal = "0.15.3"
