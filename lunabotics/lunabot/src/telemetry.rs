@@ -18,10 +18,8 @@ use ordered_float::NotNan;
 use serde::Deserialize;
 use unros::{
     anyhow,
-    logging::{
+    logging::
         dump::{ScalingFilter, VideoDataDump},
-        get_log_pub,
-    },
     node::{AsyncNode, SyncNode},
     pubsub::{MonoPublisher, Publisher, PublisherRef, Subscriber, WatchSubscriber},
     runtime::RuntimeContext,
@@ -252,7 +250,7 @@ impl AsyncNode for Telemetry {
                         Err(ConnectionError::Timeout) => {}
                     };
                 };
-                let (important, camera, odometry, controls, logs, audio) =
+                let (important, camera, odometry, controls, audio, audio_controls) =
                     match peer.negotiate(&self.negotiation).await {
                         Ok(x) => x,
                         Err(e) => {
@@ -262,7 +260,6 @@ impl AsyncNode for Telemetry {
                     };
                 enable_camera.store(true, Ordering::Relaxed);
                 info!("Connected to lunabase!");
-                get_log_pub().accept_subscription(logs.create_reliable_subscription());
 
                 if let Some(odometry_sub) = self.odometry_sub.clone() {
                     odometry_sub.accept_subscription(odometry.create_unreliable_subscription());
@@ -358,7 +355,7 @@ impl AsyncNode for Telemetry {
 
                 let audio_fut = async {
                     let audio_sub = Subscriber::new(1);
-                    audio.accept_subscription(audio_sub.create_subscription());
+                    audio_controls.accept_subscription(audio_sub.create_subscription());
 
                     loop {
                         let Some(result) = audio_sub.recv_or_closed().await else {

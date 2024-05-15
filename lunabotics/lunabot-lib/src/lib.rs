@@ -11,7 +11,7 @@ pub type LunaNegotiation = Negotiation<(
     ChannelNegotiation<CameraMessage>,
     ChannelNegotiation<Odometry>,
     ChannelNegotiation<ControlsPacket>,
-    ChannelNegotiation<Arc<str>>,
+    ChannelNegotiation<f32>,
     ChannelNegotiation<Audio>,
 )>;
 
@@ -22,8 +22,8 @@ pub fn make_negotiation() -> LunaNegotiation {
             ChannelNegotiation::new("camera"),
             ChannelNegotiation::new("odometry"),
             ChannelNegotiation::new("controls"),
-            ChannelNegotiation::new("logs"),
             ChannelNegotiation::new("audio"),
+            ChannelNegotiation::new("audio_controls"),
         ),
         46432,
     )

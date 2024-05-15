@@ -22,7 +22,7 @@ use unros::{
     setup_logging, ShouldNotDrop,
 };
 
-use crate::{audio::init_buzz, autonomy::Autonomy};
+use crate::{audio::init_audio, autonomy::Autonomy};
 
 mod actuators;
 mod drive;
@@ -44,7 +44,7 @@ const EMPTY_ROW: [u8; ROW_DATA_LENGTH] = [0; ROW_DATA_LENGTH];
 #[unros::main]
 async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
     setup_logging!(context);
-    init_buzz();
+    init_audio();
 
     let rig: Robot = toml::from_str(include_str!("lunabot.toml"))?;
     let (mut elements, robot_base) = rig.destructure::<FxBuildHasher>(["camera", "imu01"])?;

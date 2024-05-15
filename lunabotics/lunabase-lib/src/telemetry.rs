@@ -119,7 +119,7 @@ impl INode for LunabotConn {
                     }
                 }
 
-                let (important, camera, odometry, controls, logs, audio) =
+                let (important, camera, odometry, controls, audio, audio_controls) =
                     match peer.negotiate(&negotiation).await {
                         Ok(x) => x,
                         Err(e) => {
@@ -137,9 +137,6 @@ impl INode for LunabotConn {
                 let mut last_receive_time = Instant::now();
                 let mut ffplay: Option<std::process::Child> = None;
                 let mut ffplay_stderr: Option<JoinHandle<std::io::Result<u64>>> = None;
-
-                let logs_sub = Subscriber::new(32);
-                logs.accept_subscription(logs_sub.create_subscription());
 
                 let camera_sub = Subscriber::new(1);
                 camera.accept_subscription(camera_sub.create_subscription());
@@ -169,7 +166,7 @@ impl INode for LunabotConn {
                     .audio_pub
                     .lock()
                     .unwrap()
-                    .accept_subscription(audio.create_reliable_subscription());
+                    .accept_subscription(audio_controls.create_reliable_subscription());
 
                 let mut last_enable_camera = shared.enable_camera.load(Ordering::Relaxed);
 
@@ -263,24 +260,6 @@ impl INode for LunabotConn {
                             match msg {
                                 _ => {}
                             }
-                        }
-                        result = logs_sub.recv_or_closed() => {
-                            let Some(result) = result else {
-                                godot_error!("logs_sub closed");
-                                error!("logs_sub closed");
-                                break;
-                            };
-                            received!();
-
-                            let log = match result {
-                                Ok(x) => x,
-                                Err(e) => {
-                                    godot_error!("Failed to parse incoming log: {e}");
-                                    continue;
-                                }
-                            };
-
-                            godot_print!("{log}");
                         }
                         result = camera_sub.recv_or_closed() => {
                             let Some(result) = result else {
