@@ -30,8 +30,8 @@ mod serial;
 // mod imu;
 mod audio;
 // mod mosaic;
-mod telemetry;
 mod autonomy;
+mod telemetry;
 
 const MAX_CAMERA_COUNT: usize = 6;
 const ROW_LENGTH: usize = 3;
@@ -115,10 +115,17 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             if let Some(drive) = &drive {
                 if let Some(arms) = &arms {
                     let autonomy = Autonomy::default();
-                    autonomy.get_arm_pub().accept_subscription(arms.get_arm_sub());
-                    autonomy.get_steering_pub().accept_subscription(drive.get_steering_sub());
-                    arms.get_arm_values_pub().accept_subscription(autonomy.create_arm_values_sub());
-                    telemetry.autonomy_pub().accept_subscription(autonomy.create_autonomy_sub());
+                    autonomy
+                        .get_arm_pub()
+                        .accept_subscription(arms.get_arm_sub());
+                    autonomy
+                        .get_steering_pub()
+                        .accept_subscription(drive.get_steering_sub());
+                    arms.get_arm_values_pub()
+                        .accept_subscription(autonomy.create_arm_values_sub());
+                    telemetry
+                        .autonomy_pub()
+                        .accept_subscription(autonomy.create_autonomy_sub());
                     autonomy.spawn(context.make_context("autonomy"));
                 }
             }
@@ -153,6 +160,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             if let Some(arms) = arms {
                 telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
                 telemetry.odometry_sub(arms.get_odometry_pub());
+                telemetry.exec_arm_pub().accept_subscription(arms.get_exec_arm_sub());
                 arms.spawn(context.make_context("arms"));
             }
         }

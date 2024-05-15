@@ -143,13 +143,19 @@ impl AsyncNode for Drive {
                     match BASE64_STANDARD.decode(left_b64.trim()) {
                         Ok(x) => left_pub.set(x.into()),
                         Err(e) => {
-                            error!("Failed to decode left vesc message: {}: {e}", left_b64.trim());
+                            error!(
+                                "Failed to decode left vesc message: {}: {e}",
+                                left_b64.trim()
+                            );
                         }
                     }
                     match BASE64_STANDARD.decode(right_b64.trim()) {
                         Ok(x) => right_pub.set(x.into()),
                         Err(e) => {
-                            error!("Failed to decode right vesc message: {}: {e}", right_b64.trim());
+                            error!(
+                                "Failed to decode right vesc message: {}: {e}",
+                                right_b64.trim()
+                            );
                         }
                     }
                 }

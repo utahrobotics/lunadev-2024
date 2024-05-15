@@ -12,7 +12,7 @@ use std::{
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
 use lunabot_lib::{
-    make_negotiation, ArmAction, ArmParameters, Audio, AutonomyAction, CameraMessage, ControlsPacket, ImportantMessage
+    make_negotiation, ArmAction, ArmParameters, Audio, AutonomyAction, CameraMessage, ControlsPacket, ExecutiveArmAction, ImportantMessage
 };
 use networking::new_server;
 use unros::{
@@ -53,7 +53,7 @@ impl INode for LunabotConn {
             enable_camera: AtomicBool::new(true),
             audio_pub: Mutex::new(Publisher::default()),
             camera_pub: Mutex::new(Publisher::default()),
-            important_pub: Mutex::new(Publisher::default())
+            important_pub: Mutex::new(Publisher::default()),
         };
         let shared = Arc::new(shared);
 
@@ -382,13 +382,21 @@ impl INode for LunabotConn {
                     if current_enable_camera != last_enable_camera {
                         last_enable_camera = current_enable_camera;
                         if current_enable_camera {
-                            shared.important_pub.lock().unwrap().set(ImportantMessage::EnableCamera);
+                            shared
+                                .important_pub
+                                .lock()
+                                .unwrap()
+                                .set(ImportantMessage::EnableCamera);
 
                             if ffplay_stderr.is_none() {
                                 make_ffplay!();
                             }
                         } else {
-                            shared.important_pub.lock().unwrap().set(ImportantMessage::DisableCamera);
+                            shared
+                                .important_pub
+                                .lock()
+                                .unwrap()
+                                .set(ImportantMessage::DisableCamera);
                         }
                     }
                 }
@@ -595,18 +603,70 @@ impl LunabotConn {
     #[func]
     fn dig_autonomy(&self) {
         let shared = self.shared.as_ref().unwrap();
-        shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Dig));
+        shared
+            .important_pub
+            .lock()
+            .unwrap()
+            .set(ImportantMessage::Autonomy(AutonomyAction::Dig));
     }
 
     #[func]
     fn dump_autonomy(&self) {
         let shared = self.shared.as_ref().unwrap();
-        shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Dump));
+        shared
+            .important_pub
+            .lock()
+            .unwrap()
+            .set(ImportantMessage::Autonomy(AutonomyAction::Dump));
     }
 
     #[func]
     fn stop_autonomy(&self) {
         let shared = self.shared.as_ref().unwrap();
-        shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Stop));
+        shared
+            .important_pub
+            .lock()
+            .unwrap()
+            .set(ImportantMessage::Autonomy(AutonomyAction::Stop));
+    }
+
+    #[func]
+    fn home_tilt(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared
+            .important_pub
+            .lock()
+            .unwrap()
+            .set(ImportantMessage::ExecutiveArmAction(ArmParameters { lift: ExecutiveArmAction::None, tilt: ExecutiveArmAction::Home }));
+    }
+
+    #[func]
+    fn home_lift(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared
+            .important_pub
+            .lock()
+            .unwrap()
+            .set(ImportantMessage::ExecutiveArmAction(ArmParameters { tilt: ExecutiveArmAction::None, lift: ExecutiveArmAction::Home }));
+    }
+
+    #[func]
+    fn reset_tilt(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared
+            .important_pub
+            .lock()
+            .unwrap()
+            .set(ImportantMessage::ExecutiveArmAction(ArmParameters { lift: ExecutiveArmAction::None, tilt: ExecutiveArmAction::SoftReset }));
+    }
+
+    #[func]
+    fn reset_lift(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared
+            .important_pub
+            .lock()
+            .unwrap()
+            .set(ImportantMessage::ExecutiveArmAction(ArmParameters { tilt: ExecutiveArmAction::None, lift: ExecutiveArmAction::SoftReset }));
     }
 }

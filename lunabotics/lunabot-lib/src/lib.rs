@@ -39,9 +39,9 @@ pub struct Odometry {
 }
 
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Debug)]
-pub struct ArmParameters {
-    pub lift: ArmAction,
-    pub tilt: ArmAction,
+pub struct ArmParameters<T> {
+    pub lift: T,
+    pub tilt: T,
 }
 
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Debug)]
@@ -50,11 +50,16 @@ pub enum ArmAction {
     Retract,
     Stop,
     SetValue(u8),
-    Home,
-    SoftReset
 }
 
-impl Default for ArmParameters {
+#[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, Debug)]
+pub enum ExecutiveArmAction {
+    Home,
+    SoftReset,
+    None
+}
+
+impl Default for ArmParameters<ArmAction> {
     fn default() -> Self {
         ArmParameters {
             lift: ArmAction::Stop,
@@ -67,15 +72,14 @@ impl Default for ArmParameters {
 pub struct ControlsPacket {
     pub drive: i8,
     pub steering: i8,
-    pub arm_params: ArmParameters,
+    pub arm_params: ArmParameters<ArmAction>,
 }
-
 
 #[derive(Clone, Copy, Encode, Decode, Debug, Eq, PartialEq)]
 pub enum AutonomyAction {
     Dig,
     Dump,
-    Stop
+    Stop,
 }
 
 #[derive(Debug, Eq, PartialEq, Encode, Decode, Clone, Copy)]
@@ -83,7 +87,8 @@ pub enum AutonomyAction {
 pub enum ImportantMessage {
     EnableCamera,
     DisableCamera,
-    Autonomy(AutonomyAction)
+    Autonomy(AutonomyAction),
+    ExecutiveArmAction(ArmParameters<ExecutiveArmAction>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -137,5 +142,5 @@ pub enum Audio {
 #[derive(Clone, Encode, Decode, PartialEq, Eq, Debug)]
 pub enum CameraMessage {
     Sdp(Arc<str>),
-    Swap(usize, usize)
+    Swap(usize, usize),
 }

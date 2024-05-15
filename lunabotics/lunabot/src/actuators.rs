@@ -1,4 +1,4 @@
-use lunabot_lib::{ArmAction, ArmParameters, Odometry};
+use lunabot_lib::{ArmAction, ArmParameters, ExecutiveArmAction, Odometry};
 use nalgebra::Vector3;
 use serde::Deserialize;
 use serial::SerialConnection;
@@ -10,27 +10,22 @@ use unros::{
     setup_logging, tokio, DontDrop, ShouldNotDrop,
 };
 
-
 #[derive(Clone, Copy, PartialEq, Default)]
 pub(crate) struct ArmValues {
     pub tilt_value: f32,
-    pub lift_value: f32
+    pub lift_value: f32,
 }
-
 
 #[derive(Deserialize, Default)]
 struct ArmsConfig {
     #[serde(default)]
-    home: bool,
-    #[serde(default)]
     hard_reset: bool,
-    #[serde(default)]
-    soft_reset: bool
 }
 
 #[derive(ShouldNotDrop)]
 pub struct Arms {
-    arm_sub: Subscriber<ArmParameters>,
+    arm_sub: Subscriber<ArmParameters<ArmAction>>,
+    executive_arm_sub: Subscriber<ArmParameters<ExecutiveArmAction>>,
     tilt_conn: SerialConnection<String, String>,
     lift_conn: SerialConnection<String, String>,
     odometry_pub: Publisher<Odometry>,
@@ -43,6 +38,7 @@ impl Arms {
     pub fn new(tilt_port: impl Into<String>, lift_port: impl Into<String>) -> Self {
         Self {
             arm_sub: Subscriber::new(4),
+            executive_arm_sub: Subscriber::new(4),
             dont_drop: DontDrop::new("arms"),
             tilt_conn: SerialConnection::new(tilt_port, 115200, true).map_to_string(),
             lift_conn: SerialConnection::new(lift_port, 115200, true).map_to_string(),
@@ -56,8 +52,12 @@ impl Arms {
         }
     }
 
-    pub fn get_arm_sub(&self) -> DirectSubscription<ArmParameters> {
+    pub fn get_arm_sub(&self) -> DirectSubscription<ArmParameters<ArmAction>> {
         self.arm_sub.create_subscription()
+    }
+
+    pub fn get_exec_arm_sub(&self) -> DirectSubscription<ArmParameters<ExecutiveArmAction>> {
+        self.executive_arm_sub.create_subscription()
     }
 
     pub fn get_odometry_pub(&self) -> PublisherRef<Odometry> {
@@ -127,12 +127,6 @@ impl AsyncNode for Arms {
                     unros::log::error!("Unexpected response from tilt: {}", info);
                     break;
                 }
-            }
-
-            if self.config.home {
-                lift_repl.set("extend_home()\r".into());
-                tilt_repl.set("retract_home()\r".into());
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
 
             let context2 = context.clone();
@@ -308,8 +302,16 @@ impl AsyncNode for Arms {
                     arm_angle += std::f32::consts::PI / 12.0;
                     let accel = (lift_accel + tilt_accel) / 2.0;
 
-                    let front_elevation = 3.2796 - 1.06145 * tilt_l + 0.00656571 * tilt_l.powi(2) + 0.54728 * lift_l + 0.03588 * lift_l.powi(2) - 0.029068 * tilt_l * lift_l;
-                    let back_elevation = -10.404 - 0.148417 * tilt_l + 0.0250286 * tilt_l.powi(2) + -1.12599 * lift_l + 0.0211143 * lift_l.powi(2) - 0.008524 * tilt_l * lift_l;
+                    let front_elevation = 3.2796 - 1.06145 * tilt_l
+                        + 0.00656571 * tilt_l.powi(2)
+                        + 0.54728 * lift_l
+                        + 0.03588 * lift_l.powi(2)
+                        - 0.029068 * tilt_l * lift_l;
+                    let back_elevation = -10.404 - 0.148417 * tilt_l
+                        + 0.0250286 * tilt_l.powi(2)
+                        + -1.12599 * lift_l
+                        + 0.0211143 * lift_l.powi(2)
+                        - 0.008524 * tilt_l * lift_l;
 
                     self.odometry_pub.set(Odometry {
                         arm_angle,
@@ -318,45 +320,64 @@ impl AsyncNode for Arms {
                         back_elevation,
                     });
 
-                    self.arm_values_pub.set(ArmValues { tilt_value, lift_value });
+                    self.arm_values_pub.set(ArmValues {
+                        tilt_value,
+                        lift_value,
+                    });
                 }
             });
 
             loop {
-                let params = tokio::select! {
-                    params = self.arm_sub.recv() => params,
+                tokio::select! {
+                    params = self.arm_sub.recv() => {
+                        match params.lift {
+                            ArmAction::Extend => lift_repl.set("e()\r".into()),
+                            ArmAction::Retract => lift_repl.set("r()\r".into()),
+                            ArmAction::Stop => lift_repl.set("s()\r".into()),
+                            ArmAction::SetValue(val) => lift_repl.set(format!("set_pos({})\r", (val as f32 / u8::MAX as f32 * 4500.0).round() as usize)),
+                        }
+
+                        match params.tilt {
+                            ArmAction::Extend => tilt_repl.set("e()\r".into()),
+                            ArmAction::Retract => tilt_repl.set("r()\r".into()),
+                            ArmAction::Stop => tilt_repl.set("s()\r".into()),
+                            ArmAction::SetValue(val) => tilt_repl.set(format!("set_pos({})\r", (val as f32 / u8::MAX as f32 * 4500.0).round() as usize)),
+                        }
+                    }
+                    params = self.executive_arm_sub.recv() => {
+                        match params.lift {
+                            ExecutiveArmAction::Home => lift_repl.set("extend_home()\r".into()),
+                            ExecutiveArmAction::SoftReset => {
+                                lift_repl.set("s()\r".into());
+                                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                                lift_repl.set("\u{4}\r".into());
+                                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                            }
+                            ExecutiveArmAction::None => {}
+                        }
+
+                        match params.tilt {
+                            ExecutiveArmAction::Home => tilt_repl.set("retract_home()\r".into()),
+                            ExecutiveArmAction::SoftReset => {
+                                tilt_repl.set("s()\r".into());
+                                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                                tilt_repl.set("\u{4}\r".into());
+                                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                            }
+                            ExecutiveArmAction::None => {}
+                        }
+                    }
                     _ = context2.wait_for_exit() => {
-                        if self.config.soft_reset || self.config.hard_reset {
+                        if self.config.hard_reset {
                             lift_repl.set("s()\r".into());
                             tilt_repl.set("s()\r".into());
                             tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                            if self.config.soft_reset {
-                                lift_repl.set("\u{4}\r".into());
-                                tilt_repl.set("\u{4}\r".into());
-                            } else {
-                                lift_repl.set("reset()\r".into());
-                                tilt_repl.set("reset()\r".into());
-                            }
+                            lift_repl.set("reset()\r".into());
+                            tilt_repl.set("reset()\r".into());
                             tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
                         }
                         break Ok(());
                     }
-                };
-
-                match params.lift {
-                    ArmAction::Extend => lift_repl.set("e()\r".into()),
-                    ArmAction::Retract => lift_repl.set("r()\r".into()),
-                    ArmAction::Stop => lift_repl.set("s()\r".into()),
-                    ArmAction::Home => lift_repl.set("extend_home()\r".into()),
-                    ArmAction::SetValue(val) => lift_repl.set(format!("set_pos({})\r", (val as f32 / u8::MAX as f32 * 4500.0).round() as usize)),
-                }
-
-                match params.tilt {
-                    ArmAction::Extend => tilt_repl.set("e()\r".into()),
-                    ArmAction::Retract => tilt_repl.set("r()\r".into()),
-                    ArmAction::Stop => tilt_repl.set("s()\r".into()),
-                    ArmAction::Home => tilt_repl.set("extend_home()\r".into()),
-                    ArmAction::SetValue(val) => tilt_repl.set(format!("set_pos({})\r", (val as f32 / u8::MAX as f32 * 4500.0).round() as usize)),
                 }
             }
         };

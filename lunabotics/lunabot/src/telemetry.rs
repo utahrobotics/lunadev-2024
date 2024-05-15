@@ -10,7 +10,8 @@ use std::{
 
 use image::RgbImage;
 use lunabot_lib::{
-    make_negotiation, ArmParameters, Audio, AutonomyAction, CameraMessage, ImportantMessage, LunaNegotiation, Odometry, Steering
+    make_negotiation, ArmAction, ArmParameters, Audio, AutonomyAction, CameraMessage,
+    ExecutiveArmAction, ImportantMessage, LunaNegotiation, Odometry, Steering,
 };
 use networking::{new_client, ConnectionError, NetworkConnector, NetworkNode};
 use ordered_float::NotNan;
@@ -54,7 +55,8 @@ pub struct Telemetry {
     pub server_addr: SocketAddrV4,
     pub camera_delta: Duration,
     steering_signal: Publisher<Steering>,
-    arm_signal: Publisher<ArmParameters>,
+    arm_signal: Publisher<ArmParameters<ArmAction>>,
+    executive_arm_signal: Publisher<ArmParameters<ExecutiveArmAction>>,
     autonomy_signal: Publisher<AutonomyAction>,
     dont_drop: DontDrop<Self>,
     negotiation: LunaNegotiation,
@@ -84,6 +86,7 @@ impl Telemetry {
             server_addr: config.server_addr,
             steering_signal: Publisher::default(),
             arm_signal: Publisher::default(),
+            executive_arm_signal: Publisher::default(),
             autonomy_signal: Publisher::default(),
             camera_delta: Duration::from_millis((1000 / cam_fps) as u64),
             dont_drop: DontDrop::new("telemetry"),
@@ -105,8 +108,12 @@ impl Telemetry {
         self.autonomy_signal.get_ref()
     }
 
-    pub fn arm_pub(&self) -> PublisherRef<ArmParameters> {
+    pub fn arm_pub(&self) -> PublisherRef<ArmParameters<ArmAction>> {
         self.arm_signal.get_ref()
+    }
+
+    pub fn exec_arm_pub(&self) -> PublisherRef<ArmParameters<ExecutiveArmAction>> {
+        self.executive_arm_signal.get_ref()
     }
 
     pub fn odometry_sub(&mut self, pubref: PublisherRef<Odometry>) {
@@ -285,7 +292,12 @@ impl AsyncNode for Telemetry {
                             ImportantMessage::DisableCamera => {
                                 enable_camera.store(false, Ordering::Relaxed)
                             }
-                            ImportantMessage::Autonomy(action) => {self.autonomy_signal.set(action);}
+                            ImportantMessage::Autonomy(action) => {
+                                self.autonomy_signal.set(action);
+                            }
+                            ImportantMessage::ExecutiveArmAction(action) => {
+                                self.executive_arm_signal.set(action);
+                            }
                         }
                     }
                 };
@@ -336,7 +348,7 @@ impl AsyncNode for Telemetry {
                         };
 
                         match msg {
-                            CameraMessage::Sdp(_) => {},
+                            CameraMessage::Sdp(_) => {}
                             CameraMessage::Swap(first, second) => {
                                 let _ = swap_sender.send((first, second));
                             }

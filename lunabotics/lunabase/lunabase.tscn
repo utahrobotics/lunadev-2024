@@ -1,4 +1,4 @@
-[gd_scene load_steps=24 format=3 uid="uid://daaye0yq685ht"]
+[gd_scene load_steps=28 format=3 uid="uid://daaye0yq685ht"]
 
 [ext_resource type="AudioStream" uid="uid://cephremnedhtp" path="res://addons/kenney_interface_sounds/error_002.wav" id="1_8elqp"]
 [ext_resource type="AudioStream" uid="uid://dpp0287wnfjsc" path="res://addons/kenney_interface_sounds/confirmation_002.wav" id="2_5ukd6"]
@@ -391,6 +391,38 @@ func _exit_tree() -> void:
 	file.close()
 "
 
+[sub_resource type="GDScript" id="GDScript_j0vls"]
+script/source = "extends Button
+
+
+func _on_pressed() -> void:
+	Lunabot.home_lift()
+"
+
+[sub_resource type="GDScript" id="GDScript_o4tx7"]
+script/source = "extends Button
+
+
+func _on_pressed() -> void:
+	Lunabot.reset_lift()
+"
+
+[sub_resource type="GDScript" id="GDScript_mwb6w"]
+script/source = "extends Button
+
+
+func _on_pressed() -> void:
+	Lunabot.home_tilt()
+"
+
+[sub_resource type="GDScript" id="GDScript_q2q1d"]
+script/source = "extends Button
+
+
+func _on_pressed() -> void:
+	Lunabot.reset_tilt()
+"
+
 [node name="Controller" type="HSplitContainer"]
 anchors_preset = 15
 anchor_right = 1.0
@@ -655,31 +687,66 @@ script = SubResource("GDScript_byehu")
 custom_minimum_size = Vector2(0, 25)
 layout_mode = 2
 
-[node name="PanelContainer2" type="PanelContainer" parent="MarginContainer/VBoxContainer"]
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 
-[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/PanelContainer2"]
+[node name="PanelContainer2" type="PanelContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2"]
 layout_mode = 2
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
 
-[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/PanelContainer2/MarginContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2/MarginContainer"]
 layout_mode = 2
 
-[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/PanelContainer2/MarginContainer/VBoxContainer"]
-layout_mode = 2
-text = "Resets"
-horizontal_alignment = 1
-
-[node name="Button" type="Button" parent="MarginContainer/VBoxContainer/PanelContainer2/MarginContainer/VBoxContainer"]
-layout_mode = 2
-text = "Tilt"
-
-[node name="Button2" type="Button" parent="MarginContainer/VBoxContainer/PanelContainer2/MarginContainer/VBoxContainer"]
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2/MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "Lift"
+horizontal_alignment = 1
+
+[node name="Button" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Home"
+script = SubResource("GDScript_j0vls")
+
+[node name="Button2" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Reset"
+script = SubResource("GDScript_o4tx7")
+
+[node name="PanelContainer3" type="PanelContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3/MarginContainer"]
+layout_mode = 2
+
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Tilt"
+horizontal_alignment = 1
+
+[node name="Button" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Home"
+script = SubResource("GDScript_mwb6w")
+
+[node name="Button2" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Reset"
+script = SubResource("GDScript_q2q1d")
 
 [node name="Disconnected" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("1_8elqp")
@@ -700,3 +767,7 @@ stream = ExtResource("2_5ukd6")
 [connection signal="button_up" from="Control/HBoxContainer/HBoxContainer/Lift/Button2" to="Control/HBoxContainer/HBoxContainer/Lift/Button2" method="_on_button_up"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/EnableCamera" to="MarginContainer/VBoxContainer/EnableCamera" method="_on_pressed"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/Button" to="." method="_on_button_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2/MarginContainer/VBoxContainer/Button" to="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2/MarginContainer/VBoxContainer/Button" method="_on_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2/MarginContainer/VBoxContainer/Button2" to="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer2/MarginContainer/VBoxContainer/Button2" method="_on_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3/MarginContainer/VBoxContainer/Button" to="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3/MarginContainer/VBoxContainer/Button" method="_on_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3/MarginContainer/VBoxContainer/Button2" to="MarginContainer/VBoxContainer/HBoxContainer/PanelContainer3/MarginContainer/VBoxContainer/Button2" method="_on_pressed"]
