@@ -262,7 +262,7 @@ impl AsyncNode for Telemetry {
                 info!("Connected to lunabase!");
 
                 if let Some(mic_pub) = MIC_PUB.get() {
-                    mic_pub.accept_subscription(audio.create_unreliable_sequenced_subscription());
+                    mic_pub.accept_subscription(audio.create_unreliable_subscription());
                 }
 
                 if let Some(odometry_sub) = self.odometry_sub.clone() {
