@@ -23,6 +23,8 @@ use unros::{
     setup_logging, tokio,
 };
 
+use crate::audio::{init_audio, MIC_PLAYBACK};
+
 struct LunabotShared {
     base_mut_queue: SegQueue<Box<dyn FnOnce(BaseMut<LunabotConn>) + Send>>,
     controls_data: AtomicCell<ControlsPacket>,
@@ -73,9 +75,16 @@ impl INode for LunabotConn {
     }
 
     fn ready(&mut self) {
+        init_audio();
         self.base().get_tree().unwrap().set_auto_accept_quit(false);
         std::fs::File::create("camera-ffmpeg.log").expect("camera-ffmpeg.log should be writable");
         let shared = self.shared.clone().unwrap();
+        // let mut audio_player = AudioStreamPlayer::new_alloc();
+        // let mut audio_gen = AudioStreamGenerator::new_gd();
+        // let playback = audio_gen.instantiate_playback().unwrap();
+        // let mut playback: Gd<AudioStreamGeneratorPlayback> = playback.cast();
+        // audio_player.set_stream(audio_gen.upcast());
+        // self.base_mut().add_child(audio_player.upcast());
 
         let main = |context: MainRuntimeContext| async move {
             let peer_sub = Subscriber::new(1);
@@ -145,6 +154,9 @@ impl INode for LunabotConn {
                     .lock()
                     .unwrap()
                     .accept_subscription(camera.create_reliable_subscription());
+
+                let audio_sub = Subscriber::new(32);
+                audio.accept_subscription(audio_sub.create_subscription());
 
                 let mut controls_pub =
                     MonoPublisher::from(controls.create_unreliable_subscription());
@@ -319,22 +331,32 @@ impl INode for LunabotConn {
                             };
                             received!();
 
-                            let odom = match result {
-                                Ok(x) => x,
+                            match result {
+                                Ok(odom) => {
+                                    shared.base_mut_queue.push(Box::new(move |mut base| {
+                                        base.emit_signal("odometry_received".into(), &[
+                                            odom.arm_angle.to_variant(),
+                                            Vector3::new(odom.acceleration[0], odom.acceleration[1], odom.acceleration[2]).to_variant(),
+                                            odom.front_elevation.to_variant(),
+                                            odom.back_elevation.to_variant(),
+                                        ]);
+                                    }));
+                                }
                                 Err(e) => {
                                     godot_error!("Failed to parse incoming odometry: {e}");
                                     continue;
                                 }
+                            }
+                        }
+                        result = audio_sub.recv_or_closed() => {
+                            let Some(result) = result else {
+                                godot_error!("audio_sub closed");
+                                error!("audio_sub closed");
+                                break;
                             };
-
-                            shared.base_mut_queue.push(Box::new(move |mut base| {
-                                base.emit_signal("odometry_received".into(), &[
-                                    odom.arm_angle.to_variant(),
-                                    Vector3::new(odom.acceleration[0], odom.acceleration[1], odom.acceleration[2]).to_variant(),
-                                    odom.front_elevation.to_variant(),
-                                    odom.back_elevation.to_variant(),
-                                ]);
-                            }));
+                            if let Ok(frame) = result {
+                                MIC_PLAYBACK.cell.store(frame);
+                            }
                         }
                         _ = tokio::time::sleep(Duration::from_millis(50)) => {}
                     }

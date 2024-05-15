@@ -3,7 +3,7 @@
 use godot::prelude::*;
 
 mod telemetry;
-
+mod audio;
 struct LunabaseLib;
 
 #[gdextension]
