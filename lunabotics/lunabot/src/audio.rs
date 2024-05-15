@@ -12,6 +12,22 @@ static MUSIC_SINK: OnceLock<Sink> = OnceLock::new();
 pub static MIC_PUB: OnceLock<PublisherRef<f32>> = OnceLock::new();
 
 pub fn init_audio() {
+    let host = cpal::default_host();
+
+    'play: {
+        let devices = match host.output_devices() {
+            Ok(devices) => devices,
+            Err(e) => {
+                error!("Unable to get default output devices: {e}");
+                break 'play;
+            }
+        };
+
+        for device in devices {
+            println!("{}", device.name().unwrap());
+        }
+    }
+    
     match OutputStream::try_default() {
         Ok((stream, stream_handle)) => {
             std::mem::forget(stream);
@@ -46,63 +62,61 @@ pub fn init_audio() {
                     warn!("Failed to load music.mp3: {e}");
                 }
             }
-
-            // Mic
-            'mic: {
-                let host = cpal::default_host();
-                let Some(device) = host.default_input_device() else {
-                    warn!("Unable to get default input device");
-                    break 'mic;
-                };
-                let configs = match device.supported_input_configs() {
-                    Ok(x) => x,
-                    Err(e) => {
-                        warn!("Unable to get default input device configs: {e}");
-                        break 'mic;
-                    }
-                };
-                let Some(config_range) = configs.filter(|config_range| config_range.sample_format() == SampleFormat::F32).next() else {
-                    warn!("Input device does not support f32");
-                    break 'mic;
-                };
-                let Some(config) = config_range.try_with_sample_rate(SampleRate(24000)) else {
-                    warn!("Input device does not support the given sample rate");
-                    break 'mic;
-                };
-                let publisher = Publisher::default();
-                let Ok(()) = MIC_PUB.set(publisher.get_ref()) else {
-                    unreachable!()
-                };
-                let stream = match device.build_input_stream(
-                    &config.into(),
-                    move |data: &[f32], _: &_| {
-                        for d in data {
-                            publisher.set(*d);
-                        }
-                    },
-                    move |err| {
-                        error!("an error occurred on stream: {}", err);
-                    },
-                    None,
-                ) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        warn!("Failed to initialize audio input stream: {e}");
-                        break 'mic;
-                    }
-                };
-
-                match stream.play() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        warn!("Failed to start up audio input stream: {e}");
-                        break 'mic;
-                    }
-                }
-            }
         }
         Err(e) => {
             error!("Failed to open audio stream: {e}");
+        }
+    }
+
+    'mic: {
+        let Some(device) = host.default_input_device() else {
+            warn!("Unable to get default input device");
+            break 'mic;
+        };
+        let configs = match device.supported_input_configs() {
+            Ok(x) => x,
+            Err(e) => {
+                warn!("Unable to get default input device configs: {e}");
+                break 'mic;
+            }
+        };
+        let Some(config_range) = configs.filter(|config_range| config_range.sample_format() == SampleFormat::F32).next() else {
+            warn!("Input device does not support f32");
+            break 'mic;
+        };
+        let Some(config) = config_range.try_with_sample_rate(SampleRate(24000)) else {
+            warn!("Input device does not support the given sample rate");
+            break 'mic;
+        };
+        let publisher = Publisher::default();
+        let Ok(()) = MIC_PUB.set(publisher.get_ref()) else {
+            unreachable!()
+        };
+        let stream = match device.build_input_stream(
+            &config.into(),
+            move |data: &[f32], _: &_| {
+                for d in data {
+                    publisher.set(*d);
+                }
+            },
+            move |err| {
+                error!("an error occurred on stream: {}", err);
+            },
+            None,
+        ) {
+            Ok(x) => x,
+            Err(e) => {
+                warn!("Failed to initialize audio input stream: {e}");
+                break 'mic;
+            }
+        };
+
+        match stream.play() {
+            Ok(()) => {}
+            Err(e) => {
+                warn!("Failed to start up audio input stream: {e}");
+                break 'mic;
+            }
         }
     }
 }

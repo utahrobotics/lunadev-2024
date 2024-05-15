@@ -2269,6 +2269,7 @@ dependencies = [
  "godot",
  "lunabot-lib",
  "networking",
+ "rodio",
  "unros",
 ]
 

@@ -13,3 +13,4 @@ crossbeam = { workspace = true }
 lunabot-lib = { path = "../lunabot-lib" }
 networking = { workspace = true }
 unros = { workspace = true }
+rodio = "0.18.0"
