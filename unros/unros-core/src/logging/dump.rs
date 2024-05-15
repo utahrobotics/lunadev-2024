@@ -291,8 +291,7 @@ c=IN IP4 {}
 t=0 0
 a=tool:libavformat 58.76.100
 m=video {} RTP/AVP 96
-a=rtpmap:96 H264/90000
-a=fmtp:96 packetization-mode=1",
+a=rtpmap:96 H265/90000",
             addr.ip(),
             addr.port()
         )
