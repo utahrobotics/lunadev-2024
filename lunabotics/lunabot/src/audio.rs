@@ -1,11 +1,11 @@
 use cpal::traits::{HostTrait, StreamTrait};
 use cpal::{SampleFormat, SampleRate};
 use rodio::{Decoder, DeviceTrait, OutputStream, Sink, Source};
-use unros::pubsub::{Publisher, PublisherRef};
-use std::{fs::File, io::BufReader};
 use std::sync::OnceLock;
 use std::time::Duration;
+use std::{fs::File, io::BufReader};
 use unros::log::{error, info, warn};
+use unros::pubsub::{Publisher, PublisherRef};
 
 static BUZZ_SINK: OnceLock<Sink> = OnceLock::new();
 static MUSIC_SINK: OnceLock<Sink> = OnceLock::new();
@@ -31,7 +31,7 @@ pub fn init_audio() {
                 match OutputStream::try_from_device(&device) {
                     Ok((stream, stream_handle)) => {
                         std::mem::forget(stream);
-            
+
                         // Buzz
                         let sink = Sink::try_new(&stream_handle).unwrap();
                         let source = SquareWave::new(100.0);
@@ -41,7 +41,7 @@ pub fn init_audio() {
                             unreachable!();
                         };
                         info!("Buzzer initialized");
-                        
+
                         // Music
                         match File::open("music.mp3") {
                             Ok(file) => {
@@ -82,7 +82,7 @@ pub fn init_audio() {
     //             break 'mic;
     //         }
     //     };
-    
+
     //     for device in devices {
     //         if let Ok(name) = device.name() {
     //             println!("a {name}");
@@ -126,7 +126,7 @@ pub fn init_audio() {
     //                     break 'mic;
     //                 }
     //             };
-        
+
     //             match stream.play() {
     //                 Ok(()) => {}
     //                 Err(e) => {
@@ -144,7 +144,7 @@ pub fn init_audio() {
     //     //     warn!("Unable to get default input device");
     //     //     break 'mic;
     //     // };
-        
+
     // }
 }
 

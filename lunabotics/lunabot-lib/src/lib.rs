@@ -56,7 +56,7 @@ pub enum ArmAction {
 pub enum ExecutiveArmAction {
     Home,
     SoftReset,
-    None
+    None,
 }
 
 impl Default for ArmParameters<ArmAction> {
@@ -138,7 +138,7 @@ pub enum Audio {
     PlayBuzz,
     PauseBuzz,
     PlayMusic,
-    PauseMusic
+    PauseMusic,
 }
 
 #[derive(Clone, Encode, Decode, PartialEq, Eq, Debug)]

@@ -12,11 +12,17 @@ use std::{
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use godot::{engine::notify::NodeNotification, obj::BaseMut, prelude::*};
 use lunabot_lib::{
-    make_negotiation, ArmAction, ArmParameters, Audio, AutonomyAction, CameraMessage, ControlsPacket, ExecutiveArmAction, ImportantMessage
+    make_negotiation, ArmAction, ArmParameters, Audio, AutonomyAction, CameraMessage,
+    ControlsPacket, ExecutiveArmAction, ImportantMessage,
 };
 use networking::new_server;
 use unros::{
-    anyhow, logging::rate::RateLogger, node::SyncNode, pubsub::{MonoPublisher, Publisher, Subscriber}, runtime::{start_unros_runtime, MainRuntimeContext}, setup_logging, tokio
+    anyhow,
+    logging::rate::RateLogger,
+    node::SyncNode,
+    pubsub::{MonoPublisher, Publisher, Subscriber},
+    runtime::{start_unros_runtime, MainRuntimeContext},
+    setup_logging, tokio,
 };
 
 use crate::audio::{init_audio, MIC_PLAYBACK};
@@ -649,7 +655,10 @@ impl LunabotConn {
             .important_pub
             .lock()
             .unwrap()
-            .set(ImportantMessage::ExecutiveArmAction(ArmParameters { lift: ExecutiveArmAction::None, tilt: ExecutiveArmAction::Home }));
+            .set(ImportantMessage::ExecutiveArmAction(ArmParameters {
+                lift: ExecutiveArmAction::None,
+                tilt: ExecutiveArmAction::Home,
+            }));
     }
 
     #[func]
@@ -659,7 +668,10 @@ impl LunabotConn {
             .important_pub
             .lock()
             .unwrap()
-            .set(ImportantMessage::ExecutiveArmAction(ArmParameters { tilt: ExecutiveArmAction::None, lift: ExecutiveArmAction::Home }));
+            .set(ImportantMessage::ExecutiveArmAction(ArmParameters {
+                tilt: ExecutiveArmAction::None,
+                lift: ExecutiveArmAction::Home,
+            }));
     }
 
     #[func]
@@ -669,7 +681,10 @@ impl LunabotConn {
             .important_pub
             .lock()
             .unwrap()
-            .set(ImportantMessage::ExecutiveArmAction(ArmParameters { lift: ExecutiveArmAction::None, tilt: ExecutiveArmAction::SoftReset }));
+            .set(ImportantMessage::ExecutiveArmAction(ArmParameters {
+                lift: ExecutiveArmAction::None,
+                tilt: ExecutiveArmAction::SoftReset,
+            }));
     }
 
     #[func]
@@ -679,6 +694,9 @@ impl LunabotConn {
             .important_pub
             .lock()
             .unwrap()
-            .set(ImportantMessage::ExecutiveArmAction(ArmParameters { tilt: ExecutiveArmAction::None, lift: ExecutiveArmAction::SoftReset }));
+            .set(ImportantMessage::ExecutiveArmAction(ArmParameters {
+                tilt: ExecutiveArmAction::None,
+                lift: ExecutiveArmAction::SoftReset,
+            }));
     }
 }

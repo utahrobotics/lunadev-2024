@@ -160,7 +160,9 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
             if let Some(arms) = arms {
                 telemetry.arm_pub().accept_subscription(arms.get_arm_sub());
                 telemetry.odometry_sub(arms.get_odometry_pub());
-                telemetry.exec_arm_pub().accept_subscription(arms.get_exec_arm_sub());
+                telemetry
+                    .exec_arm_pub()
+                    .accept_subscription(arms.get_exec_arm_sub());
                 arms.spawn(context.make_context("arms"));
             }
         }

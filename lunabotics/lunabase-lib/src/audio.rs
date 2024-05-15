@@ -5,12 +5,13 @@ use godot::log::godot_error;
 use rodio::{OutputStream, Sink, Source};
 use unros::log::error;
 
-pub static MIC_PLAYBACK: MicPlayback = MicPlayback { cell: AtomicCell::new(0.0) };
+pub static MIC_PLAYBACK: MicPlayback = MicPlayback {
+    cell: AtomicCell::new(0.0),
+};
 
 pub struct MicPlayback {
-    pub cell: AtomicCell<f32>
+    pub cell: AtomicCell<f32>,
 }
-
 
 impl<'a> Iterator for &'a MicPlayback {
     type Item = f32;
@@ -19,7 +20,6 @@ impl<'a> Iterator for &'a MicPlayback {
         Some(self.cell.load())
     }
 }
-
 
 impl<'a> Source for &'a MicPlayback {
     #[inline]
@@ -42,7 +42,6 @@ impl<'a> Source for &'a MicPlayback {
         None
     }
 }
-
 
 pub fn init_audio() {
     match OutputStream::try_default() {

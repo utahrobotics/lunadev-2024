@@ -462,7 +462,7 @@ a=fmtp:96 packetization-mode=1",
                 "-g",
                 "10",
                 "-sdp_file",
-                "rtp.sdp"
+                "rtp.sdp",
             ])
             // .args(["-sdp_file", "sdp.txt"])
             .format("rtp")
