@@ -437,7 +437,7 @@ a=fmtp:96 packetization-mode=1",
             .pix_fmt("rgb24")
             .size(in_width, in_height)
             .input("-")
-            .codec_video("libx264")
+            .codec_video("libx265")
             .pix_fmt("yuv420p")
             .args([
                 "-crf",
@@ -461,6 +461,8 @@ a=fmtp:96 packetization-mode=1",
                 "udp",
                 "-g",
                 "10",
+                "-sdp_file",
+                "rtp.sdp"
             ])
             // .args(["-sdp_file", "sdp.txt"])
             .format("rtp")
