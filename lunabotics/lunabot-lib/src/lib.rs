@@ -135,8 +135,10 @@ impl<N: Float + FloatCore + std::ops::MulAssign + SupersetOf<f32>> Steering<N> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub enum Audio {
-    Play,
-    Pause,
+    PlayBuzz,
+    PauseBuzz,
+    PlayMusic,
+    PauseMusic
 }
 
 #[derive(Clone, Encode, Decode, PartialEq, Eq, Debug)]
