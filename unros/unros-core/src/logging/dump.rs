@@ -291,7 +291,8 @@ c=IN IP4 {}
 t=0 0
 a=tool:libavformat 58.76.100
 m=video {} RTP/AVP 96
-a=rtpmap:96 H265/90000",
+a=rtpmap:96 H264/90000
+a=fmtp:96 packetization-mode=1",
             addr.ip(),
             addr.port()
         )
@@ -436,11 +437,11 @@ a=rtpmap:96 H265/90000",
             .pix_fmt("rgb24")
             .size(in_width, in_height)
             .input("-")
-            .codec_video("libx265")
+            .codec_video("libx264")
             .pix_fmt("yuv420p")
             .args([
                 "-crf",
-                "33",
+                "35",
                 "-an",
                 "-vf",
                 &format!("fps={fps},scale={out_width}:{out_height}"),
