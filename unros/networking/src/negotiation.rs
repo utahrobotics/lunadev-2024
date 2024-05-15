@@ -69,6 +69,16 @@ impl<T: Encode + std::fmt::Debug> Channel<T> {
             Packet::unreliable(addr, data)
         })
     }
+
+    pub fn create_unreliable_sequenced_subscription(&self) -> impl Subscription<Item = T> {
+        let channel_id = self.channel_id.get();
+        let addr = self.remote_addr;
+        self.packets_to_send.clone().map(move |value| {
+            let mut data = bitcode::encode(&value).expect("Failed to serialize value");
+            data.push(channel_id);
+            Packet::unreliable_sequenced(addr, data, None)
+        })
+    }
 }
 
 #[derive(Debug)]

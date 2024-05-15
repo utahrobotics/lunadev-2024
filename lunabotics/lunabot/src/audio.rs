@@ -1,13 +1,15 @@
 use cpal::traits::{HostTrait, StreamTrait};
 use cpal::{SampleFormat, SampleRate};
 use rodio::{Decoder, DeviceTrait, OutputStream, Sink, Source};
+use unros::pubsub::{Publisher, PublisherRef};
 use std::{fs::File, io::BufReader};
 use std::sync::OnceLock;
 use std::time::Duration;
-use unros::log::{error, info, warn};
+use unros::log::{error, warn};
 
 static BUZZ_SINK: OnceLock<Sink> = OnceLock::new();
 static MUSIC_SINK: OnceLock<Sink> = OnceLock::new();
+pub static MIC_PUB: OnceLock<PublisherRef<f32>> = OnceLock::new();
 
 pub fn init_audio() {
     match OutputStream::try_default() {
@@ -67,10 +69,16 @@ pub fn init_audio() {
                     warn!("Input device does not support the given sample rate");
                     break 'mic;
                 };
+                let publisher = Publisher::default();
+                let Ok(()) = MIC_PUB.set(publisher.get_ref()) else {
+                    unreachable!()
+                };
                 let stream = match device.build_input_stream(
                     &config.into(),
                     move |data: &[f32], _: &_| {
-
+                        for d in data {
+                            publisher.set(*d);
+                        }
                     },
                     move |err| {
                         error!("an error occurred on stream: {}", err);

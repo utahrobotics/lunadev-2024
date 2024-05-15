@@ -28,10 +28,10 @@ func _input(event: InputEvent) -> void:
 		get_tree().change_scene_to_file(scene_file_path)
 	
 	elif event.is_action_pressed(\"PlayAudio\"):
-		Lunabot.play_audio()
+		Lunabot.play_buzz()
 	
 	elif event.is_action_released(\"PlayAudio\"):
-		Lunabot.pause_audio()
+		Lunabot.pause_buzz()
 
 
 func _on_button_pressed() -> void:

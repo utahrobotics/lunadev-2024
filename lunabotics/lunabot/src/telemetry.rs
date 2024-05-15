@@ -29,7 +29,7 @@ use unros::{
 };
 
 use crate::{
-    audio::{pause_buzz, play_buzz},
+    audio::{pause_buzz, pause_music, play_buzz, play_music, MIC_PUB},
     CAMERA_HEIGHT, CAMERA_WIDTH, EMPTY_ROW, MAX_CAMERA_COUNT, ROW_DATA_LENGTH, ROW_LENGTH,
 };
 
@@ -261,6 +261,10 @@ impl AsyncNode for Telemetry {
                 enable_camera.store(true, Ordering::Relaxed);
                 info!("Connected to lunabase!");
 
+                if let Some(mic_pub) = MIC_PUB.get() {
+                    mic_pub.accept_subscription(audio.create_unreliable_sequenced_subscription());
+                }
+
                 if let Some(odometry_sub) = self.odometry_sub.clone() {
                     let mut i = 0usize;
                     odometry_sub.accept_subscription(odometry.create_unreliable_subscription().filter_map(
@@ -380,8 +384,10 @@ impl AsyncNode for Telemetry {
                         };
 
                         match msg {
-                            Audio::Play => play_buzz(),
-                            Audio::Pause => pause_buzz(),
+                            Audio::PlayBuzz => play_buzz(),
+                            Audio::PauseBuzz => pause_buzz(),
+                            Audio::PlayMusic => play_music(),
+                            Audio::PauseMusic => pause_music(),
                         }
                     }
                 };

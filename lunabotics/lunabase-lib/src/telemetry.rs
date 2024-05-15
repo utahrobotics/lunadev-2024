@@ -550,15 +550,27 @@ impl LunabotConn {
     }
 
     #[func]
-    fn play_audio(&self) {
+    fn play_buzz(&self) {
         let shared = self.shared.as_ref().unwrap();
-        shared.audio_pub.lock().unwrap().set(Audio::Play);
+        shared.audio_pub.lock().unwrap().set(Audio::PlayBuzz);
     }
 
     #[func]
-    fn pause_audio(&self) {
+    fn pause_buzz(&self) {
         let shared = self.shared.as_ref().unwrap();
-        shared.audio_pub.lock().unwrap().set(Audio::Pause);
+        shared.audio_pub.lock().unwrap().set(Audio::PauseBuzz);
+    }
+
+    #[func]
+    fn play_music(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.audio_pub.lock().unwrap().set(Audio::PlayMusic);
+    }
+
+    #[func]
+    fn pause_music(&self) {
+        let shared = self.shared.as_ref().unwrap();
+        shared.audio_pub.lock().unwrap().set(Audio::PauseMusic);
     }
 
     #[func]
