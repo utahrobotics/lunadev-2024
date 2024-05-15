@@ -441,7 +441,7 @@ a=fmtp:96 packetization-mode=1",
             .pix_fmt("yuv420p")
             .args([
                 "-crf",
-                "35",
+                "37",
                 "-an",
                 "-vf",
                 &format!("fps={fps},scale={out_width}:{out_height}"),
