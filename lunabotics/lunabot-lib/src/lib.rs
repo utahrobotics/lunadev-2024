@@ -51,6 +51,7 @@ pub enum ArmAction {
     Stop,
     SetValue(u8),
     Home,
+    SoftReset
 }
 
 impl Default for ArmParameters {

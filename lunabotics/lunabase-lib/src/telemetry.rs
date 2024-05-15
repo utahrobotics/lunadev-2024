@@ -427,10 +427,6 @@ impl INode for LunabotConn {
 impl LunabotConn {
     #[constant]
     const RECV_FROM: u16 = 43721;
-    #[constant]
-    const IMAGE_WIDTH: usize = 1280;
-    #[constant]
-    const IMAGE_HEIGHT: usize = 720;
 
     #[signal]
     fn connected(&self);
@@ -448,15 +444,6 @@ impl LunabotConn {
         acceleration: Vector3,
         front_elevation: f32,
         back_elevation: f32,
-    );
-
-    #[signal]
-    fn network_statistics(
-        &self,
-        total_bytes: f32,
-        ping: i32,
-        packet_loss: f32,
-        packet_throttle: f32,
     );
 
     #[func]
@@ -622,24 +609,4 @@ impl LunabotConn {
         let shared = self.shared.as_ref().unwrap();
         shared.important_pub.lock().unwrap().set(ImportantMessage::Autonomy(AutonomyAction::Stop));
     }
-
-    // #[func]
-    // fn next_camera(&self) {
-    //     let shared = self.shared.as_ref().unwrap();
-    //     shared
-    //         .camera_pub
-    //         .lock()
-    //         .unwrap()
-    //         .set(CameraMessage::NextCamera);
-    // }
-
-    // #[func]
-    // fn previous_camera(&self) {
-    //     let shared = self.shared.as_ref().unwrap();
-    //     shared
-    //         .camera_pub
-    //         .lock()
-    //         .unwrap()
-    //         .set(CameraMessage::PreviousCamera);
-    // }
 }
