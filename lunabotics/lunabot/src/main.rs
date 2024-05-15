@@ -99,7 +99,7 @@ async fn main(context: MainRuntimeContext) -> anyhow::Result<()> {
         cam.image_received_pub().accept_subscription(
             subscriber
                 .create_subscription()
-                .map(|img: Arc<DynamicImage>| img.to_rgb8()),
+                .map(|img: Arc<DynamicImage>| img.rotate180().to_rgb8()),
         );
         let context = context.make_context(cam.get_name().to_string_lossy());
         cam.spawn(context);
